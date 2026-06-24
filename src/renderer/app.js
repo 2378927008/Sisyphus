@@ -278,6 +278,7 @@ async function stopRecording() {
     isRecording = false;
     document.body.classList.remove("recording");
     updateRecordLabel();
+    applyRecordReadiness();
     setStatus(t("status.preparing"));
 
     const wav = await recorder.stop();

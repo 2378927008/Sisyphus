@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld("localFlow", {
   getLocalModelStatus: () => ipcRenderer.invoke("llm:status"),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
   onShortcutToggle: (callback) => {
-    ipcRenderer.on("recording:toggle", callback);
+    ipcRenderer.on("recording:toggle", () => callback());
   },
   onStatus: (callback) => {
     ipcRenderer.on("dictation:status", (_event, payload) => callback(payload));
