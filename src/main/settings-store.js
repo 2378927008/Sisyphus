@@ -8,11 +8,19 @@ import {
   normalizeOutputLanguage,
   normalizeWhisperLanguage
 } from "../shared/languages.js";
+import {
+  getProcessingProviderStatus,
+  normalizeAsrProvider,
+  normalizeTextProvider
+} from "./provider-registry.js";
 
 export const defaultSettings = {
   hotkey: "CommandOrControl+Alt+Space",
+  asrProvider: "localWhisper",
   whisperCliPath: "",
   whisperModelPath: "",
+  cloudApiBaseUrl: "",
+  cloudApiKey: "",
   interfaceLanguage: defaultInterfaceLanguage,
   whisperLanguage: defaultWhisperLanguage,
   outputLanguage: defaultOutputLanguage,
@@ -53,6 +61,9 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   merged.interfaceLanguage = normalizeInterfaceLanguage(merged.interfaceLanguage);
   merged.whisperLanguage = normalizeWhisperLanguage(merged.whisperLanguage);
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
+  merged.asrProvider = normalizeAsrProvider(merged.asrProvider);
+  merged.llmProvider = normalizeTextProvider(merged.llmProvider);
+  merged.providerStatus = getProcessingProviderStatus(merged);
 
   return merged;
 }
