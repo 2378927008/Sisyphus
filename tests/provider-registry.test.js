@@ -79,6 +79,7 @@ test("getProcessingProviderStatus reports Apple Speech as unavailable system mod
 test("getProcessingProviderStatus keeps configured custom cloud ASR disabled until implemented", () => {
   const status = getProcessingProviderStatus({
     asrProvider: "customOpenAiCompatible",
+    cloudApiBaseUrl: "https://api.example.test/v1",
     cloudApiKey: "secret-key",
     llmProvider: "embedded"
   });
@@ -90,6 +91,27 @@ test("getProcessingProviderStatus keeps configured custom cloud ASR disabled unt
   assert.equal(status.asr.blockedReason, "cloud_asr_not_implemented");
   assert.equal(status.readyToRecord, false);
   assert.equal(status.recordingBlockedReason, "cloud_asr_not_implemented");
+});
+
+test("getProcessingProviderStatus requires base URL and key for custom cloud ASR", () => {
+  for (const settings of [
+    { cloudApiKey: "secret-key" },
+    { cloudApiBaseUrl: "https://api.example.test/v1" }
+  ]) {
+    const status = getProcessingProviderStatus({
+      asrProvider: "customOpenAiCompatible",
+      llmProvider: "embedded",
+      ...settings
+    });
+
+    assert.equal(status.mode, "cloud");
+    assert.equal(status.asr.configured, false);
+    assert.equal(status.asr.implemented, false);
+    assert.equal(status.asr.ready, false);
+    assert.equal(status.asr.blockedReason, "cloud_provider_not_configured");
+    assert.equal(status.readyToRecord, false);
+    assert.equal(status.recordingBlockedReason, "cloud_provider_not_configured");
+  }
 });
 
 test("getProcessingProviderStatus reports cloud mode for text-only cloud provider", () => {
@@ -178,7 +200,10 @@ const asrProviderCases = [
   },
   {
     provider: "customOpenAiCompatible",
-    settings: { cloudApiKey: "secret-key" },
+    settings: {
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key"
+    },
     mode: "cloud",
     configured: true,
     implemented: false,
@@ -248,7 +273,10 @@ const textProviderCases = [
   },
   {
     provider: "customOpenAiCompatible",
-    settings: { cloudApiKey: "secret-key" },
+    settings: {
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key"
+    },
     mode: "cloud",
     configured: true,
     implemented: false,
@@ -283,6 +311,45 @@ test("getProcessingProviderStatus reports configured cloud text as not implement
     whisperCliPath: "C:/tools/whisper-cli.exe",
     whisperModelPath: "C:/models/ggml-base.bin",
     llmProvider: "groq",
+    cloudApiKey: "secret-key"
+  });
+
+  assert.equal(status.mode, "cloud");
+  assert.equal(status.text.configured, true);
+  assert.equal(status.text.implemented, false);
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "cloud_text_not_implemented");
+});
+
+test("getProcessingProviderStatus requires base URL and key for custom cloud text", () => {
+  for (const settings of [
+    { cloudApiKey: "secret-key" },
+    { cloudApiBaseUrl: "https://api.example.test/v1" }
+  ]) {
+    const status = getProcessingProviderStatus({
+      asrProvider: "localWhisper",
+      whisperCliPath: "C:/tools/whisper-cli.exe",
+      whisperModelPath: "C:/models/ggml-base.bin",
+      llmProvider: "customOpenAiCompatible",
+      ...settings
+    });
+
+    assert.equal(status.mode, "cloud");
+    assert.equal(status.text.configured, false);
+    assert.equal(status.text.implemented, false);
+    assert.equal(status.text.ready, false);
+    assert.equal(status.text.blockedReason, "cloud_provider_not_configured");
+    assert.equal(status.readyToRecord, true);
+  }
+});
+
+test("getProcessingProviderStatus reports configured custom cloud text as not implemented", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "customOpenAiCompatible",
+    cloudApiBaseUrl: "https://api.example.test/v1",
     cloudApiKey: "secret-key"
   });
 

@@ -91,7 +91,7 @@ function getTextStatus(provider, settings) {
 }
 
 function getCloudStatus(provider, settings, type) {
-  const configured = Boolean(String(settings.cloudApiKey || "").trim());
+  const configured = hasCloudProviderConfig(provider, settings);
   const blockedReason = configured
     ? type === "asr"
       ? "cloud_asr_not_implemented"
@@ -108,6 +108,18 @@ function getCloudStatus(provider, settings, type) {
   };
 }
 
+function hasCloudProviderConfig(provider, settings) {
+  if (provider === "customOpenAiCompatible") {
+    return hasValue(settings.cloudApiBaseUrl) && hasValue(settings.cloudApiKey);
+  }
+
+  return hasValue(settings.cloudApiKey);
+}
+
 function isCloudProvider(provider) {
   return cloudProviders.has(provider);
+}
+
+function hasValue(value) {
+  return Boolean(String(value || "").trim());
 }
