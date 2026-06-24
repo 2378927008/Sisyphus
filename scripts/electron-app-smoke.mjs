@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
+import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,9 @@ const timeout = setTimeout(() => {
 let settings = mergeSettings({
   ...defaultSettings,
   hotkey: "CommandOrControl+Alt+Space",
-  pasteAfterTranscribe: false
+  pasteAfterTranscribe: false,
+  whisperCliPath: "C:\\smoke\\whisper-cli.exe",
+  whisperModelPath: "C:\\smoke\\ggml-base.bin"
 });
 let settingsAtDictation = null;
 
@@ -37,6 +40,7 @@ function wireIpc() {
       { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
     ]
   }));
+  ipcMain.handle("providers:status", () => getProcessingProviderStatus(settings));
   ipcMain.handle("llm:status", () => ({
     ready: false,
     runtimeReady: false,
@@ -105,7 +109,40 @@ app.whenReady().then(async () => {
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&
         state.hasSettingsDrawer &&
-        state.hasLocalModelStatus
+        state.hasLocalModelStatus &&
+        state.providerStatusText.includes("Local whisper.cpp")
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const interfaceLanguage = document.querySelector('#interfaceLanguage');
+        interfaceLanguage.value = 'en';
+        interfaceLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const englishLanguageState = await waitForState(
+      window,
+      (state) => (
+        state.interfaceLanguage === "en" &&
+        state.recordLabel === "Start recording" &&
+        state.providerStatusText === "Local mode · Local whisper.cpp"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const interfaceLanguage = document.querySelector('#interfaceLanguage');
+        interfaceLanguage.value = 'zh-Hans';
+        interfaceLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.interfaceLanguage === "zh-Hans" &&
+        state.recordLabel === "开始录音" &&
+        state.providerStatusText.includes("Local whisper.cpp")
       ),
       5000
     );
@@ -141,6 +178,7 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({
       ok: true,
       initialState,
+      englishLanguageState,
       recordingState,
       completedState,
       settingsAtDictation,
@@ -190,6 +228,7 @@ function readRendererState(window) {
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
+      providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
       hasRecordButton: Boolean(document.querySelector('#recordButton')),

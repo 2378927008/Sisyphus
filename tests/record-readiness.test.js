@@ -25,6 +25,15 @@ test("getRecordReadiness blocks recording when provider is not ready", () => {
   assert.equal(readiness.reason, "whisper_not_configured");
 });
 
+test("getRecordReadiness falls back when provider status is missing", () => {
+  const readiness = getRecordReadiness({
+    hasMediaDevicesApi: true
+  });
+
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.reason, "provider_not_ready");
+});
+
 test("getRecordReadiness allows recording when media and provider are ready", () => {
   const readiness = getRecordReadiness({
     hasMediaDevicesApi: true,

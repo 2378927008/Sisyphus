@@ -191,18 +191,46 @@ function renderProviderStatus() {
   });
 }
 
-function applyRecordReadiness() {
-  const readiness = getRecordReadiness({
+function getCurrentRecordReadiness() {
+  return getRecordReadiness({
     hasMediaDevicesApi: Boolean(navigator.mediaDevices?.getUserMedia),
     providerStatus: currentProviderStatus || currentSettings?.providerStatus
   });
+}
 
-  recordButton.disabled = !readiness.ready && !isRecording;
-  recordButton.title = readiness.ready ? "" : t(`record.disabled.${readiness.reason}`);
+function applyRecordReadiness() {
+  const readiness = getCurrentRecordReadiness();
+  renderRecordReadiness(readiness);
 
   if (!readiness.ready && !isRecording) {
-    setStatus(t(`record.disabled.${readiness.reason}`));
+    showRecordReadinessReason(readiness);
   }
+
+  return readiness;
+}
+
+function ensureRecordReady() {
+  const readiness = getCurrentRecordReadiness();
+  renderRecordReadiness(readiness);
+  if (readiness.ready) return true;
+
+  showRecordReadinessReason(readiness);
+  return false;
+}
+
+function renderRecordReadiness(readiness) {
+  recordButton.disabled = !readiness.ready && !isRecording;
+  recordButton.title = readiness.ready ? "" : getRecordDisabledMessage(readiness);
+}
+
+function showRecordReadinessReason(readiness) {
+  const message = getRecordDisabledMessage(readiness);
+  recordButton.title = message;
+  setStatus(message);
+}
+
+function getRecordDisabledMessage(readiness) {
+  return t(`record.disabled.${readiness.reason}`);
 }
 
 function showLocalModelInstallCommand() {
@@ -232,6 +260,8 @@ async function toggleRecording() {
 async function startRecording() {
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
+    if (!ensureRecordReady()) return;
+
     recorder = new WavRecorder();
     await recorder.start();
     isRecording = true;
@@ -345,6 +375,7 @@ function applyInterfaceLanguage(language) {
     element.placeholder = t(element.dataset.i18nPlaceholder);
   }
 
+  renderProviderStatus();
   updateRecordLabel();
 
   if (resultText.dataset.emptyResult === "true") {
