@@ -18,6 +18,7 @@ test("processWav saves polished result and pastes when enabled", async () => {
   assert.equal(entry.text, "hello world");
   assert.equal(entry.transcript, "um hello world");
   assert.equal(entry.status, "complete");
+  assert.equal(entry.detectedLanguage, "en");
   assert.equal(history.at(-1).pasted, "hello world");
 });
 
@@ -69,10 +70,26 @@ test("processWav keeps partial failure reason in final warning status", async ()
   assert.match(finalEvent.message, /Install a language model/);
   assert.equal(history[0], entry);
   assert.equal(history[0].outputLanguage, "auto");
-  assert.equal(history[0].detectedLanguage, "unknown");
+  assert.equal(history[0].detectedLanguage, "en");
   assert.equal(history[0].providerMode, "local");
   assert.equal(history[0].status, "partial");
   assert.equal(history[0].processingError, "Install a language model");
+});
+
+test("processWav stores detected language metadata for automatic output", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, { outputLanguage: "auto" }),
+    clipboard: {},
+    transcribe: async () => "这是一个测试",
+    polish: async (text) => text,
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.detectedLanguage, "zh");
+  assert.equal(entry.outputLanguage, "auto");
 });
 
 function fakeSettingsStore(history, overrides = {}) {
