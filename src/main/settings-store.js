@@ -78,7 +78,7 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
     },
     async saveSettings(settings) {
       const existing = await loadJson(settingsPath, baseSettings);
-      const next = mergeSettings({ ...existing, ...settings }, baseSettings);
+      const next = mergeSettings({ ...existing, ...omitEmptyProviderOverrides(settings, existing) }, baseSettings);
       await writeJson(settingsPath, toPersistedSettings(next));
       return next;
     },
@@ -105,6 +105,26 @@ function normalizeDictionary(value) {
   }
 
   return [];
+}
+
+function omitEmptyProviderOverrides(settings, existing) {
+  const next = { ...settings };
+
+  for (const key of ["asrProvider", "llmProvider"]) {
+    if (Object.hasOwn(next, key) && isEmptyProviderValue(next[key]) && hasProviderValue(existing[key])) {
+      delete next[key];
+    }
+  }
+
+  return next;
+}
+
+function isEmptyProviderValue(value) {
+  return value == null || String(value).trim() === "";
+}
+
+function hasProviderValue(value) {
+  return !isEmptyProviderValue(value);
 }
 
 function toPersistedSettings(settings) {

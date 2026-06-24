@@ -127,3 +127,59 @@ test("saveSettings preserves persisted provider settings across partial saves", 
     await rm(userDataPath, { recursive: true, force: true });
   }
 });
+
+test("saveSettings preserves persisted providers when partial save sends empty values", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "groq"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({
+      hotkey: "CommandOrControl+Shift+Space",
+      asrProvider: null,
+      llmProvider: ""
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.asrProvider, "customOpenAiCompatible");
+    assert.equal(saved.llmProvider, "groq");
+    assert.equal(persisted.asrProvider, "customOpenAiCompatible");
+    assert.equal(persisted.llmProvider, "groq");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("saveSettings applies explicit valid provider changes", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiKey: "secret-key",
+      llmProvider: "groq"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({
+      asrProvider: "localWhisper",
+      llmProvider: "ollama"
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.asrProvider, "localWhisper");
+    assert.equal(saved.llmProvider, "ollama");
+    assert.equal(persisted.asrProvider, "localWhisper");
+    assert.equal(persisted.llmProvider, "ollama");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
