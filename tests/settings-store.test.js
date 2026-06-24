@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeSettings, defaultSettings } from "../src/main/settings-store.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createSettingsStore, mergeSettings, defaultSettings } from "../src/main/settings-store.js";
 
 test("mergeSettings preserves defaults for missing values", () => {
   const settings = mergeSettings({ whisperModelPath: "C:/models/ggml-small.bin" });
@@ -8,6 +11,9 @@ test("mergeSettings preserves defaults for missing values", () => {
   assert.equal(settings.whisperModelPath, "C:/models/ggml-small.bin");
   assert.equal(settings.hotkey, defaultSettings.hotkey);
   assert.equal(settings.ollamaBaseUrl, defaultSettings.ollamaBaseUrl);
+  assert.equal(settings.asrProvider, "localWhisper");
+  assert.equal(settings.cloudApiBaseUrl, "");
+  assert.equal(settings.cloudApiKey, "");
   assert.equal(settings.interfaceLanguage, "zh-Hans");
   assert.equal(settings.whisperLanguage, "auto");
   assert.equal(settings.outputLanguage, "auto");
@@ -71,4 +77,53 @@ test("mergeSettings maps legacy original output language to automatic same-langu
   const settings = mergeSettings({ outputLanguage: "original" });
 
   assert.equal(settings.outputLanguage, "auto");
+});
+
+test("mergeSettings normalizes invalid provider preferences", () => {
+  const settings = mergeSettings({
+    asrProvider: "bad-asr",
+    llmProvider: "bad-text"
+  });
+
+  assert.equal(settings.asrProvider, "localWhisper");
+  assert.equal(settings.llmProvider, "embedded");
+});
+
+test("mergeSettings reports recording ready when Whisper paths are configured", () => {
+  const settings = mergeSettings({
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin"
+  });
+
+  assert.equal(settings.providerStatus.readyToRecord, true);
+});
+
+test("saveSettings preserves persisted provider settings across partial saves", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "groq"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({ hotkey: "CommandOrControl+Shift+Space" });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.hotkey, "CommandOrControl+Shift+Space");
+    assert.equal(saved.asrProvider, "customOpenAiCompatible");
+    assert.equal(saved.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(saved.cloudApiKey, "secret-key");
+    assert.equal(saved.llmProvider, "groq");
+    assert.equal(persisted.asrProvider, "customOpenAiCompatible");
+    assert.equal(persisted.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(persisted.cloudApiKey, "secret-key");
+    assert.equal("providerStatus" in persisted, false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
 });

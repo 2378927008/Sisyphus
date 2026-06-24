@@ -77,8 +77,9 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
       return loadJson(settingsPath, baseSettings).then((settings) => mergeSettings(settings, baseSettings));
     },
     async saveSettings(settings) {
-      const next = mergeSettings(settings, baseSettings);
-      await writeJson(settingsPath, next);
+      const existing = await loadJson(settingsPath, baseSettings);
+      const next = mergeSettings({ ...existing, ...settings }, baseSettings);
+      await writeJson(settingsPath, toPersistedSettings(next));
       return next;
     },
     async getHistory() {
@@ -104,6 +105,18 @@ function normalizeDictionary(value) {
   }
 
   return [];
+}
+
+function toPersistedSettings(settings) {
+  const persisted = {};
+
+  for (const key of Object.keys(defaultSettings)) {
+    if (Object.hasOwn(settings, key)) {
+      persisted[key] = settings[key];
+    }
+  }
+
+  return persisted;
 }
 
 async function loadJson(filePath, fallback) {

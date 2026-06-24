@@ -63,3 +63,67 @@ test("getProcessingProviderStatus reports cloud providers as not configured in P
   assert.equal(status.text.ready, false);
   assert.equal(status.recordingBlockedReason, "cloud_provider_not_configured");
 });
+
+test("getProcessingProviderStatus reports Apple Speech as unavailable system mode on Windows", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "appleSpeech",
+    llmProvider: "embedded"
+  });
+
+  assert.equal(status.mode, "system");
+  assert.equal(status.asr.ready, false);
+  assert.equal(status.asr.blockedReason, "apple_speech_not_available_on_windows");
+  assert.equal(status.recordingBlockedReason, "apple_speech_not_available_on_windows");
+});
+
+test("getProcessingProviderStatus allows configured custom cloud ASR", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "customOpenAiCompatible",
+    cloudApiKey: "secret-key",
+    llmProvider: "embedded"
+  });
+
+  assert.equal(status.mode, "cloud");
+  assert.equal(status.asr.ready, true);
+  assert.equal(status.readyToRecord, true);
+});
+
+test("getProcessingProviderStatus reports cloud mode for text-only cloud provider", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "cloudflareWorkersAi"
+  });
+
+  assert.equal(status.mode, "cloud");
+  assert.equal(status.asr.ready, true);
+  assert.equal(status.text.provider, "cloudflareWorkersAi");
+});
+
+test("getProcessingProviderStatus explains missing embedded LLM setup", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "embedded",
+    embeddedLlmCliPath: "",
+    embeddedLlmModelPath: ""
+  });
+
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "embedded_llm_not_configured");
+});
+
+test("getProcessingProviderStatus explains disabled Ollama setup", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "ollama",
+    ollamaEnabled: false
+  });
+
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "ollama_not_enabled");
+});
