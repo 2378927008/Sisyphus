@@ -44,6 +44,37 @@ test("processWav preserves raw transcript when text processing fails", async () 
   assert.equal(history[0].text, "hello world");
 });
 
+test("processWav keeps partial failure reason in final warning status", async () => {
+  const history = [];
+  const events = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, { pasteAfterTranscribe: true, historyLimit: 20 }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => {
+      throw "Install a language model";
+    },
+    paste: async () => {
+      throw new Error("paste should not run after partial processing");
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+  const finalEvent = events.at(-1);
+  const warningEvents = events.filter((event) => event.phase === "warning");
+
+  assert.equal(warningEvents.length, 1);
+  assert.equal(finalEvent.phase, "warning");
+  assert.match(finalEvent.message, /Install a language model/);
+  assert.equal(history[0], entry);
+  assert.equal(history[0].outputLanguage, "auto");
+  assert.equal(history[0].detectedLanguage, "unknown");
+  assert.equal(history[0].providerMode, "local");
+  assert.equal(history[0].status, "partial");
+  assert.equal(history[0].processingError, "Install a language model");
+});
+
 function fakeSettingsStore(history, overrides = {}) {
   return {
     async getSettings() {

@@ -40,8 +40,7 @@ export class DictationService {
       text = await this.polish(transcript, settings);
     } catch (error) {
       status = "partial";
-      processingError = error.message;
-      this.notifyStatus({ phase: "warning", message: `Saved raw transcript. ${error.message}` });
+      processingError = error instanceof Error ? error.message : String(error);
     }
 
     const entry = {
@@ -66,7 +65,7 @@ export class DictationService {
 
     this.notifyStatus({
       phase: status === "complete" ? "done" : "warning",
-      message: status === "complete" ? "Dictation complete." : "Raw transcript saved."
+      message: status === "complete" ? "Dictation complete." : `Raw transcript saved. ${processingError}`
     });
     return entry;
   }
