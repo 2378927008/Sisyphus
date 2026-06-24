@@ -1,5 +1,8 @@
-export function detectLikelyLanguage(input = "") {
-  const text = String(input).trim().toLowerCase();
+// Lightweight heuristic metadata, not authoritative language detection.
+export function detectLikelyLanguage(input) {
+  if (typeof input !== "string") return "unknown";
+
+  const text = input.trim().toLowerCase();
   if (!text || !/[a-z\u00c0-\u024f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0400-\u04ff]/i.test(text)) {
     return "unknown";
   }

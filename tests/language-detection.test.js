@@ -22,3 +22,24 @@ test("detectLikelyLanguage returns unknown for empty or numeric text", () => {
   assert.equal(detectLikelyLanguage(""), "unknown");
   assert.equal(detectLikelyLanguage("12345"), "unknown");
 });
+
+test("detectLikelyLanguage returns unknown for non-string inputs", () => {
+  assert.equal(detectLikelyLanguage(null), "unknown");
+  assert.equal(detectLikelyLanguage(undefined), "unknown");
+  assert.equal(detectLikelyLanguage(true), "unknown");
+  assert.equal(detectLikelyLanguage(false), "unknown");
+});
+
+test("detectLikelyLanguage does not throw for hostile object input", () => {
+  const hostile = {
+    toString() {
+      throw new Error("coercion failed");
+    }
+  };
+  let language;
+
+  assert.doesNotThrow(() => {
+    language = detectLikelyLanguage(hostile);
+  });
+  assert.equal(language, "unknown");
+});
