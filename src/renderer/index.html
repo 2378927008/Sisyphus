@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Flow 本地语音输入</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow" data-i18n="app.eyebrow">本地优先语音输入</p>
+          <h1 data-i18n="app.title">Local Flow 本地语音输入</h1>
+        </div>
+        <button id="openSettings" class="icon-text-button" type="button" data-i18n="action.settings">设置</button>
+      </header>
+
+      <section class="dictation-stage">
+        <div class="language-strip">
+          <label>
+            <span data-i18n="label.recognitionLanguage">语音识别语言</span>
+            <select id="whisperLanguage" name="whisperLanguage" form="settingsForm"></select>
+          </label>
+          <label>
+            <span data-i18n="label.outputLanguage">输出语言</span>
+            <select id="outputLanguage" name="outputLanguage" form="settingsForm"></select>
+          </label>
+        </div>
+
+        <button id="recordButton" class="record-orb" type="button" aria-live="polite">
+          <span class="record-ring"></span>
+          <span class="record-dot"></span>
+          <span id="recordLabel" data-i18n="record.start">开始录音</span>
+        </button>
+
+        <div class="status-line">
+          <span data-i18n="label.status">状态</span>
+          <p id="statusText">就绪。快捷键：Ctrl + Alt + Space</p>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <section class="result-surface">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow" data-i18n="label.latestResult">最新结果</p>
+              <h2 data-i18n="section.result">可编辑结果</h2>
+            </div>
+          </div>
+          <p id="resultText" class="result-text" contenteditable="true" data-empty-result="true" data-i18n="empty.result">还没有转写结果。</p>
+        </section>
+
+        <section class="history-surface">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow" data-i18n="section.history">历史记录</p>
+              <h2 data-i18n="section.recent">最近输入</h2>
+            </div>
+            <button id="refreshHistory" type="button" class="ghost" data-i18n="action.refresh">刷新</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <aside id="settingsDrawer" class="settings-drawer" aria-hidden="true">
+      <div class="drawer-backdrop" data-close-settings="true"></div>
+      <section class="drawer-panel" aria-label="Settings">
+        <header class="drawer-header">
+          <div>
+            <p class="eyebrow" data-i18n="action.settings">设置</p>
+            <h2 data-i18n="section.settings">语音输入设置</h2>
+          </div>
+          <button id="closeSettings" class="ghost" type="button" data-i18n="action.close">关闭</button>
+        </header>
+
+        <form id="settingsForm" class="settings-form">
+          <section class="drawer-section">
+            <h3 data-i18n="section.language">语言</h3>
+            <label>
+              <span data-i18n="label.interfaceLanguage">界面语言</span>
+              <select id="interfaceLanguage" name="interfaceLanguage"></select>
+            </label>
+          </section>
+
+          <section class="drawer-section">
+            <h3 data-i18n="section.builtInModel">内置本地语言模型</h3>
+            <div id="localModelStatus" class="model-status"></div>
+            <label>
+              <span data-i18n="label.llmProvider">文本模型提供方</span>
+              <select id="llmProvider" name="llmProvider">
+                <option value="embedded" data-i18n="model.provider.embedded">内置 Qwen3</option>
+                <option value="ollama" data-i18n="model.provider.ollama">Ollama</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="label.embeddedLlmCliPath">llama.cpp 可执行文件</span>
+              <input id="embeddedLlmCliPath" name="embeddedLlmCliPath" placeholder="vendor\llm\bin\llama-cli.exe" />
+            </label>
+            <label>
+              <span data-i18n="label.embeddedLlmModelPath">Qwen3 GGUF 模型文件</span>
+              <input id="embeddedLlmModelPath" name="embeddedLlmModelPath" placeholder="vendor\llm\models\Qwen3-4B-Q4_K_M.gguf" />
+            </label>
+            <button id="setupLocalModel" class="secondary" type="button" data-i18n="action.setupLocalModel">显示安装命令</button>
+            <pre id="localModelInstallCommand" class="install-command" hidden></pre>
+          </section>
+
+          <section class="drawer-section">
+            <h3 data-i18n="section.localModel">Whisper 语音识别</h3>
+            <label>
+              <span data-i18n="label.whisperCliPath">whisper.cpp 可执行文件</span>
+              <input id="whisperCliPath" name="whisperCliPath" placeholder="C:\tools\whisper.cpp\build\bin\Release\whisper-cli.exe" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelPath">Whisper 模型文件</span>
+              <input id="whisperModelPath" name="whisperModelPath" placeholder="C:\models\ggml-base.bin" />
+            </label>
+            <div class="button-row">
+              <button id="checkMicrophone" class="secondary" type="button" data-i18n="action.checkMicrophone">检查麦克风</button>
+              <button id="checkWhisper" class="secondary" type="button" data-i18n="action.checkWhisper">检查本地 Whisper</button>
+            </div>
+            <div id="microphoneDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
+            <div id="diagnosticsList" class="diagnostics-list" aria-live="polite"></div>
+          </section>
+
+          <section class="drawer-section">
+            <h3 data-i18n="section.localCleanup">文本整理</h3>
+            <label>
+              <span data-i18n="label.polishMode">处理模式</span>
+              <select id="polishMode" name="polishMode">
+                <option value="polish" data-i18n="mode.polish">整理口述文本</option>
+                <option value="raw" data-i18n="mode.raw">原始转写</option>
+                <option value="command" data-i18n="mode.command">语音编辑指令</option>
+                <option value="translate" data-i18n="mode.translate">翻译成英文</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input id="pasteAfterTranscribe" name="pasteAfterTranscribe" type="checkbox" />
+              <span data-i18n="label.pasteAfterTranscribe">转写后粘贴到当前应用</span>
+            </label>
+            <label class="checkbox-label">
+              <input id="ollamaEnabled" name="ollamaEnabled" type="checkbox" />
+              <span data-i18n="label.ollamaEnabled">使用 Ollama 作为高级备用</span>
+            </label>
+            <label>
+              <span data-i18n="label.ollamaBaseUrl">Ollama 地址</span>
+              <input id="ollamaBaseUrl" name="ollamaBaseUrl" placeholder="http://localhost:11434" />
+            </label>
+            <label>
+              <span data-i18n="label.ollamaModel">Ollama 模型</span>
+              <input id="ollamaModel" name="ollamaModel" placeholder="qwen3:4b" />
+            </label>
+            <label>
+              <span data-i18n="label.dictionary">个人词典</span>
+              <textarea id="dictionary" name="dictionary" rows="5" data-i18n-placeholder="placeholder.dictionary" placeholder="每行一个人名、产品名或术语"></textarea>
+            </label>
+          </section>
+
+          <section class="drawer-section">
+            <h3 data-i18n="section.shortcuts">快捷键</h3>
+            <label>
+              <span data-i18n="label.hotkey">全局快捷键</span>
+              <input id="hotkey" name="hotkey" />
+            </label>
+          </section>
+
+          <button class="primary" type="submit" data-i18n="action.save">保存设置</button>
+        </form>
+      </section>
+    </aside>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

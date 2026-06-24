@@ -1,0 +1,86 @@
+param(
+  [string]$InstallDir = "",
+  [ValidateSet("Q4_K_M")]
+  [string]$Quantization = "Q4_K_M"
+)
+
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+  $InstallDir = Join-Path $repoRoot "vendor\llm"
+}
+
+$binDir = Join-Path $InstallDir "bin"
+$modelDir = Join-Path $InstallDir "models"
+$downloadDir = Join-Path $InstallDir "downloads"
+$downloadScript = Join-Path $repoRoot "scripts\download-file.mjs"
+$releaseApi = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+$modelFile = "Qwen3-4B-Q4_K_M.gguf"
+$modelUrl = "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/$modelFile"
+$modelMirrorUrl = "https://hf-mirror.com/Qwen/Qwen3-4B-GGUF/resolve/main/$modelFile"
+$modelPath = Join-Path $modelDir $modelFile
+
+New-Item -ItemType Directory -Force -Path $binDir, $modelDir, $downloadDir | Out-Null
+
+Write-Host "Fetching latest llama.cpp release metadata..."
+$releaseJson = & node -e "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());" $releaseApi
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to fetch llama.cpp release metadata."
+}
+
+$release = $releaseJson | ConvertFrom-Json
+$asset = $release.assets |
+  Where-Object { $_.name -match "win" -and $_.name -match "x64" -and $_.name -match "\.zip$" } |
+  Select-Object -First 1
+
+if (-not $asset) {
+  throw "Could not find a Windows x64 llama.cpp zip asset in the latest release."
+}
+
+$zipPath = Join-Path $downloadDir $asset.name
+if (-not (Test-Path -LiteralPath $zipPath)) {
+  Write-Host "Downloading $($asset.name)..."
+  & node $downloadScript $asset.browser_download_url $zipPath
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to download $($asset.name)."
+  }
+} else {
+  Write-Host "Using existing $zipPath"
+}
+
+Write-Host "Extracting llama.cpp binaries..."
+Expand-Archive -LiteralPath $zipPath -DestinationPath $binDir -Force
+
+$cli = Get-ChildItem -Path $binDir -Filter "llama-cli.exe" -Recurse | Select-Object -First 1
+$server = Get-ChildItem -Path $binDir -Filter "llama-server.exe" -Recurse | Select-Object -First 1
+if (-not $cli -and -not $server) {
+  throw "llama-cli.exe or llama-server.exe was not found after extracting $zipPath"
+}
+
+if ($cli -and $cli.DirectoryName -ne $binDir) {
+  Copy-Item -LiteralPath $cli.FullName -Destination (Join-Path $binDir "llama-cli.exe") -Force
+}
+if ($server -and $server.DirectoryName -ne $binDir) {
+  Copy-Item -LiteralPath $server.FullName -Destination (Join-Path $binDir "llama-server.exe") -Force
+}
+
+if (-not (Test-Path -LiteralPath $modelPath)) {
+  Write-Host "Downloading $modelFile. This is about 2.5 GB..."
+  & node $downloadScript $modelUrl $modelPath
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Primary Hugging Face download failed. Trying mirror..."
+    & node $downloadScript $modelMirrorUrl $modelPath
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to download $modelFile from primary and mirror URLs."
+    }
+  }
+} else {
+  Write-Host "Using existing $modelPath"
+}
+
+Write-Host ""
+Write-Host "Local language model setup complete."
+Write-Host "Runtime: $binDir"
+Write-Host "Model:   $modelPath"
+Write-Host "License: Apache-2.0. Keep the Qwen license notice with distributed builds."

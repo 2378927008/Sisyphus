@@ -1,0 +1,9 @@
+node_modules/
+.electron-runtime*/
+vendor/
+dist/
+out/
+.env
+.env.local
+npm-debug.log*
+local-flow-dictation-*.tgz
