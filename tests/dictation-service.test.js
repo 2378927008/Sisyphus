@@ -92,11 +92,72 @@ test("processWav stores detected language metadata for automatic output", async 
   assert.equal(entry.outputLanguage, "auto");
 });
 
+test("processWav blocks transcription when the selected ASR provider is not ready", async () => {
+  const history = [];
+  const events = [];
+  let transcribeCalls = 0;
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      asrProvider: "groq",
+      cloudApiKey: "secret-key",
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => {
+      transcribeCalls += 1;
+      return "this should not run";
+    },
+    polish: async (text) => text,
+    paste: async () => {
+      throw new Error("paste should not run when ASR is blocked");
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  await assert.rejects(
+    service.processWav(Buffer.from("wav")),
+    /cloud_asr_not_implemented/
+  );
+
+  assert.equal(transcribeCalls, 0);
+  assert.equal(history.length, 0);
+  assert.equal(events.at(-1).phase, "error");
+});
+
+test("processWav saves raw transcript without paste when the selected text provider is not implemented", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      whisperCliPath: "C:/tools/whisper-cli.exe",
+      whisperModelPath: "C:/models/ggml-base.bin",
+      llmProvider: "groq",
+      cloudApiKey: "secret-key",
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => "cloud text result should not run",
+    paste: async () => {
+      throw new Error("paste should not run after partial processing");
+    },
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.status, "partial");
+  assert.equal(entry.text, "hello world");
+  assert.equal(entry.processingError, "cloud_text_not_implemented");
+  assert.equal(history[0], entry);
+});
+
 function fakeSettingsStore(history, overrides = {}) {
   return {
     async getSettings() {
       return {
         polishMode: "polish",
+        whisperCliPath: "C:/tools/whisper-cli.exe",
+        whisperModelPath: "C:/models/ggml-base.bin",
         outputLanguage: "auto",
         pasteAfterTranscribe: false,
         historyLimit: 20,

@@ -112,12 +112,14 @@ test("saveSettings preserves persisted provider settings across partial saves", 
 
     const store = createSettingsStore(userDataPath);
     const saved = await store.saveSettings({ hotkey: "CommandOrControl+Shift+Space" });
+    const privateSettings = await store.getSettings({ includeSecrets: true });
     const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
 
     assert.equal(saved.hotkey, "CommandOrControl+Shift+Space");
     assert.equal(saved.asrProvider, "customOpenAiCompatible");
     assert.equal(saved.cloudApiBaseUrl, "https://api.example.test/v1");
-    assert.equal(saved.cloudApiKey, "secret-key");
+    assert.equal(saved.cloudApiKey, "");
+    assert.equal(privateSettings.cloudApiKey, "secret-key");
     assert.equal(saved.llmProvider, "groq");
     assert.equal(persisted.asrProvider, "customOpenAiCompatible");
     assert.equal(persisted.cloudApiBaseUrl, "https://api.example.test/v1");
@@ -184,7 +186,59 @@ test("saveSettings applies explicit valid provider changes", async () => {
   }
 });
 
-test("saveSettings preserves persisted cloud credentials when partial save sends empty values", async () => {
+test("getSettings redacts cloud credentials unless secrets are explicitly requested", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "embedded"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const publicSettings = await store.getSettings();
+    const privateSettings = await store.getSettings({ includeSecrets: true });
+
+    assert.equal(publicSettings.cloudApiKey, "");
+    assert.equal(publicSettings.providerStatus.asr.configured, true);
+    assert.equal(privateSettings.cloudApiKey, "secret-key");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("saveSettings preserves persisted cloud credentials when partial save omits them", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "customOpenAiCompatible"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({
+      hotkey: "CommandOrControl+Shift+Space"
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(saved.cloudApiKey, "");
+    assert.equal(persisted.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(persisted.cloudApiKey, "secret-key");
+    assert.equal("providerStatus" in persisted, false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("saveSettings clears persisted cloud credentials when explicitly emptied", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
 
   try {
@@ -201,13 +255,15 @@ test("saveSettings preserves persisted cloud credentials when partial save sends
       cloudApiBaseUrl: "",
       cloudApiKey: null
     });
+    const privateSettings = await store.getSettings({ includeSecrets: true });
     const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
 
-    assert.equal(saved.cloudApiBaseUrl, "https://api.example.test/v1");
-    assert.equal(saved.cloudApiKey, "secret-key");
-    assert.equal(persisted.cloudApiBaseUrl, "https://api.example.test/v1");
-    assert.equal(persisted.cloudApiKey, "secret-key");
-    assert.equal("providerStatus" in persisted, false);
+    assert.equal(saved.cloudApiBaseUrl, "");
+    assert.equal(saved.cloudApiKey, "");
+    assert.equal(privateSettings.cloudApiBaseUrl, "");
+    assert.equal(privateSettings.cloudApiKey, "");
+    assert.equal(persisted.cloudApiBaseUrl, "");
+    assert.equal(persisted.cloudApiKey, "");
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
@@ -233,9 +289,39 @@ test("saveSettings applies explicit cloud credential changes", async () => {
     const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
 
     assert.equal(saved.cloudApiBaseUrl, "https://api.updated.test/v1");
-    assert.equal(saved.cloudApiKey, "updated-key");
+    assert.equal(saved.cloudApiKey, "");
     assert.equal(persisted.cloudApiBaseUrl, "https://api.updated.test/v1");
     assert.equal(persisted.cloudApiKey, "updated-key");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("saveSettings uses an injected secret codec instead of persisting raw cloud API keys", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+  const secretCodec = {
+    encrypt: (value) => Buffer.from(`coded:${value}`).toString("base64"),
+    decrypt: (value) => Buffer.from(value, "base64").toString("utf8").replace(/^coded:/, "")
+  };
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    const store = createSettingsStore(userDataPath, defaultSettings, secretCodec);
+    await store.saveSettings({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key"
+    });
+
+    const publicSettings = await store.getSettings();
+    const privateSettings = await store.getSettings({ includeSecrets: true });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(publicSettings.cloudApiKey, "");
+    assert.equal(privateSettings.cloudApiKey, "secret-key");
+    assert.equal(persisted.cloudApiKey, undefined);
+    assert.equal(typeof persisted.cloudApiKeyEncrypted, "string");
+    assert.notEqual(persisted.cloudApiKeyEncrypted, "secret-key");
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

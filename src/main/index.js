@@ -1,7 +1,7 @@
-import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, session, Tray } from "electron";
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, session, Tray } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSettingsStore } from "./settings-store.js";
+import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-store.js";
 import { DictationService } from "./dictation-service.js";
 import { applyElectronRuntimeSwitches } from "./electron-runtime.js";
 import { validateWhisperSetup } from "./whisper-diagnostics.js";
@@ -97,7 +97,7 @@ function wireIpc() {
     return validateWhisperSetup(settings);
   });
   ipcMain.handle("providers:status", async () => {
-    const settings = await settingsStore.getSettings();
+    const settings = await settingsStore.getSettings({ includeSecrets: true });
     return getProcessingProviderStatus(settings);
   });
   ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(process.cwd()));
@@ -116,7 +116,7 @@ app.whenReady().then(async () => {
     ,
     embeddedLlmCliPath: embeddedLlmDefaults.cliPath,
     embeddedLlmModelPath: embeddedLlmDefaults.modelPath
-  });
+  }, createSafeStorageSecretCodec(safeStorage));
   dictationService = new DictationService({
     settingsStore,
     clipboard,

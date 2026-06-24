@@ -24,8 +24,14 @@ export class DictationService {
   }
 
   async processWav(wavBuffer) {
-    const settings = await this.settingsStore.getSettings();
+    const settings = await this.settingsStore.getSettings({ includeSecrets: true });
     const providers = this.providerStatus(settings);
+
+    if (!providers.readyToRecord) {
+      const reason = providers.recordingBlockedReason || "provider_not_ready";
+      this.notifyStatus({ phase: "error", message: reason });
+      throw new Error(reason);
+    }
 
     this.notifyStatus({ phase: "transcribing", message: "Transcribing speech..." });
     const transcript = await this.transcribe(wavBuffer, settings);
@@ -37,6 +43,7 @@ export class DictationService {
 
     try {
       this.notifyStatus({ phase: "polishing", message: "Cleaning up dictation..." });
+      assertTextProviderCanProcess(providers);
       text = await this.polish(transcript, settings);
     } catch (error) {
       status = "partial";
@@ -68,5 +75,18 @@ export class DictationService {
       message: status === "complete" ? "Dictation complete." : `Raw transcript saved. ${processingError}`
     });
     return entry;
+  }
+}
+
+function assertTextProviderCanProcess(providers = {}) {
+  const textProvider = providers.text;
+  if (!textProvider) return;
+
+  if (textProvider.provider === "embedded" && textProvider.implemented) {
+    return;
+  }
+
+  if (!textProvider.implemented || !textProvider.ready) {
+    throw new Error(textProvider.blockedReason || "text_provider_not_ready");
   }
 }

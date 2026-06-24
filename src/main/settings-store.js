@@ -36,6 +36,25 @@ export const defaultSettings = {
   historyLimit: 20
 };
 
+export function createSafeStorageSecretCodec(safeStorage) {
+  try {
+    if (!safeStorage?.isEncryptionAvailable?.()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return {
+    encrypt(value) {
+      return safeStorage.encryptString(String(value)).toString("base64");
+    },
+    decrypt(value) {
+      return safeStorage.decryptString(Buffer.from(String(value), "base64"));
+    }
+  };
+}
+
 export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   const defaults = { ...defaultSettings, ...baseSettings };
   const merged = { ...defaults };
@@ -63,24 +82,27 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
   merged.asrProvider = normalizeAsrProvider(merged.asrProvider);
   merged.llmProvider = normalizeTextProvider(merged.llmProvider);
+  merged.cloudApiBaseUrl = String(merged.cloudApiBaseUrl || "").trim();
+  merged.cloudApiKey = String(merged.cloudApiKey || "").trim();
   merged.providerStatus = getProcessingProviderStatus(merged);
 
   return merged;
 }
 
-export function createSettingsStore(userDataPath, baseSettings = defaultSettings) {
+export function createSettingsStore(userDataPath, baseSettings = defaultSettings, secretCodec = null) {
   const settingsPath = path.join(userDataPath, "settings.json");
   const historyPath = path.join(userDataPath, "history.json");
 
   return {
-    async getSettings() {
-      return loadJson(settingsPath, baseSettings).then((settings) => mergeSettings(settings, baseSettings));
+    async getSettings(options = {}) {
+      const settings = await loadSettings(settingsPath, baseSettings, secretCodec);
+      return options.includeSecrets ? settings : redactSecrets(settings);
     },
-    async saveSettings(settings) {
-      const existing = await loadJson(settingsPath, baseSettings);
-      const next = mergeSettings({ ...existing, ...omitEmptyProviderOverrides(settings, existing) }, baseSettings);
-      await writeJson(settingsPath, toPersistedSettings(next));
-      return next;
+    async saveSettings(settings, options = {}) {
+      const existing = await loadSettings(settingsPath, baseSettings, secretCodec);
+      const next = mergeSettings({ ...existing, ...omitEmptyProviderSelectionOverrides(settings) }, baseSettings);
+      await writeJson(settingsPath, toPersistedSettings(next, secretCodec));
+      return options.includeSecrets ? next : redactSecrets(next);
     },
     async getHistory() {
       const history = await loadJson(historyPath, []);
@@ -107,11 +129,34 @@ function normalizeDictionary(value) {
   return [];
 }
 
-function omitEmptyProviderOverrides(settings, existing) {
+async function loadSettings(settingsPath, baseSettings, secretCodec) {
+  const persisted = await loadJson(settingsPath, baseSettings);
+  return mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
+}
+
+function hydratePersistedSecrets(settings, secretCodec) {
+  if (!settings || typeof settings !== "object") {
+    return settings;
+  }
+
+  const hydrated = { ...settings };
+
+  if (!hasProviderValue(hydrated.cloudApiKey) && hasProviderValue(hydrated.cloudApiKeyEncrypted) && secretCodec) {
+    try {
+      hydrated.cloudApiKey = secretCodec.decrypt(hydrated.cloudApiKeyEncrypted);
+    } catch {
+      hydrated.cloudApiKey = "";
+    }
+  }
+
+  return hydrated;
+}
+
+function omitEmptyProviderSelectionOverrides(settings) {
   const next = { ...settings };
 
-  for (const key of ["asrProvider", "llmProvider", "cloudApiBaseUrl", "cloudApiKey"]) {
-    if (Object.hasOwn(next, key) && isEmptyProviderValue(next[key]) && hasProviderValue(existing[key])) {
+  for (const key of ["asrProvider", "llmProvider"]) {
+    if (Object.hasOwn(next, key) && isEmptyProviderValue(next[key])) {
       delete next[key];
     }
   }
@@ -127,13 +172,29 @@ function hasProviderValue(value) {
   return !isEmptyProviderValue(value);
 }
 
-function toPersistedSettings(settings) {
+function redactSecrets(settings) {
+  return {
+    ...settings,
+    cloudApiKey: ""
+  };
+}
+
+function toPersistedSettings(settings, secretCodec) {
   const persisted = {};
 
   for (const key of Object.keys(defaultSettings)) {
+    if (key === "cloudApiKey" && secretCodec && hasProviderValue(settings.cloudApiKey)) {
+      continue;
+    }
+
     if (Object.hasOwn(settings, key)) {
       persisted[key] = settings[key];
     }
+  }
+
+  if (secretCodec && hasProviderValue(settings.cloudApiKey)) {
+    persisted.cloudApiKeyEncrypted = secretCodec.encrypt(settings.cloudApiKey);
+    delete persisted.cloudApiKey;
   }
 
   return persisted;
