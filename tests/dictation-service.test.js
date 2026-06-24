@@ -151,6 +151,32 @@ test("processWav saves raw transcript without paste when the selected text provi
   assert.equal(history[0], entry);
 });
 
+test("processWav saves raw transcript without paste when the embedded text provider is not configured", async () => {
+  const history = [];
+  const pasted = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      embeddedLlmCliPath: "",
+      embeddedLlmModelPath: "",
+      llmProvider: "embedded",
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => "hello world cleaned",
+    paste: async (text) => pasted.push(text),
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.status, "partial");
+  assert.equal(entry.text, "hello world");
+  assert.equal(entry.processingError, "embedded_llm_not_configured");
+  assert.equal(pasted.length, 0);
+  assert.equal(history[0], entry);
+});
+
 function fakeSettingsStore(history, overrides = {}) {
   return {
     async getSettings() {
@@ -158,6 +184,8 @@ function fakeSettingsStore(history, overrides = {}) {
         polishMode: "polish",
         whisperCliPath: "C:/tools/whisper-cli.exe",
         whisperModelPath: "C:/models/ggml-base.bin",
+        embeddedLlmCliPath: "C:/tools/llama-cli.exe",
+        embeddedLlmModelPath: "C:/models/qwen.gguf",
         outputLanguage: "auto",
         pasteAfterTranscribe: false,
         historyLimit: 20,

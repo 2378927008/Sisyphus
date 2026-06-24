@@ -82,10 +82,6 @@ function assertTextProviderCanProcess(providers = {}) {
   const textProvider = providers.text;
   if (!textProvider) return;
 
-  if (textProvider.provider === "embedded" && textProvider.implemented) {
-    return;
-  }
-
   if (!textProvider.implemented || !textProvider.ready) {
     throw new Error(textProvider.blockedReason || "text_provider_not_ready");
   }
