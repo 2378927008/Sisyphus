@@ -1,5 +1,6 @@
-const asrProviders = new Set(["localWhisper", "appleSpeech", "cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
-const textProviders = new Set(["embedded", "ollama", "cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
+const cloudProviders = new Set(["cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
+const asrProviders = new Set(["localWhisper", "appleSpeech", ...cloudProviders]);
+const textProviders = new Set(["embedded", "ollama", ...cloudProviders]);
 
 export function normalizeAsrProvider(value) {
   const provider = String(value || "").trim();
@@ -17,7 +18,7 @@ export function getProcessingProviderStatus(settings = {}) {
   const mode = getMode(asrProvider, textProvider);
   const asr = getAsrStatus(asrProvider, settings);
   const text = getTextStatus(textProvider, settings);
-  const readyToRecord = Boolean(asr.ready);
+  const readyToRecord = Boolean(asr.implemented && asr.ready);
 
   return {
     mode,
@@ -36,12 +37,14 @@ function getMode(asrProvider, textProvider) {
 
 function getAsrStatus(provider, settings) {
   if (provider === "localWhisper") {
-    const ready = Boolean(String(settings.whisperCliPath || "").trim() && String(settings.whisperModelPath || "").trim());
+    const configured = Boolean(String(settings.whisperCliPath || "").trim() && String(settings.whisperModelPath || "").trim());
     return {
       provider,
       label: "Local whisper.cpp",
-      ready,
-      blockedReason: ready ? "" : "whisper_not_configured"
+      configured,
+      implemented: true,
+      ready: configured,
+      blockedReason: configured ? "" : "whisper_not_configured"
     };
   }
 
@@ -49,48 +52,62 @@ function getAsrStatus(provider, settings) {
     return {
       provider,
       label: "Apple Speech",
+      configured: false,
+      implemented: false,
       ready: false,
       blockedReason: "apple_speech_not_available_on_windows"
     };
   }
 
-  return getCloudStatus(provider, settings);
+  return getCloudStatus(provider, settings, "asr");
 }
 
 function getTextStatus(provider, settings) {
   if (provider === "embedded") {
-    const ready = Boolean(String(settings.embeddedLlmCliPath || "").trim() && String(settings.embeddedLlmModelPath || "").trim());
+    const configured = Boolean(String(settings.embeddedLlmCliPath || "").trim() && String(settings.embeddedLlmModelPath || "").trim());
     return {
       provider,
       label: "Built-in local language model",
-      ready,
-      blockedReason: ready ? "" : "embedded_llm_not_configured"
+      configured,
+      implemented: true,
+      ready: configured,
+      blockedReason: configured ? "" : "embedded_llm_not_configured"
     };
   }
 
   if (provider === "ollama") {
-    const ready = Boolean(settings.ollamaEnabled);
+    const configured = Boolean(settings.ollamaEnabled);
     return {
       provider,
       label: "Ollama",
-      ready,
-      blockedReason: ready ? "" : "ollama_not_enabled"
+      configured,
+      implemented: true,
+      ready: configured,
+      blockedReason: configured ? "" : "ollama_not_enabled"
     };
   }
 
-  return getCloudStatus(provider, settings);
+  return getCloudStatus(provider, settings, "text");
 }
 
-function getCloudStatus(provider, settings) {
-  const ready = Boolean(String(settings.cloudApiKey || "").trim());
+function getCloudStatus(provider, settings, type) {
+  const configured = Boolean(String(settings.cloudApiKey || "").trim());
+  const blockedReason = configured
+    ? type === "asr"
+      ? "cloud_asr_not_implemented"
+      : "cloud_text_not_implemented"
+    : "cloud_provider_not_configured";
+
   return {
     provider,
     label: provider,
-    ready,
-    blockedReason: ready ? "" : "cloud_provider_not_configured"
+    configured,
+    implemented: false,
+    ready: false,
+    blockedReason
   };
 }
 
 function isCloudProvider(provider) {
-  return ["cloudflareWorkersAi", "groq", "customOpenAiCompatible"].includes(provider);
+  return cloudProviders.has(provider);
 }

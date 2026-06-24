@@ -76,7 +76,7 @@ test("getProcessingProviderStatus reports Apple Speech as unavailable system mod
   assert.equal(status.recordingBlockedReason, "apple_speech_not_available_on_windows");
 });
 
-test("getProcessingProviderStatus allows configured custom cloud ASR", () => {
+test("getProcessingProviderStatus keeps configured custom cloud ASR disabled until implemented", () => {
   const status = getProcessingProviderStatus({
     asrProvider: "customOpenAiCompatible",
     cloudApiKey: "secret-key",
@@ -84,8 +84,12 @@ test("getProcessingProviderStatus allows configured custom cloud ASR", () => {
   });
 
   assert.equal(status.mode, "cloud");
-  assert.equal(status.asr.ready, true);
-  assert.equal(status.readyToRecord, true);
+  assert.equal(status.asr.configured, true);
+  assert.equal(status.asr.implemented, false);
+  assert.equal(status.asr.ready, false);
+  assert.equal(status.asr.blockedReason, "cloud_asr_not_implemented");
+  assert.equal(status.readyToRecord, false);
+  assert.equal(status.recordingBlockedReason, "cloud_asr_not_implemented");
 });
 
 test("getProcessingProviderStatus reports cloud mode for text-only cloud provider", () => {
@@ -126,4 +130,165 @@ test("getProcessingProviderStatus explains disabled Ollama setup", () => {
 
   assert.equal(status.text.ready, false);
   assert.equal(status.text.blockedReason, "ollama_not_enabled");
+});
+
+const asrProviderCases = [
+  {
+    provider: "localWhisper",
+    settings: {
+      whisperCliPath: "C:/tools/whisper-cli.exe",
+      whisperModelPath: "C:/models/ggml-base.bin"
+    },
+    mode: "local",
+    configured: true,
+    implemented: true,
+    ready: true,
+    blockedReason: "",
+    readyToRecord: true
+  },
+  {
+    provider: "appleSpeech",
+    settings: {},
+    mode: "system",
+    configured: false,
+    implemented: false,
+    ready: false,
+    blockedReason: "apple_speech_not_available_on_windows",
+    readyToRecord: false
+  },
+  {
+    provider: "cloudflareWorkersAi",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_asr_not_implemented",
+    readyToRecord: false
+  },
+  {
+    provider: "groq",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_asr_not_implemented",
+    readyToRecord: false
+  },
+  {
+    provider: "customOpenAiCompatible",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_asr_not_implemented",
+    readyToRecord: false
+  }
+];
+
+for (const expected of asrProviderCases) {
+  test(`getProcessingProviderStatus reports ASR provider state for ${expected.provider}`, () => {
+    const status = getProcessingProviderStatus({
+      asrProvider: expected.provider,
+      llmProvider: "embedded",
+      ...expected.settings
+    });
+
+    assert.equal(status.mode, expected.mode);
+    assert.equal(status.asr.provider, expected.provider);
+    assert.equal(status.asr.configured, expected.configured);
+    assert.equal(status.asr.implemented, expected.implemented);
+    assert.equal(status.asr.ready, expected.ready);
+    assert.equal(status.asr.blockedReason, expected.blockedReason);
+    assert.equal(status.readyToRecord, expected.readyToRecord);
+  });
+}
+
+const textProviderCases = [
+  {
+    provider: "embedded",
+    settings: {
+      embeddedLlmCliPath: "C:/tools/llama-cli.exe",
+      embeddedLlmModelPath: "C:/models/qwen.gguf"
+    },
+    mode: "local",
+    configured: true,
+    implemented: true,
+    ready: true,
+    blockedReason: ""
+  },
+  {
+    provider: "ollama",
+    settings: { ollamaEnabled: true },
+    mode: "local",
+    configured: true,
+    implemented: true,
+    ready: true,
+    blockedReason: ""
+  },
+  {
+    provider: "cloudflareWorkersAi",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_text_not_implemented"
+  },
+  {
+    provider: "groq",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_text_not_implemented"
+  },
+  {
+    provider: "customOpenAiCompatible",
+    settings: { cloudApiKey: "secret-key" },
+    mode: "cloud",
+    configured: true,
+    implemented: false,
+    ready: false,
+    blockedReason: "cloud_text_not_implemented"
+  }
+];
+
+for (const expected of textProviderCases) {
+  test(`getProcessingProviderStatus reports text provider state for ${expected.provider}`, () => {
+    const status = getProcessingProviderStatus({
+      asrProvider: "localWhisper",
+      whisperCliPath: "C:/tools/whisper-cli.exe",
+      whisperModelPath: "C:/models/ggml-base.bin",
+      llmProvider: expected.provider,
+      ...expected.settings
+    });
+
+    assert.equal(status.mode, expected.mode);
+    assert.equal(status.text.provider, expected.provider);
+    assert.equal(status.text.configured, expected.configured);
+    assert.equal(status.text.implemented, expected.implemented);
+    assert.equal(status.text.ready, expected.ready);
+    assert.equal(status.text.blockedReason, expected.blockedReason);
+    assert.equal(status.readyToRecord, true);
+  });
+}
+
+test("getProcessingProviderStatus reports configured cloud text as not implemented", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "groq",
+    cloudApiKey: "secret-key"
+  });
+
+  assert.equal(status.mode, "cloud");
+  assert.equal(status.text.configured, true);
+  assert.equal(status.text.implemented, false);
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "cloud_text_not_implemented");
 });
