@@ -110,7 +110,7 @@ function normalizeDictionary(value) {
 function omitEmptyProviderOverrides(settings, existing) {
   const next = { ...settings };
 
-  for (const key of ["asrProvider", "llmProvider"]) {
+  for (const key of ["asrProvider", "llmProvider", "cloudApiBaseUrl", "cloudApiKey"]) {
     if (Object.hasOwn(next, key) && isEmptyProviderValue(next[key]) && hasProviderValue(existing[key])) {
       delete next[key];
     }

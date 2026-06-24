@@ -183,3 +183,60 @@ test("saveSettings applies explicit valid provider changes", async () => {
     await rm(userDataPath, { recursive: true, force: true });
   }
 });
+
+test("saveSettings preserves persisted cloud credentials when partial save sends empty values", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "customOpenAiCompatible"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({
+      cloudApiBaseUrl: "",
+      cloudApiKey: null
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(saved.cloudApiKey, "secret-key");
+    assert.equal(persisted.cloudApiBaseUrl, "https://api.example.test/v1");
+    assert.equal(persisted.cloudApiKey, "secret-key");
+    assert.equal("providerStatus" in persisted, false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("saveSettings applies explicit cloud credential changes", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      asrProvider: "customOpenAiCompatible",
+      cloudApiBaseUrl: "https://api.example.test/v1",
+      cloudApiKey: "secret-key",
+      llmProvider: "customOpenAiCompatible"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath);
+    const saved = await store.saveSettings({
+      cloudApiBaseUrl: "https://api.updated.test/v1",
+      cloudApiKey: "updated-key"
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(saved.cloudApiBaseUrl, "https://api.updated.test/v1");
+    assert.equal(saved.cloudApiKey, "updated-key");
+    assert.equal(persisted.cloudApiBaseUrl, "https://api.updated.test/v1");
+    assert.equal(persisted.cloudApiKey, "updated-key");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
