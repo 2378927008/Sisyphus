@@ -8,6 +8,7 @@ import { validateWhisperSetup } from "./whisper-diagnostics.js";
 import { detectWhisperAssets } from "./whisper-assets.js";
 import { configureMediaPermissions } from "./media-permissions.js";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
+import { getProcessingProviderStatus } from "./provider-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,6 +95,10 @@ function wireIpc() {
   ipcMain.handle("diagnostics:whisper", async () => {
     const settings = await settingsStore.getSettings();
     return validateWhisperSetup(settings);
+  });
+  ipcMain.handle("providers:status", async () => {
+    const settings = await settingsStore.getSettings();
+    return getProcessingProviderStatus(settings);
   });
   ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(process.cwd()));
   ipcMain.handle("dictation:wav", async (_event, wavBytes) => {

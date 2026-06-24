@@ -1,4 +1,5 @@
 import { describeMicrophoneError } from "../shared/media-errors.js";
+import { getRecordReadiness } from "./record-readiness.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -14,6 +15,7 @@ const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
 const recordLabel = document.querySelector("#recordLabel");
 const statusText = document.querySelector("#statusText");
+const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
 const historyList = document.querySelector("#historyList");
 const refreshHistory = document.querySelector("#refreshHistory");
@@ -31,6 +33,7 @@ const localModelInstallCommand = document.querySelector("#localModelInstallComma
 let recorder = null;
 let isRecording = false;
 let currentSettings = null;
+let currentProviderStatus = null;
 let currentLanguage = defaultInterfaceLanguage;
 
 init();
@@ -43,6 +46,7 @@ async function init() {
   setReadyStatus();
   await renderHistory();
   await renderLocalModelStatus();
+  await refreshProviderStatus();
 
   recordButton.addEventListener("click", toggleRecording);
   openSettings.addEventListener("click", () => setSettingsDrawer(true));
@@ -172,6 +176,35 @@ async function renderLocalModelStatus() {
   localModelInstallCommand.textContent = status.setupCommand || "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1";
 }
 
+async function refreshProviderStatus() {
+  if (!window.localFlow.getProviderStatus) return;
+  currentProviderStatus = await window.localFlow.getProviderStatus();
+  renderProviderStatus();
+  applyRecordReadiness();
+}
+
+function renderProviderStatus() {
+  if (!providerStatusText || !currentProviderStatus) return;
+  providerStatusText.textContent = t("status.providerMode", {
+    mode: t(`provider.mode.${currentProviderStatus.mode}`),
+    asr: currentProviderStatus.asr.label
+  });
+}
+
+function applyRecordReadiness() {
+  const readiness = getRecordReadiness({
+    hasMediaDevicesApi: Boolean(navigator.mediaDevices?.getUserMedia),
+    providerStatus: currentProviderStatus || currentSettings?.providerStatus
+  });
+
+  recordButton.disabled = !readiness.ready && !isRecording;
+  recordButton.title = readiness.ready ? "" : t(`record.disabled.${readiness.reason}`);
+
+  if (!readiness.ready && !isRecording) {
+    setStatus(t(`record.disabled.${readiness.reason}`));
+  }
+}
+
 function showLocalModelInstallCommand() {
   localModelInstallCommand.hidden = false;
   setStatus(t("model.installCommandShown"));
@@ -261,6 +294,7 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
   if (updateStatus) {
     setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
   }
+  await refreshProviderStatus();
   await renderLocalModelStatus();
 }
 
@@ -367,6 +401,7 @@ function updateRecordLabel() {
 function setReadyStatus() {
   const hotkey = currentSettings?.hotkey || form.hotkey?.value || "CommandOrControl+Alt+Space";
   setStatus(t("status.ready", { hotkey: formatHotkey(hotkey) }));
+  applyRecordReadiness();
 }
 
 function renderChecks(checks) {

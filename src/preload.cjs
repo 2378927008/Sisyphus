@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("localFlow", {
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   listHistory: () => ipcRenderer.invoke("history:list"),
   checkWhisper: () => ipcRenderer.invoke("diagnostics:whisper"),
+  getProviderStatus: () => ipcRenderer.invoke("providers:status"),
   getLocalModelStatus: () => ipcRenderer.invoke("llm:status"),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
   onShortcutToggle: (callback) => {
