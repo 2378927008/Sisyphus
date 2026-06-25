@@ -26,6 +26,7 @@ let settings = mergeSettings({
   whisperModelPath: "C:\\smoke\\ggml-base.bin"
 });
 let settingsAtDictation = null;
+const settingsSaveCalls = [];
 
 const missingSetupStatus = {
   assets: {
@@ -52,6 +53,7 @@ const setupStartResolvers = new Map();
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
   ipcMain.handle("settings:save", (_event, next) => {
+    settingsSaveCalls.push(next);
     settings = mergeSettings(next, settings);
     return settings;
   });
@@ -90,7 +92,7 @@ function wireIpc() {
   ipcMain.handle("models:setup-start", (_event, type) => {
     setupIpcCalls.start.push(type);
     return new Promise((resolve) => {
-      setupStartResolvers.set(type, () => resolve({
+      setupStartResolvers.set(type, (result) => resolve(result || {
         type,
         status: "complete",
         output: [`${type} setup completed`],
@@ -188,6 +190,40 @@ app.whenReady().then(async () => {
       })()
     `);
     await waitForState(window, (state) => state.copyAttempts === 0, 5000);
+    const failedSetupRefreshCalls = setupIpcCalls.refresh;
+    const failedSetupSaveCalls = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript("document.querySelector('#installLlm').click()");
+    await waitForState(window, () => setupIpcCalls.start.includes("llm"), 5000);
+    setupStartResolvers.get("llm")?.({
+      type: "llm",
+      status: "failed",
+      output: ["model downloaded"],
+      error: "Qwen setup finished but required assets were not found.",
+      assets: {
+        whisper: {},
+        llm: {
+          ready: false,
+          runtimeReady: false,
+          modelReady: true,
+          modelPath: "C:\\partial\\Qwen3-4B-Q4_K_M.gguf"
+        }
+      }
+    });
+    await waitForState(
+      window,
+      (state) => state.statusText.includes("Qwen setup finished but required assets were not found."),
+      5000
+    );
+    if (setupIpcCalls.refresh !== failedSetupRefreshCalls) {
+      throw new Error("Failed setup should not call persistent setup refresh.");
+    }
+    if (settingsSaveCalls.length !== failedSetupSaveCalls) {
+      throw new Error("Failed setup should not save detected setup paths.");
+    }
+    if (settings.embeddedLlmModelPath) {
+      throw new Error(`Failed setup persisted partial LLM model path: ${settings.embeddedLlmModelPath}`);
+    }
+
     await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
     await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
     await waitForState(

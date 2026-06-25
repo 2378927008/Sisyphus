@@ -296,10 +296,16 @@ async function runModelSetup(type) {
 
   try {
     const result = await window.localFlow.startModelSetup(type);
-    currentSetupStatus = window.localFlow.refreshModelSetupStatus
-      ? await window.localFlow.refreshModelSetupStatus()
-      : { ...currentSetupStatus, assets: result.assets };
-    await saveDetectedSetupPaths();
+    if (result.status === "complete") {
+      currentSetupStatus = window.localFlow.refreshModelSetupStatus
+        ? await window.localFlow.refreshModelSetupStatus()
+        : { ...currentSetupStatus, assets: result.assets };
+      await saveDetectedSetupPaths();
+    } else {
+      currentSetupStatus = window.localFlow.getModelSetupStatus
+        ? await window.localFlow.getModelSetupStatus()
+        : { ...currentSetupStatus, assets: result.assets };
+    }
     renderSetupChecklist();
     await renderLocalModelStatus();
     await refreshProviderStatus();

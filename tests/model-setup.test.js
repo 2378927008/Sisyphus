@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import {
   createModelSetupService,
-  getModelSetupScript
+  getModelSetupScript,
+  killSetupProcessTree
 } from "../src/main/model-setup.js";
 
 test("getModelSetupScript returns only known local setup scripts", () => {
@@ -21,6 +22,46 @@ test("getModelSetupScript returns only known local setup scripts", () => {
   });
   assert.equal(getModelSetupScript("bad", rootPath), null);
   assert.equal(getModelSetupScript("toString", rootPath), null);
+});
+
+test("killSetupProcessTree uses taskkill for Windows child process trees", () => {
+  const spawned = [];
+  let childKillCalls = 0;
+
+  killSetupProcessTree({
+    pid: 4321,
+    kill: () => {
+      childKillCalls += 1;
+    }
+  }, (file, args, options) => {
+    spawned.push({ file, args, options });
+    return fakeTaskkillProcess();
+  }, "win32");
+
+  assert.deepEqual(spawned, [{
+    file: "taskkill.exe",
+    args: ["/PID", "4321", "/T", "/F"],
+    options: { windowsHide: true, stdio: "ignore" }
+  }]);
+  assert.equal(childKillCalls, 0);
+});
+
+test("killSetupProcessTree falls back to child kill outside Windows process trees", () => {
+  let childKillCalls = 0;
+  const spawned = [];
+
+  killSetupProcessTree({
+    pid: 4321,
+    kill: () => {
+      childKillCalls += 1;
+    }
+  }, (...args) => {
+    spawned.push(args);
+    return fakeTaskkillProcess();
+  }, "linux");
+
+  assert.equal(childKillCalls, 1);
+  assert.deepEqual(spawned, []);
 });
 
 test("createModelSetupService starts PowerShell with a known setup script only", async () => {
@@ -325,16 +366,17 @@ test("createModelSetupService snapshots shallow object fields", async () => {
 
 test("createModelSetupService times out a stuck setup process and allows retry", async () => {
   let attempts = 0;
-  let killCalls = 0;
+  const killedPids = [];
   const service = createModelSetupService({
     rootPath: "C:/app",
     setupTimeoutMs: 5,
+    killProcessTree: (child) => {
+      killedPids.push(child.pid);
+    },
     spawnImpl: () => {
       attempts += 1;
       if (attempts === 1) {
-        return fakeStuckChildProcess(() => {
-          killCalls += 1;
-        });
+        return fakeStuckChildProcess();
       }
       return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
     },
@@ -348,7 +390,7 @@ test("createModelSetupService times out a stuck setup process and allows retry",
 
   assert.equal(failed.status, "failed");
   assert.match(failed.error, /timed out/);
-  assert.equal(killCalls, 1);
+  assert.deepEqual(killedPids, [2468]);
   assert.equal(service.getStatus("whisper").status, "failed");
 
   const retry = await service.start("whisper");
@@ -465,16 +507,25 @@ function fakePendingChildProcess(registerClose) {
   return child;
 }
 
-function fakeStuckChildProcess(onKill) {
+function fakeStuckChildProcess() {
   const child = {
+    pid: 2468,
     stdout: fakeStream([]),
     stderr: fakeStream([]),
     on() {
       return child;
     },
     kill() {
-      onKill();
       return true;
+    }
+  };
+  return child;
+}
+
+function fakeTaskkillProcess() {
+  const child = {
+    on() {
+      return child;
     }
   };
   return child;

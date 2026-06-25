@@ -35,6 +35,7 @@ export function createModelSetupService({
   spawnImpl,
   spawn,
   setupTimeoutMs = defaultSetupTimeoutMs,
+  killProcessTree = killSetupProcessTree,
   refreshAssets = () => detectModelAssets(rootPath)
 }) {
   const spawnProcess = spawnImpl || spawn || nodeSpawn;
@@ -60,7 +61,7 @@ export function createModelSetupService({
 
     let result;
     try {
-      result = await runSetup(script, spawnProcess, setupTimeoutMs);
+      result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree);
     } catch (error) {
       return failSetup(type, {
         output: error.output || [],
@@ -158,7 +159,23 @@ function getSetupAssetError(type, assets) {
   return "Setup finished but required assets were not found.";
 }
 
-function runSetup(script, spawn, timeoutMs) {
+export function killSetupProcessTree(child, spawn = nodeSpawn, platform = process.platform) {
+  if (platform === "win32" && child?.pid) {
+    const killer = spawn(
+      "taskkill.exe",
+      ["/PID", String(child.pid), "/T", "/F"],
+      { windowsHide: true, stdio: "ignore" }
+    );
+    killer?.on?.("error", () => {
+      child?.kill?.();
+    });
+    return;
+  }
+
+  child?.kill?.();
+}
+
+function runSetup(script, spawn, timeoutMs, killProcessTree) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const output = [];
@@ -206,9 +223,9 @@ function runSetup(script, spawn, timeoutMs) {
         return;
       }
       try {
-        child?.kill?.();
+        killProcessTree(child);
       } catch {
-        // The process may already be gone; the timeout failure still clears state.
+        child?.kill?.();
       }
       fail(new Error(`Setup timed out after ${timeoutMs} ms.`));
     }
