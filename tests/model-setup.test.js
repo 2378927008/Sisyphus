@@ -88,6 +88,26 @@ test("createModelSetupService reports failed setup with captured output", async 
   assert.deepEqual(result.output, ["download started", "network failed"]);
 });
 
+test("createModelSetupService buffers split output chunks into complete lines", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakeOrderedChildProcess({
+      code: 0,
+      events: [
+        ["stdout", "down"],
+        ["stdout", "load\nnext\n"],
+        ["stderr", "err"],
+        ["stderr", "or\n"]
+      ]
+    }),
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const result = await service.start("whisper");
+
+  assert.deepEqual(result.output, ["download", "next", "error"]);
+});
+
 function fakeChildProcess({ code = 0, stdout = [], stderr = [] }) {
   const handlers = new Map();
   const child = {
@@ -104,6 +124,31 @@ function fakeChildProcess({ code = 0, stdout = [], stderr = [] }) {
   return child;
 }
 
+function fakeOrderedChildProcess({ code = 0, events = [] }) {
+  const handlers = new Map();
+  const streamHandlers = {
+    stdout: new Map(),
+    stderr: new Map()
+  };
+  const child = {
+    stdout: fakeControlledStream(streamHandlers.stdout),
+    stderr: fakeControlledStream(streamHandlers.stderr),
+    on(event, callback) {
+      handlers.set(event, callback);
+      if (event === "close") {
+        queueMicrotask(() => {
+          for (const [streamName, chunk] of events) {
+            streamHandlers[streamName].get("data")?.(Buffer.from(chunk));
+          }
+          callback(code);
+        });
+      }
+      return child;
+    }
+  };
+  return child;
+}
+
 function fakeStream(chunks) {
   return {
     on(event, callback) {
@@ -112,6 +157,15 @@ function fakeStream(chunks) {
           queueMicrotask(() => callback(Buffer.from(chunk)));
         }
       }
+      return this;
+    }
+  };
+}
+
+function fakeControlledStream(handlers) {
+  return {
+    on(event, callback) {
+      handlers.set(event, callback);
       return this;
     }
   };

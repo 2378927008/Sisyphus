@@ -110,25 +110,55 @@ async function detectModelAssets(rootPath) {
 function runSetup(script, spawn) {
   return new Promise((resolve, reject) => {
     const output = [];
+    const stdoutBuffer = createLineBuffer(output);
+    const stderrBuffer = createLineBuffer(output);
     const child = spawn(
       "powershell.exe",
       ["-ExecutionPolicy", "Bypass", "-File", script.scriptPath, ...script.args],
       { windowsHide: true }
     );
 
-    child.stdout?.on("data", (chunk) => pushOutput(output, chunk));
-    child.stderr?.on("data", (chunk) => pushOutput(output, chunk));
+    child.stdout?.on("data", (chunk) => stdoutBuffer.push(chunk));
+    child.stderr?.on("data", (chunk) => stderrBuffer.push(chunk));
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code, output }));
+    child.on("close", (code) => {
+      stdoutBuffer.flush();
+      stderrBuffer.flush();
+      resolve({ code, output });
+    });
   });
 }
 
-function pushOutput(output, chunk) {
-  const lines = String(chunk)
-    .split(/\r?\n/)
+function createLineBuffer(output) {
+  let pending = "";
+
+  function push(chunk) {
+    pending += String(chunk);
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() || "";
+    pushCompletedLines(output, lines);
+  }
+
+  function flush() {
+    if (!pending) {
+      return;
+    }
+    pushCompletedLines(output, [pending]);
+    pending = "";
+  }
+
+  return { push, flush };
+}
+
+function pushCompletedLines(output, lines) {
+  const completedLines = lines
     .map((line) => line.trim())
     .filter(Boolean);
-  output.push(...lines);
+  output.push(...completedLines);
+  trimOutput(output);
+}
+
+function trimOutput(output) {
   while (output.length > 40) {
     output.shift();
   }
