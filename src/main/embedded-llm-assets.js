@@ -46,6 +46,30 @@ export function buildEmbeddedLlmInstallCommand() {
   return "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1";
 }
 
+export function selectLlamaReleaseAsset(assets = []) {
+  const candidates = assets
+    .filter((asset) => isWindowsRuntimeAsset(asset?.name))
+    .sort((left, right) => scoreRuntimeAsset(right.name) - scoreRuntimeAsset(left.name));
+
+  return candidates[0] || null;
+}
+
+function isWindowsRuntimeAsset(name = "") {
+  const normalized = String(name).toLowerCase();
+  return normalized.startsWith("llama-") &&
+    normalized.includes("bin-win") &&
+    normalized.includes("x64") &&
+    normalized.endsWith(".zip") &&
+    !/(cudart|cuda|vulkan|kompute|opencl|sycl)/.test(normalized);
+}
+
+function scoreRuntimeAsset(name = "") {
+  const normalized = String(name).toLowerCase();
+  if (normalized.includes("avx2")) return 30;
+  if (normalized.includes("avx")) return 20;
+  return 10;
+}
+
 async function isFile(filePath, stat) {
   try {
     const file = await stat(filePath);

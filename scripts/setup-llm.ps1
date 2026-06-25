@@ -15,6 +15,7 @@ $binDir = Join-Path $InstallDir "bin"
 $modelDir = Join-Path $InstallDir "models"
 $downloadDir = Join-Path $InstallDir "downloads"
 $downloadScript = Join-Path $repoRoot "scripts\download-file.mjs"
+$assetSelector = Join-Path $repoRoot "scripts\select-llama-release-asset.mjs"
 $releaseApi = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 $modelFile = "Qwen3-4B-Q4_K_M.gguf"
 $modelUrl = "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/$modelFile"
@@ -30,13 +31,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $release = $releaseJson | ConvertFrom-Json
-$asset = $release.assets |
-  Where-Object { $_.name -match "win" -and $_.name -match "x64" -and $_.name -match "\.zip$" } |
-  Select-Object -First 1
-
-if (-not $asset) {
-  throw "Could not find a Windows x64 llama.cpp zip asset in the latest release."
+$assetsJson = $release.assets | ConvertTo-Json -Depth 10 -Compress
+$assetJson = $assetsJson | node $assetSelector
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($assetJson)) {
+  throw "Could not find a Windows x64 llama.cpp runtime zip asset in the latest release."
 }
+$asset = $assetJson | ConvertFrom-Json
 
 $zipPath = Join-Path $downloadDir $asset.name
 if (-not (Test-Path -LiteralPath $zipPath)) {

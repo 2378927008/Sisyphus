@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detectEmbeddedLlmAssets, embeddedLlmRecommendation, buildEmbeddedLlmInstallCommand } from "../src/main/embedded-llm-assets.js";
+import {
+  detectEmbeddedLlmAssets,
+  embeddedLlmRecommendation,
+  buildEmbeddedLlmInstallCommand,
+  selectLlamaReleaseAsset
+} from "../src/main/embedded-llm-assets.js";
 
 test("embeddedLlmRecommendation describes the bundled default model", () => {
   assert.equal(embeddedLlmRecommendation.modelId, "Qwen/Qwen3-4B-GGUF");
@@ -49,4 +54,15 @@ test("buildEmbeddedLlmInstallCommand points to the setup script", () => {
     buildEmbeddedLlmInstallCommand(),
     "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1"
   );
+});
+
+test("selectLlamaReleaseAsset skips cudart packages and prefers Windows AVX2 runtime", () => {
+  const asset = selectLlamaReleaseAsset([
+    { name: "cudart-llama-bin-win-cuda-12.4-x64.zip", browser_download_url: "https://example.com/cudart.zip" },
+    { name: "llama-b1234-bin-win-cuda-cu12.4-x64.zip", browser_download_url: "https://example.com/cuda.zip" },
+    { name: "llama-b1234-bin-win-x64.zip", browser_download_url: "https://example.com/x64.zip" },
+    { name: "llama-b1234-bin-win-avx2-x64.zip", browser_download_url: "https://example.com/avx2.zip" }
+  ]);
+
+  assert.equal(asset.name, "llama-b1234-bin-win-avx2-x64.zip");
 });

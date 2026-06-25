@@ -54,10 +54,82 @@ export async function transcribeWithWhisper(wavBuffer, settings, deps = {}) {
       throw new Error("Whisper returned an empty transcript.");
     }
 
+    if (shouldRetryChineseRecognition(settings, transcript)) {
+      const retryArgs = buildWhisperArgs({
+        modelPath,
+        wavPath,
+        language: "zh"
+      });
+
+      try {
+        const retryResult = await runProcess(cliPath, retryArgs, deps);
+        const retryTranscript = parseWhisperOutput(`${retryResult.stdout}\n${retryResult.stderr}`);
+        if (isBetterChineseTranscript(retryTranscript, transcript)) {
+          return retryTranscript;
+        }
+      } catch {
+        // Keep the automatic transcript if the Chinese retry cannot complete.
+      }
+    }
+
     return transcript;
   } finally {
     await rm(wavPath, { force: true });
   }
+}
+
+function shouldRetryChineseRecognition(settings = {}, transcript = "") {
+  if ((settings.whisperLanguage || "auto") !== "auto") {
+    return false;
+  }
+  if (!prefersChineseRecognition(settings)) {
+    return false;
+  }
+  return hasLatinLetters(transcript);
+}
+
+function prefersChineseRecognition(settings = {}) {
+  return isChineseLanguageCode(settings.interfaceLanguage) || isChineseLanguageCode(settings.outputLanguage);
+}
+
+function isChineseLanguageCode(value) {
+  return String(value || "").startsWith("zh");
+}
+
+function containsChinese(value) {
+  return /[\u4e00-\u9fff]/.test(String(value || ""));
+}
+
+function hasLatinLetters(value) {
+  return latinLetterCount(value) > 0;
+}
+
+function isBetterChineseTranscript(candidate, original) {
+  const candidateChinese = chineseCharacterCount(candidate);
+  const originalChinese = chineseCharacterCount(original);
+
+  if (candidateChinese < 2) {
+    return false;
+  }
+
+  return candidateChinese > originalChinese &&
+    chineseDensity(candidate) > chineseDensity(original);
+}
+
+function chineseCharacterCount(value) {
+  return (String(value || "").match(/[\u4e00-\u9fff]/g) || []).length;
+}
+
+function latinLetterCount(value) {
+  return (String(value || "").match(/[A-Za-z]/g) || []).length;
+}
+
+function chineseDensity(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  if (!text.length) {
+    return 0;
+  }
+  return chineseCharacterCount(text) / text.length;
 }
 
 function runProcess(file, args, deps = {}) {

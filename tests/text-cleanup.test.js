@@ -40,6 +40,19 @@ test("buildOutputPrompt keeps source language when output language is automatic"
   assert.doesNotMatch(prompt, /Translate/);
 });
 
+test("buildOutputPrompt does not translate legacy translate mode when output language is automatic", () => {
+  const prompt = buildOutputPrompt({
+    mode: "translate",
+    outputLanguage: "auto",
+    transcript: "这是一个测试",
+    dictionary: []
+  });
+
+  assert.match(prompt, /same language as the transcript/);
+  assert.doesNotMatch(prompt, /natural English/);
+  assert.doesNotMatch(prompt, /Translate/);
+});
+
 test("buildOutputPrompt targets Simplified Chinese output", () => {
   const prompt = buildOutputPrompt({
     mode: "polish",
