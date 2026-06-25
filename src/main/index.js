@@ -10,6 +10,7 @@ import { configureMediaPermissions } from "./media-permissions.js";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { getProcessingProviderStatus } from "./provider-registry.js";
 import { createModelSetupService } from "./model-setup.js";
+import { wireModelSetupIpc } from "./model-setup-ipc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -86,33 +87,6 @@ function sendStatus(payload) {
   }
 }
 
-async function refreshDetectedModelPaths() {
-  const status = await modelSetupService.refresh();
-  await saveDetectedModelPaths(status.assets);
-  return status;
-}
-
-async function saveDetectedModelPaths(assets = {}) {
-  const next = {};
-
-  if (assets.whisper?.whisperCliPath) {
-    next.whisperCliPath = assets.whisper.whisperCliPath;
-  }
-  if (assets.whisper?.whisperModelPath) {
-    next.whisperModelPath = assets.whisper.whisperModelPath;
-  }
-  if (assets.llm?.cliPath) {
-    next.embeddedLlmCliPath = assets.llm.cliPath;
-  }
-  if (assets.llm?.modelPath) {
-    next.embeddedLlmModelPath = assets.llm.modelPath;
-  }
-
-  if (Object.keys(next).length) {
-    await settingsStore.saveSettings(next, { includeSecrets: true });
-  }
-}
-
 function wireIpc() {
   ipcMain.handle("settings:get", () => settingsStore.getSettings());
   ipcMain.handle("settings:save", async (_event, settings) => {
@@ -130,14 +104,10 @@ function wireIpc() {
     return getProcessingProviderStatus(settings);
   });
   ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(process.cwd()));
-  ipcMain.handle("models:setup-status", () => modelSetupService.refresh());
-  ipcMain.handle("models:setup-refresh", () => refreshDetectedModelPaths());
-  ipcMain.handle("models:setup-start", async (_event, type) => {
-    const result = await modelSetupService.start(type);
-    if (result.assets) {
-      await saveDetectedModelPaths(result.assets);
-    }
-    return result;
+  wireModelSetupIpc({
+    ipcMain,
+    modelSetupService,
+    settingsStore
   });
   ipcMain.handle("dictation:wav", async (_event, wavBytes) => {
     const buffer = Buffer.from(wavBytes);

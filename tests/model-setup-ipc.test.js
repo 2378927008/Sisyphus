@@ -1,0 +1,210 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  collectDetectedModelPaths,
+  refreshDetectedModelPaths,
+  wireModelSetupIpc
+} from "../src/main/model-setup-ipc.js";
+
+test("collectDetectedModelPaths maps only detected local model paths", () => {
+  assert.deepEqual(collectDetectedModelPaths({
+    whisper: {
+      whisperCliPath: "C:/app/vendor/whisper/whisper-cli.exe",
+      whisperModelPath: "C:/app/vendor/whisper/ggml-base.bin"
+    },
+    llm: {
+      cliPath: "C:/app/vendor/llm/llama-cli.exe",
+      modelPath: "C:/app/vendor/llm/Qwen3-4B-Q4_K_M.gguf",
+      serverPath: "C:/app/vendor/llm/llama-server.exe"
+    }
+  }), {
+    whisperCliPath: "C:/app/vendor/whisper/whisper-cli.exe",
+    whisperModelPath: "C:/app/vendor/whisper/ggml-base.bin",
+    embeddedLlmCliPath: "C:/app/vendor/llm/llama-cli.exe",
+    embeddedLlmModelPath: "C:/app/vendor/llm/Qwen3-4B-Q4_K_M.gguf"
+  });
+
+  assert.deepEqual(collectDetectedModelPaths({
+    whisper: {},
+    llm: {
+      cliPath: "",
+      modelPath: ""
+    }
+  }), {});
+});
+
+test("refreshDetectedModelPaths saves detected paths without requesting secret-bearing return values", async () => {
+  const saved = [];
+  const status = {
+    assets: {
+      whisper: {
+        whisperCliPath: "C:/whisper/whisper-cli.exe",
+        whisperModelPath: "C:/whisper/ggml-base.bin"
+      },
+      llm: {
+        cliPath: "C:/llm/llama-cli.exe",
+        modelPath: "C:/llm/Qwen3-4B-Q4_K_M.gguf"
+      }
+    },
+    setups: {}
+  };
+  const result = await refreshDetectedModelPaths({
+    modelSetupService: {
+      refresh: async () => status
+    },
+    settingsStore: {
+      saveSettings: async (...args) => {
+        saved.push(args);
+      }
+    }
+  });
+
+  assert.equal(result, status);
+  assert.deepEqual(saved, [[{
+    whisperCliPath: "C:/whisper/whisper-cli.exe",
+    whisperModelPath: "C:/whisper/ggml-base.bin",
+    embeddedLlmCliPath: "C:/llm/llama-cli.exe",
+    embeddedLlmModelPath: "C:/llm/Qwen3-4B-Q4_K_M.gguf"
+  }]]);
+});
+
+test("refreshDetectedModelPaths does not save when no paths are detected", async () => {
+  let saveCalls = 0;
+  const status = {
+    assets: {
+      whisper: {},
+      llm: {
+        ready: false
+      }
+    },
+    setups: {}
+  };
+
+  const result = await refreshDetectedModelPaths({
+    modelSetupService: {
+      refresh: async () => status
+    },
+    settingsStore: {
+      saveSettings: async () => {
+        saveCalls += 1;
+      }
+    }
+  });
+
+  assert.equal(result, status);
+  assert.equal(saveCalls, 0);
+});
+
+test("model setup start IPC returns failed setup result without persisting stale assets", async () => {
+  const handlers = new Map();
+  let saveCalls = 0;
+  const failedResult = {
+    type: "whisper",
+    status: "failed",
+    error: "Setup exited with code 7.",
+    output: ["download failed"],
+    assets: {
+      whisper: {
+        whisperCliPath: "C:/old/whisper-cli.exe",
+        whisperModelPath: "C:/old/ggml-base.bin"
+      },
+      llm: {}
+    }
+  };
+
+  wireModelSetupIpc({
+    ipcMain: fakeIpcMain(handlers),
+    modelSetupService: {
+      refresh: async () => ({ assets: {}, setups: {} }),
+      start: async () => failedResult
+    },
+    settingsStore: {
+      saveSettings: async () => {
+        saveCalls += 1;
+        throw new Error("settings write should not run");
+      }
+    }
+  });
+
+  const result = await handlers.get("models:setup-start")(null, "whisper");
+
+  assert.equal(result, failedResult);
+  assert.equal(saveCalls, 0);
+});
+
+test("model setup start IPC persists detected paths only after complete setup", async () => {
+  const handlers = new Map();
+  const saved = [];
+  const completeResult = {
+    type: "llm",
+    status: "complete",
+    output: ["setup complete"],
+    assets: {
+      whisper: {},
+      llm: {
+        cliPath: "C:/llm/llama-cli.exe",
+        modelPath: "C:/llm/Qwen3-4B-Q4_K_M.gguf"
+      }
+    }
+  };
+
+  wireModelSetupIpc({
+    ipcMain: fakeIpcMain(handlers),
+    modelSetupService: {
+      refresh: async () => ({ assets: {}, setups: {} }),
+      start: async (_type) => completeResult
+    },
+    settingsStore: {
+      saveSettings: async (...args) => {
+        saved.push(args);
+      }
+    }
+  });
+
+  const result = await handlers.get("models:setup-start")(null, "llm");
+
+  assert.equal(result, completeResult);
+  assert.deepEqual(saved, [[{
+    embeddedLlmCliPath: "C:/llm/llama-cli.exe",
+    embeddedLlmModelPath: "C:/llm/Qwen3-4B-Q4_K_M.gguf"
+  }]]);
+});
+
+test("model setup status IPC only refreshes setup status without saving settings", async () => {
+  const handlers = new Map();
+  let saveCalls = 0;
+  const status = {
+    assets: {
+      whisper: {
+        whisperCliPath: "C:/whisper/whisper-cli.exe"
+      }
+    },
+    setups: {}
+  };
+
+  wireModelSetupIpc({
+    ipcMain: fakeIpcMain(handlers),
+    modelSetupService: {
+      refresh: async () => status,
+      start: async () => ({ status: "complete" })
+    },
+    settingsStore: {
+      saveSettings: async () => {
+        saveCalls += 1;
+      }
+    }
+  });
+
+  const result = await handlers.get("models:setup-status")();
+
+  assert.equal(result, status);
+  assert.equal(saveCalls, 0);
+});
+
+function fakeIpcMain(handlers) {
+  return {
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    }
+  };
+}

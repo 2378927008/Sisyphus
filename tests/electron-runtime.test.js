@@ -157,20 +157,14 @@ test("preload exposes model setup IPC without raw ipcRenderer access", async () 
   ]);
 });
 
-test("main process wires model setup IPC and persists detected local paths", async () => {
+test("main process delegates model setup IPC wiring to the setup IPC module", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
   assert.match(mainSource, /import \{ createModelSetupService \} from "\.\/model-setup\.js";/);
+  assert.match(mainSource, /import \{ wireModelSetupIpc \} from "\.\/model-setup-ipc\.js";/);
   assert.match(mainSource, /let modelSetupService;/);
   assert.match(mainSource, /modelSetupService = createModelSetupService\(\{/);
-  assert.match(mainSource, /ipcMain\.handle\("models:setup-status"/);
-  assert.match(mainSource, /ipcMain\.handle\("models:setup-refresh"/);
-  assert.match(mainSource, /ipcMain\.handle\("models:setup-start"/);
-  assert.match(mainSource, /modelSetupService\.start\(type\)/);
-  assert.match(mainSource, /refreshDetectedModelPaths\(\)/);
-  assert.match(mainSource, /whisperCliPath/);
-  assert.match(mainSource, /whisperModelPath/);
-  assert.match(mainSource, /embeddedLlmCliPath/);
-  assert.match(mainSource, /embeddedLlmModelPath/);
-  assert.match(mainSource, /saveSettings\(next, \{ includeSecrets: true \}\)/);
+  assert.match(mainSource, /wireModelSetupIpc\(\{/);
+  assert.match(mainSource, /modelSetupService,/);
+  assert.match(mainSource, /settingsStore/);
 });
