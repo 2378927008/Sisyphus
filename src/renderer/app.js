@@ -549,12 +549,25 @@ async function stopRecording() {
     recorder = null;
 
     const entry = await window.localFlow.processWav(wav);
-    resultText.dataset.emptyResult = "false";
-    resultText.textContent = entry.text;
+    renderDictationResult(entry);
     await renderHistory();
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function renderDictationResult(entry) {
+  if (entry?.status === "failed") {
+    resultText.dataset.emptyResult = "true";
+    resultText.textContent = t("result.outputFailed");
+    setStatus(t("status.outputFailed", {
+      message: entry.processingError || "Unknown text model error."
+    }));
+    return;
+  }
+
+  resultText.dataset.emptyResult = "false";
+  resultText.textContent = entry.text;
 }
 
 async function saveSettings(event) {

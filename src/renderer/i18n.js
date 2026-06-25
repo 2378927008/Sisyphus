@@ -88,6 +88,7 @@ const en = {
   "status.polishing": "Cleaning up dictation...",
   "status.pasting": "Pasting into the active app...",
   "status.done": "Dictation complete.",
+  "status.outputFailed": "Target language output failed: {message}",
   "status.checkingWhisper": "Checking whisper.cpp setup...",
   "status.whisperReady": "Whisper setup is ready.",
   "status.whisperNeedsAttention": "Whisper setup still needs attention.",
@@ -95,6 +96,7 @@ const en = {
   "status.checkingMicrophone": "Checking microphone access...",
   "status.microphoneReady": "Microphone access is ready.",
   "empty.result": "No transcript yet.",
+  "result.outputFailed": "Target language output failed. Check the local text model, then try again.",
   "empty.history": "No history yet.",
   "diagnostic.microphone": "Microphone",
   "diagnostic.requestingPermission": "Requesting microphone permission...",
@@ -134,6 +136,8 @@ const en = {
 
 const zhHans = {
   ...en,
+  "status.outputFailed": "目标语言输出失败：{message}",
+  "result.outputFailed": "目标语言输出失败。请检查本地文本模型后重试。",
   "app.title": "Local Flow 本地语音输入",
   "app.eyebrow": "本地优先语音输入",
   "record.start": "开始录音",

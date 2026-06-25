@@ -26,6 +26,11 @@ let settings = mergeSettings({
   whisperModelPath: "C:\\smoke\\ggml-base.bin"
 });
 let settingsAtDictation = null;
+let dictationResult = {
+  createdAt: new Date().toISOString(),
+  status: "complete",
+  text: "smoke transcript"
+};
 const settingsSaveCalls = [];
 
 const missingSetupStatus = {
@@ -103,10 +108,7 @@ function wireIpc() {
   });
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
-    return {
-      createdAt: new Date().toISOString(),
-      text: "smoke transcript"
-    };
+    return dictationResult;
   });
 }
 
@@ -324,6 +326,41 @@ app.whenReady().then(async () => {
       5000
     );
 
+    dictationResult = {
+      createdAt: new Date().toISOString(),
+      status: "failed",
+      text: "",
+      transcript: "hello world",
+      processingError: "Local language model exited with code 3221225477."
+    };
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const interfaceLanguage = document.querySelector('#interfaceLanguage');
+        interfaceLanguage.value = 'en';
+        interfaceLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(window, (state) => state.interfaceLanguage === "en", 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    await waitForState(window, (state) => state.isRecording, 10000);
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    const failedTargetOutputState = await waitForState(
+      window,
+      (state) => (
+        !state.isRecording &&
+        state.resultText.includes("Target language output failed") &&
+        state.statusText.includes("Local language model exited with code 3221225477")
+      ),
+      10000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(window, (state) => state.copyAttempts === 0, 5000);
+
     if (settingsAtDictation?.outputLanguage !== "zh-Hans") {
       throw new Error(`Output language was not applied before dictation. Saw ${settingsAtDictation?.outputLanguage || "unset"}.`);
     }
@@ -339,6 +376,7 @@ app.whenReady().then(async () => {
       englishLanguageState,
       recordingState,
       completedState,
+      failedTargetOutputState,
       settingsAtDictation,
       rendererMessages: rendererMessages.filter((item) => item.level >= 2)
     }, null, 2));

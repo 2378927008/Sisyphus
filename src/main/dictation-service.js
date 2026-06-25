@@ -1,4 +1,5 @@
 import { detectLikelyLanguage } from "../shared/language-detection.js";
+import { isTargetOutputLanguage } from "../shared/languages.js";
 import { transcribeWithWhisper } from "./local-asr.js";
 import { polishTranscript } from "./local-llm.js";
 import { pasteText } from "./paste.js";
@@ -46,7 +47,10 @@ export class DictationService {
       assertTextProviderCanProcess(providers);
       text = await this.polish(transcript, settings);
     } catch (error) {
-      status = "partial";
+      status = isTargetOutputLanguage(settings.outputLanguage) ? "failed" : "partial";
+      if (status === "failed") {
+        text = "";
+      }
       processingError = error instanceof Error ? error.message : String(error);
     }
 
@@ -71,11 +75,23 @@ export class DictationService {
     }
 
     this.notifyStatus({
-      phase: status === "complete" ? "done" : "warning",
-      message: status === "complete" ? "Dictation complete." : `Raw transcript saved. ${processingError}`
+      phase: getFinalPhase(status),
+      message: getFinalMessage(status, processingError)
     });
     return entry;
   }
+}
+
+function getFinalPhase(status) {
+  if (status === "complete") return "done";
+  if (status === "failed") return "error";
+  return "warning";
+}
+
+function getFinalMessage(status, processingError) {
+  if (status === "complete") return "Dictation complete.";
+  if (status === "failed") return `Target language output failed. ${processingError}`;
+  return `Raw transcript saved. ${processingError}`;
 }
 
 function assertTextProviderCanProcess(providers = {}) {
