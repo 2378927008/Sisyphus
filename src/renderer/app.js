@@ -203,7 +203,9 @@ function renderProviderStatus() {
   if (!providerStatusText || !currentProviderStatus) return;
   providerStatusText.textContent = t("status.providerMode", {
     mode: t(`provider.mode.${currentProviderStatus.mode}`),
-    asr: currentProviderStatus.asr.label
+    asr: [currentProviderStatus.asr?.label, currentProviderStatus.text?.label]
+      .filter(Boolean)
+      .join(" + ")
   });
 }
 

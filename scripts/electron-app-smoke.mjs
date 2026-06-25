@@ -170,7 +170,8 @@ app.whenReady().then(async () => {
         state.hasInstallLlmButton &&
         state.hasRefreshSetupButton &&
         state.hasCopyResultButton &&
-        state.providerStatusText.includes("Local whisper.cpp")
+        state.providerStatusText.includes("Local whisper.cpp") &&
+        state.providerStatusText.includes("Built-in local language model")
       ),
       5000
     );
@@ -256,8 +257,37 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "en" &&
         state.recordLabel === "Start recording" &&
-        state.providerStatusText === "Local mode · Local whisper.cpp"
+        state.providerStatusText === "Local mode · Local whisper.cpp + Built-in local language model"
       ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'mymemory';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    const myMemoryProviderState = await waitForState(
+      window,
+      (state) => (
+        state.llmProvider === "mymemory" &&
+        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'embedded';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.llmProvider === "embedded" && state.providerStatusText.includes("Built-in local language model"),
       5000
     );
     await window.webContents.executeJavaScript(`
@@ -374,6 +404,7 @@ app.whenReady().then(async () => {
       ok: true,
       initialState,
       englishLanguageState,
+      myMemoryProviderState,
       recordingState,
       completedState,
       failedTargetOutputState,
@@ -424,6 +455,7 @@ function readRendererState(window) {
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
+      llmProvider: document.querySelector('#llmProvider')?.value || '',
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
