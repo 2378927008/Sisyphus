@@ -20,6 +20,7 @@ test("getModelSetupScript returns only known local setup scripts", () => {
     args: []
   });
   assert.equal(getModelSetupScript("bad", rootPath), null);
+  assert.equal(getModelSetupScript("toString", rootPath), null);
 });
 
 test("createModelSetupService starts PowerShell with a known setup script only", async () => {
@@ -47,6 +48,24 @@ test("createModelSetupService starts PowerShell with a known setup script only",
     "base"
   ]);
   assert.equal(spawned[0].options.windowsHide, true);
+});
+
+test("createModelSetupService rejects inherited setup type names without spawning", async () => {
+  let spawnCalls = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => {
+      spawnCalls += 1;
+      return fakeChildProcess({ code: 0 });
+    },
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  await assert.rejects(
+    service.start("toString"),
+    /Unknown setup type: toString/
+  );
+  assert.equal(spawnCalls, 0);
 });
 
 test("createModelSetupService rejects duplicate setup requests for the same type", async () => {

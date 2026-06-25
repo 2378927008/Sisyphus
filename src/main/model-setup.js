@@ -15,10 +15,11 @@ const setupScripts = {
 };
 
 export function getModelSetupScript(type, rootPath) {
-  const config = setupScripts[type];
-  if (!config) {
+  if (!Object.hasOwn(setupScripts, type)) {
     return null;
   }
+
+  const config = setupScripts[type];
 
   return {
     type,
