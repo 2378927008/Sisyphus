@@ -42,6 +42,11 @@ const missingSetupStatus = {
     llm: { type: "llm", status: "idle", output: [], error: "" }
   }
 };
+const setupIpcCalls = {
+  status: 0,
+  refresh: 0,
+  start: []
+};
 
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
@@ -70,15 +75,24 @@ function wireIpc() {
     cliPath: "",
     modelPath: ""
   }));
-  ipcMain.handle("models:setup-status", () => missingSetupStatus);
-  ipcMain.handle("models:setup-refresh", () => missingSetupStatus);
-  ipcMain.handle("models:setup-start", (_event, type) => ({
-    type,
-    status: "complete",
-    output: [`${type} setup completed`],
-    error: "",
-    assets: missingSetupStatus.assets
-  }));
+  ipcMain.handle("models:setup-status", () => {
+    setupIpcCalls.status += 1;
+    return missingSetupStatus;
+  });
+  ipcMain.handle("models:setup-refresh", () => {
+    setupIpcCalls.refresh += 1;
+    return missingSetupStatus;
+  });
+  ipcMain.handle("models:setup-start", (_event, type) => {
+    setupIpcCalls.start.push(type);
+    return {
+      type,
+      status: "complete",
+      output: [`${type} setup completed`],
+      error: "",
+      assets: missingSetupStatus.assets
+    };
+  });
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
     return {
@@ -144,11 +158,16 @@ app.whenReady().then(async () => {
         state.setupChecklistText.includes("Whisper") &&
         state.hasInstallWhisperButton &&
         state.hasInstallLlmButton &&
+        state.hasRefreshSetupButton &&
         state.hasCopyResultButton &&
         state.providerStatusText.includes("Local whisper.cpp")
       ),
       5000
     );
+    await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
+    await waitForState(window, () => setupIpcCalls.refresh >= 1, 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
+    await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
     await window.webContents.executeJavaScript(`
       (() => {
         const interfaceLanguage = document.querySelector('#interfaceLanguage');
@@ -275,6 +294,7 @@ function readRendererState(window) {
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
       hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
+      hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)

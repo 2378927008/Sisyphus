@@ -67,7 +67,7 @@ async function init() {
   setupLocalModel.addEventListener("click", showLocalModelInstallCommand);
   installWhisper.addEventListener("click", () => runModelSetup("whisper"));
   installLlm.addEventListener("click", () => runModelSetup("llm"));
-  refreshSetupStatus.addEventListener("click", refreshSetupStatusView);
+  refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
   copyResult.addEventListener("click", copyLatestResult);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
   form.addEventListener("submit", saveSettings);
@@ -257,6 +257,27 @@ async function refreshSetupStatusView() {
 
   currentSetupStatus = await window.localFlow.getModelSetupStatus();
   renderSetupChecklist();
+}
+
+async function refreshSetupStatusAndSettings() {
+  if (!window.localFlow.refreshModelSetupStatus) {
+    await refreshSetupStatusView();
+    return;
+  }
+
+  refreshSetupStatus.disabled = true;
+  try {
+    currentSetupStatus = await window.localFlow.refreshModelSetupStatus();
+    await saveDetectedSetupPaths();
+    renderSetupChecklist();
+    await renderLocalModelStatus();
+    await refreshProviderStatus();
+    setStatus(t("setup.refreshed"));
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    refreshSetupStatus.disabled = false;
+  }
 }
 
 async function runModelSetup(type) {
