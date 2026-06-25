@@ -67,6 +67,8 @@ async function init() {
   refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
   copyResult.addEventListener("click", copyLatestResult);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
+  form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
+  form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
   window.localFlow.onShortcutToggle(toggleRecording);
   window.localFlow.onStatus(handleMainStatus);
@@ -83,6 +85,14 @@ function changeInterfaceLanguage() {
   setReadyStatus();
   renderSetupChecklist();
   renderHistory();
+}
+
+async function refreshProcessingProviderPreview() {
+  try {
+    await saveSettingsFromCurrentForm({ updateStatus: false });
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 function handleMainStatus(payload) {

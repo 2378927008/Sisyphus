@@ -263,6 +263,29 @@ app.whenReady().then(async () => {
     );
     await window.webContents.executeJavaScript(`
       (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'zh-Hans';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const myMemoryTargetPreviewState = await waitForState(
+      window,
+      (state) => (
+        state.outputLanguage === "zh-Hans" &&
+        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'auto';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await window.webContents.executeJavaScript(`
+      (() => {
         const provider = document.querySelector('#llmProvider');
         provider.value = 'mymemory';
         provider.dispatchEvent(new Event('change', { bubbles: true }));
@@ -404,6 +427,7 @@ app.whenReady().then(async () => {
       ok: true,
       initialState,
       englishLanguageState,
+      myMemoryTargetPreviewState,
       myMemoryProviderState,
       recordingState,
       completedState,
