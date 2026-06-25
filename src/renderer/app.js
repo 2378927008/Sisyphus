@@ -29,11 +29,19 @@ const settingsDrawer = document.querySelector("#settingsDrawer");
 const localModelStatus = document.querySelector("#localModelStatus");
 const setupLocalModel = document.querySelector("#setupLocalModel");
 const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
+const setupChecklist = document.querySelector("#setupChecklist");
+const whisperSetupStatus = document.querySelector("#whisperSetupStatus");
+const llmSetupStatus = document.querySelector("#llmSetupStatus");
+const installWhisper = document.querySelector("#installWhisper");
+const installLlm = document.querySelector("#installLlm");
+const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
+const copyResult = document.querySelector("#copyResult");
 
 let recorder = null;
 let isRecording = false;
 let currentSettings = null;
 let currentProviderStatus = null;
+let currentSetupStatus = null;
 let currentLanguage = defaultInterfaceLanguage;
 
 init();
@@ -47,6 +55,7 @@ async function init() {
   await renderHistory();
   await renderLocalModelStatus();
   await refreshProviderStatus();
+  await refreshSetupStatusView();
 
   recordButton.addEventListener("click", toggleRecording);
   openSettings.addEventListener("click", () => setSettingsDrawer(true));
@@ -56,6 +65,10 @@ async function init() {
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   setupLocalModel.addEventListener("click", showLocalModelInstallCommand);
+  installWhisper.addEventListener("click", () => runModelSetup("whisper"));
+  installLlm.addEventListener("click", () => runModelSetup("llm"));
+  refreshSetupStatus.addEventListener("click", refreshSetupStatusView);
+  copyResult.addEventListener("click", copyLatestResult);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
   form.addEventListener("submit", saveSettings);
   window.localFlow.onShortcutToggle(toggleRecording);
@@ -66,6 +79,7 @@ function changeInterfaceLanguage() {
   currentLanguage = normalizeInterfaceLanguage(form.interfaceLanguage.value);
   applyInterfaceLanguage(currentLanguage);
   setReadyStatus();
+  renderSetupChecklist();
   renderHistory();
 }
 
@@ -238,6 +252,107 @@ function showLocalModelInstallCommand() {
   setStatus(t("model.installCommandShown"));
 }
 
+async function refreshSetupStatusView() {
+  if (!window.localFlow.getModelSetupStatus) return;
+
+  currentSetupStatus = await window.localFlow.getModelSetupStatus();
+  renderSetupChecklist();
+}
+
+async function runModelSetup(type) {
+  if (!window.localFlow.startModelSetup) return;
+
+  const button = type === "whisper" ? installWhisper : installLlm;
+  button.disabled = true;
+  setStatus(t(type === "whisper" ? "setup.whisper.installing" : "setup.llm.installing"));
+
+  try {
+    const result = await window.localFlow.startModelSetup(type);
+    currentSetupStatus = window.localFlow.refreshModelSetupStatus
+      ? await window.localFlow.refreshModelSetupStatus()
+      : { ...currentSetupStatus, assets: result.assets };
+    await saveDetectedSetupPaths();
+    renderSetupChecklist();
+    await renderLocalModelStatus();
+    await refreshProviderStatus();
+    setStatus(result.status === "complete"
+      ? t(type === "whisper" ? "setup.whisper.complete" : "setup.llm.complete")
+      : result.error || t("setup.failed"));
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveDetectedSetupPaths() {
+  const assets = currentSetupStatus?.assets || {};
+  const next = {};
+
+  if (assets.whisper?.whisperCliPath) next.whisperCliPath = assets.whisper.whisperCliPath;
+  if (assets.whisper?.whisperModelPath) next.whisperModelPath = assets.whisper.whisperModelPath;
+  if (assets.llm?.cliPath) next.embeddedLlmCliPath = assets.llm.cliPath;
+  if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
+
+  if (Object.keys(next).length) {
+    currentSettings = await window.localFlow.saveSettings(next);
+    fillSettings(currentSettings);
+  }
+}
+
+function renderSetupChecklist() {
+  if (!currentSetupStatus || !setupChecklist) return;
+
+  const whisperReady = Boolean(
+    currentSetupStatus.assets?.whisper?.whisperCliPath &&
+    currentSetupStatus.assets?.whisper?.whisperModelPath
+  );
+  const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
+  const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
+  const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
+
+  whisperSetupStatus.textContent = t(getSetupStatusKey("whisper", whisperReady, whisperStatus));
+  llmSetupStatus.textContent = t(getSetupStatusKey("llm", llmReady, llmStatus));
+  setupChecklist.dataset.whisperReady = String(whisperReady);
+  setupChecklist.dataset.llmReady = String(llmReady);
+  installWhisper.hidden = whisperReady;
+  installLlm.hidden = llmReady;
+  installWhisper.disabled = whisperStatus === "running";
+  installLlm.disabled = llmStatus === "running";
+}
+
+function getSetupStatusKey(type, ready, status) {
+  if (ready) return `setup.${type}.ready`;
+  if (status === "running") return `setup.${type}.installing`;
+  if (status === "failed") return `setup.${type}.failed`;
+  return `setup.${type}.missing`;
+}
+
+async function copyLatestResult() {
+  const text = resultText.textContent.trim();
+  if (!text || resultText.dataset.emptyResult === "true") return;
+
+  await writeClipboardText(text);
+  setStatus(t("status.copied"));
+}
+
+async function writeClipboardText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
 function setSettingsDrawer(open) {
   settingsDrawer.classList.toggle("open", open);
   settingsDrawer.setAttribute("aria-hidden", open ? "false" : "true");
@@ -377,6 +492,7 @@ function applyInterfaceLanguage(language) {
   }
 
   renderProviderStatus();
+  renderSetupChecklist();
   updateRecordLabel();
 
   if (resultText.dataset.emptyResult === "true") {

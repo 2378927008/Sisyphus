@@ -27,6 +27,22 @@ let settings = mergeSettings({
 });
 let settingsAtDictation = null;
 
+const missingSetupStatus = {
+  assets: {
+    whisper: {},
+    llm: {
+      ready: false,
+      runtimeReady: false,
+      modelReady: false,
+      setupCommand: "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1"
+    }
+  },
+  setups: {
+    whisper: { type: "whisper", status: "idle", output: [], error: "" },
+    llm: { type: "llm", status: "idle", output: [], error: "" }
+  }
+};
+
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
   ipcMain.handle("settings:save", (_event, next) => {
@@ -53,6 +69,15 @@ function wireIpc() {
     setupCommand: "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1",
     cliPath: "",
     modelPath: ""
+  }));
+  ipcMain.handle("models:setup-status", () => missingSetupStatus);
+  ipcMain.handle("models:setup-refresh", () => missingSetupStatus);
+  ipcMain.handle("models:setup-start", (_event, type) => ({
+    type,
+    status: "complete",
+    output: [`${type} setup completed`],
+    error: "",
+    assets: missingSetupStatus.assets
   }));
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
@@ -115,6 +140,11 @@ app.whenReady().then(async () => {
         state.outputLanguage === "auto" &&
         state.hasSettingsDrawer &&
         state.hasLocalModelStatus &&
+        state.hasSetupChecklist &&
+        state.setupChecklistText.includes("Whisper") &&
+        state.hasInstallWhisperButton &&
+        state.hasInstallLlmButton &&
+        state.hasCopyResultButton &&
         state.providerStatusText.includes("Local whisper.cpp")
       ),
       5000
@@ -241,6 +271,11 @@ function readRendererState(window) {
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
+      hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
+      setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
+      hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
+      hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
+      hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)
     }))()
