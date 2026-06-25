@@ -47,6 +47,7 @@ const setupIpcCalls = {
   refresh: 0,
   start: []
 };
+const setupStartResolvers = new Map();
 
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
@@ -77,6 +78,9 @@ function wireIpc() {
   }));
   ipcMain.handle("models:setup-status", () => {
     setupIpcCalls.status += 1;
+    if (setupIpcCalls.status === 1) {
+      throw new Error("setup status unavailable");
+    }
     return missingSetupStatus;
   });
   ipcMain.handle("models:setup-refresh", () => {
@@ -85,13 +89,15 @@ function wireIpc() {
   });
   ipcMain.handle("models:setup-start", (_event, type) => {
     setupIpcCalls.start.push(type);
-    return {
-      type,
-      status: "complete",
-      output: [`${type} setup completed`],
-      error: "",
-      assets: missingSetupStatus.assets
-    };
+    return new Promise((resolve) => {
+      setupStartResolvers.set(type, () => resolve({
+        type,
+        status: "complete",
+        output: [`${type} setup completed`],
+        error: "",
+        assets: missingSetupStatus.assets
+      }));
+    });
   });
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
@@ -166,8 +172,31 @@ app.whenReady().then(async () => {
     );
     await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
     await waitForState(window, () => setupIpcCalls.refresh >= 1, 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: (text) => {
+              window.__copyAttempts.push(text);
+              return Promise.resolve();
+            }
+          }
+        });
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(window, (state) => state.copyAttempts === 0, 5000);
     await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
     await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
+    await waitForState(
+      window,
+      (state) => state.installWhisperDisabled && state.installLlmDisabled && state.refreshSetupDisabled,
+      5000
+    );
+    setupStartResolvers.get("whisper")?.();
+    await waitForState(window, (state) => state.statusText === "Whisper 安装完成。", 5000);
     await window.webContents.executeJavaScript(`
       (() => {
         const interfaceLanguage = document.querySelector('#interfaceLanguage');
@@ -223,6 +252,31 @@ app.whenReady().then(async () => {
         state.resultText === "smoke transcript"
       ),
       10000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        window.__execCommands = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: (text) => {
+              window.__copyAttempts.push(text);
+              return Promise.reject(new Error('clipboard denied'));
+            }
+          }
+        });
+        document.execCommand = (command) => {
+          window.__execCommands.push(command);
+          return true;
+        };
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.statusText === "已复制。" && state.execCommands.includes("copy"),
+      5000
     );
 
     if (settingsAtDictation?.outputLanguage !== "zh-Hans") {
@@ -296,6 +350,11 @@ function readRendererState(window) {
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
       hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
+      installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
+      installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
+      refreshSetupDisabled: Boolean(document.querySelector('#refreshSetupStatus')?.disabled),
+      copyAttempts: window.__copyAttempts?.length || 0,
+      execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)
     }))()

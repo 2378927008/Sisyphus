@@ -42,6 +42,7 @@ let isRecording = false;
 let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
+let isSetupBusy = false;
 let currentLanguage = defaultInterfaceLanguage;
 
 init();
@@ -52,11 +53,6 @@ async function init() {
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
   setReadyStatus();
-  await renderHistory();
-  await renderLocalModelStatus();
-  await refreshProviderStatus();
-  await refreshSetupStatusView();
-
   recordButton.addEventListener("click", toggleRecording);
   openSettings.addEventListener("click", () => setSettingsDrawer(true));
   closeSettings.addEventListener("click", () => setSettingsDrawer(false));
@@ -73,6 +69,11 @@ async function init() {
   form.addEventListener("submit", saveSettings);
   window.localFlow.onShortcutToggle(toggleRecording);
   window.localFlow.onStatus(handleMainStatus);
+
+  await renderHistory();
+  await renderLocalModelStatus();
+  await refreshProviderStatus();
+  await refreshSetupStatusView();
 }
 
 function changeInterfaceLanguage() {
@@ -255,17 +256,23 @@ function showLocalModelInstallCommand() {
 async function refreshSetupStatusView() {
   if (!window.localFlow.getModelSetupStatus) return;
 
-  currentSetupStatus = await window.localFlow.getModelSetupStatus();
+  try {
+    currentSetupStatus = await window.localFlow.getModelSetupStatus();
+  } catch (error) {
+    currentSetupStatus = createFailedSetupStatus(error);
+    setStatus(t("setup.failed"));
+  }
   renderSetupChecklist();
 }
 
 async function refreshSetupStatusAndSettings() {
+  if (isSetupBusy) return;
   if (!window.localFlow.refreshModelSetupStatus) {
     await refreshSetupStatusView();
     return;
   }
 
-  refreshSetupStatus.disabled = true;
+  setSetupBusy(true);
   try {
     currentSetupStatus = await window.localFlow.refreshModelSetupStatus();
     await saveDetectedSetupPaths();
@@ -276,15 +283,15 @@ async function refreshSetupStatusAndSettings() {
   } catch (error) {
     setStatus(error.message);
   } finally {
-    refreshSetupStatus.disabled = false;
+    setSetupBusy(false);
   }
 }
 
 async function runModelSetup(type) {
+  if (isSetupBusy) return;
   if (!window.localFlow.startModelSetup) return;
 
-  const button = type === "whisper" ? installWhisper : installLlm;
-  button.disabled = true;
+  setSetupBusy(true);
   setStatus(t(type === "whisper" ? "setup.whisper.installing" : "setup.llm.installing"));
 
   try {
@@ -302,7 +309,7 @@ async function runModelSetup(type) {
   } catch (error) {
     setStatus(error.message);
   } finally {
-    button.disabled = false;
+    setSetupBusy(false);
   }
 }
 
@@ -338,8 +345,25 @@ function renderSetupChecklist() {
   setupChecklist.dataset.llmReady = String(llmReady);
   installWhisper.hidden = whisperReady;
   installLlm.hidden = llmReady;
-  installWhisper.disabled = whisperStatus === "running";
-  installLlm.disabled = llmStatus === "running";
+  installWhisper.disabled = isSetupBusy || whisperStatus === "running";
+  installLlm.disabled = isSetupBusy || llmStatus === "running";
+  refreshSetupStatus.disabled = isSetupBusy;
+}
+
+function setSetupBusy(busy) {
+  isSetupBusy = busy;
+  renderSetupChecklist();
+}
+
+function createFailedSetupStatus(error) {
+  const message = error?.message || t("setup.failed");
+  return {
+    assets: currentSetupStatus?.assets || {},
+    setups: {
+      whisper: { type: "whisper", status: "failed", output: [], error: message },
+      llm: { type: "llm", status: "failed", output: [], error: message }
+    }
+  };
 }
 
 function getSetupStatusKey(type, ready, status) {
@@ -353,16 +377,29 @@ async function copyLatestResult() {
   const text = resultText.textContent.trim();
   if (!text || resultText.dataset.emptyResult === "true") return;
 
-  await writeClipboardText(text);
-  setStatus(t("status.copied"));
+  try {
+    await writeClipboardText(text);
+    setStatus(t("status.copied"));
+  } catch {
+    setStatus(t("status.copyFailed"));
+  }
 }
 
 async function writeClipboardText(text) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to the focused-document copy path below.
+    }
   }
 
+  if (copyTextWithTextarea(text)) return;
+  throw new Error("Copy failed.");
+}
+
+function copyTextWithTextarea(text) {
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
@@ -370,8 +407,9 @@ async function writeClipboardText(text) {
   textarea.style.opacity = "0";
   document.body.append(textarea);
   textarea.select();
-  document.execCommand("copy");
+  const copied = document.execCommand("copy");
   textarea.remove();
+  return copied;
 }
 
 function setSettingsDrawer(open) {
