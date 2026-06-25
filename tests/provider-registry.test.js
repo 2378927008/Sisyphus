@@ -14,12 +14,12 @@ test("normalizeAsrProvider defaults to localWhisper on Windows", () => {
 });
 
 test("normalizeTextProvider keeps embedded and ollama providers", () => {
-  assert.equal(normalizeTextProvider(""), "embedded");
+  assert.equal(normalizeTextProvider(""), "mymemory");
   assert.equal(normalizeTextProvider("embedded"), "embedded");
   assert.equal(normalizeTextProvider("ollama"), "ollama");
   assert.equal(normalizeTextProvider("mymemory"), "mymemory");
   assert.equal(normalizeTextProvider("groq"), "groq");
-  assert.equal(normalizeTextProvider("bad"), "embedded");
+  assert.equal(normalizeTextProvider("bad"), "mymemory");
 });
 
 test("getProcessingProviderStatus reports local mode when Whisper is configured", () => {
@@ -126,6 +126,19 @@ test("getProcessingProviderStatus reports cloud mode for text-only cloud provide
   assert.equal(status.mode, "cloud");
   assert.equal(status.asr.ready, true);
   assert.equal(status.text.provider, "cloudflareWorkersAi");
+});
+
+test("getProcessingProviderStatus keeps MyMemory local while automatic output is selected", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "mymemory",
+    outputLanguage: "auto"
+  });
+
+  assert.equal(status.mode, "local");
+  assert.equal(status.text.provider, "mymemory");
 });
 
 test("getProcessingProviderStatus explains missing embedded LLM setup", () => {
@@ -256,7 +269,7 @@ const textProviderCases = [
   },
   {
     provider: "mymemory",
-    settings: {},
+    settings: { outputLanguage: "zh-Hans" },
     mode: "cloud",
     configured: true,
     implemented: true,

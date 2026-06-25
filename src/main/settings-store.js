@@ -29,7 +29,7 @@ export const defaultSettings = {
   ollamaEnabled: false,
   ollamaBaseUrl: "http://localhost:11434",
   ollamaModel: "qwen3:4b",
-  llmProvider: "embedded",
+  llmProvider: "mymemory",
   embeddedLlmCliPath: "",
   embeddedLlmModelPath: "",
   dictionary: [],

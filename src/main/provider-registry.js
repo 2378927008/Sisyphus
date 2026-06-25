@@ -1,7 +1,10 @@
+import { isTargetOutputLanguage } from "../shared/languages.js";
+
 const cloudProviders = new Set(["cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
 const asrProviders = new Set(["localWhisper", "appleSpeech", ...cloudProviders]);
 const freeCloudTextProviders = new Set(["mymemory"]);
 const textProviders = new Set(["embedded", "ollama", ...freeCloudTextProviders, ...cloudProviders]);
+const defaultTextProvider = "mymemory";
 
 export function normalizeAsrProvider(value) {
   const provider = String(value || "").trim();
@@ -10,13 +13,13 @@ export function normalizeAsrProvider(value) {
 
 export function normalizeTextProvider(value) {
   const provider = String(value || "").trim();
-  return textProviders.has(provider) ? provider : "embedded";
+  return textProviders.has(provider) ? provider : defaultTextProvider;
 }
 
 export function getProcessingProviderStatus(settings = {}) {
   const asrProvider = normalizeAsrProvider(settings.asrProvider);
   const textProvider = normalizeTextProvider(settings.llmProvider);
-  const mode = getMode(asrProvider, textProvider);
+  const mode = getMode(asrProvider, textProvider, settings);
   const asr = getAsrStatus(asrProvider, settings);
   const text = getTextStatus(textProvider, settings);
   const readyToRecord = Boolean(asr.implemented && asr.ready);
@@ -30,9 +33,10 @@ export function getProcessingProviderStatus(settings = {}) {
   };
 }
 
-function getMode(asrProvider, textProvider) {
+function getMode(asrProvider, textProvider, settings = {}) {
   if (asrProvider === "appleSpeech") return "system";
-  if (isCloudProvider(asrProvider) || isCloudProvider(textProvider) || freeCloudTextProviders.has(textProvider)) return "cloud";
+  if (isCloudProvider(asrProvider) || isCloudProvider(textProvider)) return "cloud";
+  if (freeCloudTextProviders.has(textProvider) && isTargetOutputLanguage(settings.outputLanguage)) return "cloud";
   return "local";
 }
 

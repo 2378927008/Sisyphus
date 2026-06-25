@@ -171,7 +171,7 @@ app.whenReady().then(async () => {
         state.hasRefreshSetupButton &&
         state.hasCopyResultButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
-        state.providerStatusText.includes("Built-in local language model")
+        state.providerStatusText.includes("MyMemory Free")
       ),
       5000
     );
@@ -257,7 +257,7 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "en" &&
         state.recordLabel === "Start recording" &&
-        state.providerStatusText === "Local mode · Local whisper.cpp + Built-in local language model"
+        state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
       ),
       5000
     );
@@ -273,7 +273,7 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         state.llmProvider === "mymemory" &&
-        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
+        state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
       ),
       5000
     );

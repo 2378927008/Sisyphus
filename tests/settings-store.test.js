@@ -17,6 +17,7 @@ test("mergeSettings preserves defaults for missing values", () => {
   assert.equal(settings.interfaceLanguage, "zh-Hans");
   assert.equal(settings.whisperLanguage, "auto");
   assert.equal(settings.outputLanguage, "auto");
+  assert.equal(settings.llmProvider, "mymemory");
 });
 
 test("mergeSettings ignores unknown keys", () => {
@@ -86,7 +87,7 @@ test("mergeSettings normalizes invalid provider preferences", () => {
   });
 
   assert.equal(settings.asrProvider, "localWhisper");
-  assert.equal(settings.llmProvider, "embedded");
+  assert.equal(settings.llmProvider, "mymemory");
 });
 
 test("mergeSettings reports recording ready when Whisper paths are configured", () => {
