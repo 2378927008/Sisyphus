@@ -190,10 +190,7 @@ function runSetup(script, spawn) {
 }
 
 function cloneStatus(status) {
-  return {
-    ...status,
-    output: [...status.output]
-  };
+  return cloneSnapshotValue(status);
 }
 
 function formatSetupError(error) {
@@ -236,4 +233,16 @@ function trimOutput(output) {
   while (output.length > 40) {
     output.shift();
   }
+}
+
+function cloneSnapshotValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneSnapshotValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneSnapshotValue(item)])
+    );
+  }
+  return value;
 }
