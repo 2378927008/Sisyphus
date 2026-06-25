@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("localFlow", {
   checkWhisper: () => ipcRenderer.invoke("diagnostics:whisper"),
   getProviderStatus: () => ipcRenderer.invoke("providers:status"),
   getLocalModelStatus: () => ipcRenderer.invoke("llm:status"),
+  getModelSetupStatus: () => ipcRenderer.invoke("models:setup-status"),
+  startModelSetup: (type) => ipcRenderer.invoke("models:setup-start", type),
+  refreshModelSetupStatus: () => ipcRenderer.invoke("models:setup-refresh"),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
   onShortcutToggle: (callback) => {
     ipcRenderer.on("recording:toggle", () => callback());
