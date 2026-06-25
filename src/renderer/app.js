@@ -31,6 +31,7 @@ const setupLocalModel = document.querySelector("#setupLocalModel");
 const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
 const setupChecklist = document.querySelector("#setupChecklist");
 const whisperSetupStatus = document.querySelector("#whisperSetupStatus");
+const llmSetupTitle = document.querySelector("[data-setup-type='llm'] strong");
 const llmSetupStatus = document.querySelector("#llmSetupStatus");
 const installWhisper = document.querySelector("#installWhisper");
 const installLlm = document.querySelector("#installLlm");
@@ -206,6 +207,7 @@ async function refreshProviderStatus() {
   if (!window.localFlow.getProviderStatus) return;
   currentProviderStatus = await window.localFlow.getProviderStatus();
   renderProviderStatus();
+  renderSetupChecklist();
   applyRecordReadiness();
 }
 
@@ -397,17 +399,49 @@ function renderSetupChecklist() {
   const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
   const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
   const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
+  const textSetupState = getTextSetupState(llmReady, llmStatus);
 
   whisperSetupStatus.textContent = t(getSetupStatusKey("whisper", whisperReady, whisperStatus));
-  llmSetupStatus.textContent = t(getSetupStatusKey("llm", llmReady, llmStatus));
+  llmSetupTitle.textContent = t(`model.provider.${textSetupState.provider}`);
+  llmSetupStatus.textContent = t(textSetupState.statusKey);
   setupChecklist.dataset.whisperReady = String(whisperReady);
-  setupChecklist.dataset.llmReady = String(llmReady);
+  setupChecklist.dataset.llmReady = String(textSetupState.ready);
   installWhisper.hidden = whisperReady;
-  installLlm.hidden = llmReady;
+  installLlm.hidden = !textSetupState.showInstall;
   installWhisper.disabled = isSetupBusy || whisperStatus === "running";
   installLlm.disabled = isSetupBusy || llmStatus === "running";
   refreshSetupStatus.disabled = isSetupBusy;
   renderSetupOutput(getActiveSetupStatus(whisperStatus, llmStatus));
+}
+
+function getTextSetupState(llmReady, llmStatus) {
+  const provider = currentSettings?.llmProvider || form.llmProvider?.value || "mymemory";
+
+  if (provider === "embedded") {
+    return {
+      provider,
+      ready: llmReady,
+      showInstall: !llmReady,
+      statusKey: getSetupStatusKey("llm", llmReady, llmStatus)
+    };
+  }
+
+  if (provider === "ollama") {
+    const ready = Boolean(currentProviderStatus?.text?.ready);
+    return {
+      provider,
+      ready,
+      showInstall: false,
+      statusKey: ready ? "setup.text.ollama.ready" : "setup.text.ollama.missing"
+    };
+  }
+
+  return {
+    provider: "mymemory",
+    ready: true,
+    showInstall: false,
+    statusKey: "setup.text.mymemory.ready"
+  };
 }
 
 function getActiveSetupStatus(whisperStatus, llmStatus) {

@@ -12,6 +12,7 @@ Local-first Windows voice dictation MVP inspired by Typeless and Wispr Flow. It 
 - Optional Ollama local model cleanup.
 - Interface language, speech recognition language, and output language settings.
 - UI v2 dictation workspace with advanced settings moved into a drawer.
+- Free-first text output path: automatic output keeps the spoken language locally; selected target-language output can use MyMemory Free.
 - Built-in local language model setup path for Qwen3-4B-GGUF through llama.cpp.
 - Fallback local cleanup that removes common filler words.
 - Clipboard paste into the active Windows app.
@@ -22,7 +23,8 @@ Local-first Windows voice dictation MVP inspired by Typeless and Wispr Flow. It 
 - Node.js and npm.
 - A built `whisper.cpp` executable, usually `whisper-cli.exe`.
 - A Whisper model file, for example `ggml-small.bin`.
-- Optional: Ollama running locally as an advanced fallback for text cleanup.
+- Optional: internet access for MyMemory Free when a target output language is selected.
+- Optional: Ollama or the built-in Qwen3 local model as advanced fallbacks for text cleanup.
 
 ## Run
 
@@ -67,11 +69,12 @@ In the app settings, set:
 - `输出语言`: controls final displayed/saved/pasted text. Default is `自动（同语音）`.
 - `whisper.cpp 可执行文件`: full path to `whisper-cli.exe`.
 - `Whisper 模型文件`: full path to a `.bin` model file.
-- `Ollama`: optional advanced fallback. The recommended default path is the built-in Qwen3 local model. If you use Ollama, set a model such as `qwen3:4b`.
+- `文本模型提供方`: defaults to `MyMemory Free`. With `输出语言=自动`, the app keeps the spoken language and uses local cleanup. When a target output language is selected, MyMemory Free is used for target-language output.
+- `Ollama` / `内置 Qwen3`: optional advanced fallbacks. If you use Ollama, set a model such as `qwen3:4b`.
 
-## Built-in Local Language Model
+## Optional Built-in Local Language Model
 
-The app recommends `Qwen/Qwen3-4B-GGUF` with `Q4_K_M` quantization for local cleanup and translation.
+The default path does not require Qwen. The app still includes an optional local model path for users who want offline cleanup or target-language output without MyMemory. It recommends `Qwen/Qwen3-4B-GGUF` with `Q4_K_M` quantization.
 
 - License: Apache 2.0.
 - Approximate model size: 2.5 GB.

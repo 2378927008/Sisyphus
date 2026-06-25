@@ -166,8 +166,11 @@ app.whenReady().then(async () => {
         state.hasLocalModelStatus &&
         state.hasSetupChecklist &&
         state.setupChecklistText.includes("Whisper") &&
+        state.llmSetupTitle === "MyMemory Free（云端）" &&
+        state.llmSetupStatusText.includes("自动输出会保持说话语言") &&
         state.hasInstallWhisperButton &&
         state.hasInstallLlmButton &&
+        state.installLlmHidden &&
         state.hasRefreshSetupButton &&
         state.hasCopyResultButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
@@ -257,6 +260,8 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "en" &&
         state.recordLabel === "Start recording" &&
+        state.llmSetupTitle === "MyMemory Free (cloud)" &&
+        state.installLlmHidden &&
         state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
       ),
       5000
@@ -310,7 +315,12 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      (state) => state.llmProvider === "embedded" && state.providerStatusText.includes("Built-in local language model"),
+      (state) => (
+        state.llmProvider === "embedded" &&
+        state.llmSetupTitle === "Built-in Qwen3" &&
+        !state.installLlmHidden &&
+        state.providerStatusText.includes("Built-in local language model")
+      ),
       5000
     );
     await window.webContents.executeJavaScript(`
@@ -480,6 +490,8 @@ function readRendererState(window) {
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
       llmProvider: document.querySelector('#llmProvider')?.value || '',
+      llmSetupTitle: document.querySelector('[data-setup-type="llm"] strong')?.textContent || '',
+      llmSetupStatusText: document.querySelector('#llmSetupStatus')?.textContent || '',
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
@@ -492,6 +504,7 @@ function readRendererState(window) {
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
       installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
       installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
+      installLlmHidden: Boolean(document.querySelector('#installLlm')?.hidden),
       refreshSetupDisabled: Boolean(document.querySelector('#refreshSetupStatus')?.disabled),
       copyAttempts: window.__copyAttempts?.length || 0,
       execCommands: window.__execCommands || [],
