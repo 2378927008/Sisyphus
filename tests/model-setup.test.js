@@ -127,6 +127,148 @@ test("createModelSetupService buffers split output chunks into complete lines", 
   assert.deepEqual(result.output, ["download", "next", "error"]);
 });
 
+test("createModelSetupService caps output to the last 40 completed lines", async () => {
+  const lines = Array.from({ length: 45 }, (_, index) => `line ${index + 1}`);
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakeChildProcess({
+      code: 0,
+      stdout: [`${lines.join("\n")}\n`]
+    }),
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const result = await service.start("whisper");
+
+  assert.deepEqual(result.output, lines.slice(5));
+});
+
+test("createModelSetupService refreshes assets after process close", async () => {
+  const order = [];
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakeCloseRecordingChildProcess(order),
+    refreshAssets: async () => {
+      order.push("refresh");
+      return { whisper: { ready: true }, llm: {} };
+    }
+  });
+
+  const result = await service.start("whisper");
+
+  assert.equal(result.status, "complete");
+  assert.deepEqual(order, ["close", "refresh"]);
+});
+
+test("createModelSetupService uses spawnImpl injection", async () => {
+  let spawnImplCalls = 0;
+  let legacySpawnCalls = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => {
+      legacySpawnCalls += 1;
+      return fakeChildProcess({ code: 0 });
+    },
+    spawnImpl: () => {
+      spawnImplCalls += 1;
+      return fakeChildProcess({ code: 0 });
+    },
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  await service.start("llm");
+
+  assert.equal(spawnImplCalls, 1);
+  assert.equal(legacySpawnCalls, 0);
+});
+
+test("createModelSetupService records process errors as failed and allows retry", async () => {
+  let attempts = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return fakeErrorChildProcess({
+          error: new Error("PowerShell unavailable"),
+          stdout: ["download\n"]
+        });
+      }
+      return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
+    },
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const failed = await service.start("whisper");
+
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /PowerShell unavailable/);
+  assert.deepEqual(failed.output, ["download"]);
+  assert.equal(service.getStatus("whisper").status, "failed");
+
+  const retry = await service.start("whisper");
+
+  assert.equal(retry.status, "complete");
+  assert.equal(attempts, 2);
+});
+
+test("createModelSetupService records refresh failures as failed and allows retry", async () => {
+  let refreshAttempts = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => fakeChildProcess({ code: 0, stdout: ["setup output\n"] }),
+    refreshAssets: async () => {
+      refreshAttempts += 1;
+      if (refreshAttempts === 1) {
+        throw new Error("asset scan failed");
+      }
+      return { whisper: { ready: true }, llm: {} };
+    }
+  });
+
+  const failed = await service.start("whisper");
+
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /asset scan failed/);
+  assert.deepEqual(failed.output, ["setup output"]);
+  assert.equal(service.getStatus("whisper").status, "failed");
+
+  const retry = await service.start("whisper");
+
+  assert.equal(retry.status, "complete");
+  assert.equal(refreshAttempts, 2);
+});
+
+test("createModelSetupService returns status snapshots", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => fakeChildProcess({ code: 0, stdout: ["ok\n"] }),
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  await service.start("whisper");
+  const status = service.getStatus("whisper");
+  status.status = "running";
+  status.output.push("mutated");
+
+  assert.equal(service.getStatus("whisper").status, "complete");
+  assert.deepEqual(service.getStatus("whisper").output, ["ok"]);
+});
+
+test("createModelSetupService snapshots shallow object fields", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => fakeChildProcess({ code: 0 }),
+    refreshAssets: async () => ({ whisper: { ready: true }, llm: { ready: false } })
+  });
+
+  await service.start("whisper");
+  const status = service.getStatus("whisper");
+  status.assets.whisper.ready = false;
+
+  assert.equal(service.getStatus("whisper").assets.whisper.ready, true);
+});
+
 function fakeChildProcess({ code = 0, stdout = [], stderr = [] }) {
   const handlers = new Map();
   const child = {
@@ -136,6 +278,37 @@ function fakeChildProcess({ code = 0, stdout = [], stderr = [] }) {
       handlers.set(event, callback);
       if (event === "close") {
         queueMicrotask(() => callback(code));
+      }
+      return child;
+    }
+  };
+  return child;
+}
+
+function fakeErrorChildProcess({ error, stdout = [], stderr = [] }) {
+  const child = {
+    stdout: fakeStream(stdout),
+    stderr: fakeStream(stderr),
+    on(event, callback) {
+      if (event === "error") {
+        queueMicrotask(() => callback(error));
+      }
+      return child;
+    }
+  };
+  return child;
+}
+
+function fakeCloseRecordingChildProcess(order) {
+  const child = {
+    stdout: fakeStream([]),
+    stderr: fakeStream([]),
+    on(event, callback) {
+      if (event === "close") {
+        queueMicrotask(() => {
+          order.push("close");
+          callback(0);
+        });
       }
       return child;
     }

@@ -30,9 +30,11 @@ export function getModelSetupScript(type, rootPath) {
 
 export function createModelSetupService({
   rootPath,
-  spawn = nodeSpawn,
+  spawnImpl,
+  spawn,
   refreshAssets = () => detectModelAssets(rootPath)
 }) {
+  const spawnProcess = spawnImpl || spawn || nodeSpawn;
   const state = new Map();
 
   async function start(type) {
@@ -53,18 +55,34 @@ export function createModelSetupService({
       completedAt: ""
     });
 
-    const result = await runSetup(script, spawn);
-    const assets = await refreshAssets();
-    const nextState = {
-      ...getStatus(type),
-      status: result.code === 0 ? "complete" : "failed",
-      output: result.output,
-      error: result.code === 0 ? "" : `Setup exited with code ${result.code}.`,
-      completedAt: new Date().toISOString(),
-      assets
-    };
-    setState(type, nextState);
-    return nextState;
+    let result;
+    try {
+      result = await runSetup(script, spawnProcess);
+    } catch (error) {
+      return failSetup(type, {
+        output: error.output || [],
+        error: formatSetupError(error)
+      });
+    }
+
+    try {
+      const assets = await refreshAssets();
+      const nextState = {
+        ...getStatus(type),
+        status: result.code === 0 ? "complete" : "failed",
+        output: result.output,
+        error: result.code === 0 ? "" : `Setup exited with code ${result.code}.`,
+        completedAt: new Date().toISOString(),
+        assets
+      };
+      setState(type, nextState);
+      return getStatus(type);
+    } catch (error) {
+      return failSetup(type, {
+        output: result.output,
+        error: formatSetupError(error)
+      });
+    }
   }
 
   async function refresh() {
@@ -79,18 +97,30 @@ export function createModelSetupService({
   }
 
   function getStatus(type) {
-    return state.get(type) || {
+    return cloneStatus(state.get(type) || {
       type,
       status: "idle",
       output: [],
       error: "",
       startedAt: "",
       completedAt: ""
-    };
+    });
   }
 
   function setState(type, value) {
     state.set(type, value);
+  }
+
+  function failSetup(type, { output, error }) {
+    const nextState = {
+      ...getStatus(type),
+      status: "failed",
+      output: [...output],
+      error,
+      completedAt: new Date().toISOString()
+    };
+    setState(type, nextState);
+    return getStatus(type);
   }
 
   return {
@@ -110,24 +140,67 @@ async function detectModelAssets(rootPath) {
 
 function runSetup(script, spawn) {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const output = [];
     const stdoutBuffer = createLineBuffer(output);
     const stderrBuffer = createLineBuffer(output);
-    const child = spawn(
-      "powershell.exe",
-      ["-ExecutionPolicy", "Bypass", "-File", script.scriptPath, ...script.args],
-      { windowsHide: true }
-    );
+    let child;
+
+    function flushOutput() {
+      stdoutBuffer.flush();
+      stderrBuffer.flush();
+    }
+
+    function fail(error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      flushOutput();
+      const setupError = error instanceof Error ? error : new Error(String(error));
+      setupError.output = [...output];
+      reject(setupError);
+    }
+
+    function complete(code) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      flushOutput();
+      resolve({ code, output });
+    }
+
+    try {
+      child = spawn(
+        "powershell.exe",
+        ["-ExecutionPolicy", "Bypass", "-File", script.scriptPath, ...script.args],
+        { windowsHide: true }
+      );
+    } catch (error) {
+      fail(error);
+      return;
+    }
 
     child.stdout?.on("data", (chunk) => stdoutBuffer.push(chunk));
     child.stderr?.on("data", (chunk) => stderrBuffer.push(chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      stdoutBuffer.flush();
-      stderrBuffer.flush();
-      resolve({ code, output });
-    });
+    child.on("error", fail);
+    child.on("close", complete);
   });
+}
+
+function cloneStatus(status) {
+  return {
+    ...status,
+    output: [...status.output]
+  };
+}
+
+function formatSetupError(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function createLineBuffer(output) {
