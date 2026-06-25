@@ -31,7 +31,7 @@ test("createModelSetupService starts PowerShell with a known setup script only",
       spawned.push({ file, args, options });
       return fakeChildProcess({ code: 0, stdout: ["ok"] });
     },
-    refreshAssets: async () => ({ whisper: { ready: true }, llm: { ready: false } })
+    refreshAssets: async () => readyAssets()
   });
 
   const result = await service.start("whisper");
@@ -58,7 +58,7 @@ test("createModelSetupService rejects inherited setup type names without spawnin
       spawnCalls += 1;
       return fakeChildProcess({ code: 0 });
     },
-    refreshAssets: async () => ({ whisper: {}, llm: {} })
+    refreshAssets: async () => readyAssets()
   });
 
   await assert.rejects(
@@ -107,6 +107,34 @@ test("createModelSetupService reports failed setup with captured output", async 
   assert.deepEqual(result.output, ["download started", "network failed"]);
 });
 
+test("createModelSetupService fails successful Whisper script when assets are not detected", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => fakeChildProcess({ code: 0, stdout: ["script complete\n"] }),
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const result = await service.start("whisper");
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /Whisper setup finished but required assets were not found/);
+  assert.deepEqual(result.output, ["script complete"]);
+});
+
+test("createModelSetupService fails successful LLM script when assets are not ready", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => fakeChildProcess({ code: 0, stdout: ["script complete\n"] }),
+    refreshAssets: async () => ({ whisper: {}, llm: { ready: false } })
+  });
+
+  const result = await service.start("llm");
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /Qwen setup finished but required assets were not found/);
+  assert.deepEqual(result.output, ["script complete"]);
+});
+
 test("createModelSetupService buffers split output chunks into complete lines", async () => {
   const service = createModelSetupService({
     rootPath: "C:/app",
@@ -150,7 +178,7 @@ test("createModelSetupService refreshes assets after process close", async () =>
     spawn: () => fakeCloseRecordingChildProcess(order),
     refreshAssets: async () => {
       order.push("refresh");
-      return { whisper: { ready: true }, llm: {} };
+      return readyAssets();
     }
   });
 
@@ -173,7 +201,7 @@ test("createModelSetupService uses spawnImpl injection", async () => {
       spawnImplCalls += 1;
       return fakeChildProcess({ code: 0 });
     },
-    refreshAssets: async () => ({ whisper: {}, llm: {} })
+    refreshAssets: async () => readyAssets()
   });
 
   await service.start("llm");
@@ -196,7 +224,7 @@ test("createModelSetupService records process errors as failed and allows retry"
       }
       return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
     },
-    refreshAssets: async () => ({ whisper: {}, llm: {} })
+    refreshAssets: async () => readyAssets()
   });
 
   const failed = await service.start("whisper");
@@ -223,7 +251,7 @@ test("createModelSetupService records spawn failures as failed and allows retry"
       }
       return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
     },
-    refreshAssets: async () => ({ whisper: {}, llm: {} })
+    refreshAssets: async () => readyAssets()
   });
 
   const failed = await service.start("whisper");
@@ -248,7 +276,7 @@ test("createModelSetupService records refresh failures as failed and allows retr
       if (refreshAttempts === 1) {
         throw new Error("asset scan failed");
       }
-      return { whisper: { ready: true }, llm: {} };
+      return readyAssets();
     }
   });
 
@@ -269,7 +297,7 @@ test("createModelSetupService returns status snapshots", async () => {
   const service = createModelSetupService({
     rootPath: "C:/app",
     spawnImpl: () => fakeChildProcess({ code: 0, stdout: ["ok\n"] }),
-    refreshAssets: async () => ({ whisper: {}, llm: {} })
+    refreshAssets: async () => readyAssets()
   });
 
   await service.start("whisper");
@@ -293,6 +321,40 @@ test("createModelSetupService snapshots shallow object fields", async () => {
   status.assets.whisper.ready = false;
 
   assert.equal(service.getStatus("whisper").assets.whisper.ready, true);
+});
+
+test("createModelSetupService times out a stuck setup process and allows retry", async () => {
+  let attempts = 0;
+  let killCalls = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    setupTimeoutMs: 5,
+    spawnImpl: () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return fakeStuckChildProcess(() => {
+          killCalls += 1;
+        });
+      }
+      return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
+    },
+    refreshAssets: async () => readyAssets()
+  });
+
+  const failed = await Promise.race([
+    service.start("whisper"),
+    delay(50).then(() => ({ status: "timed-out-test-sentinel" }))
+  ]);
+
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /timed out/);
+  assert.equal(killCalls, 1);
+  assert.equal(service.getStatus("whisper").status, "failed");
+
+  const retry = await service.start("whisper");
+
+  assert.equal(retry.status, "complete");
+  assert.equal(attempts, 2);
 });
 
 function fakeChildProcess({ code = 0, stdout = [], stderr = [] }) {
@@ -401,4 +463,37 @@ function fakePendingChildProcess(registerClose) {
     }
   };
   return child;
+}
+
+function fakeStuckChildProcess(onKill) {
+  const child = {
+    stdout: fakeStream([]),
+    stderr: fakeStream([]),
+    on() {
+      return child;
+    },
+    kill() {
+      onKill();
+      return true;
+    }
+  };
+  return child;
+}
+
+function readyAssets() {
+  return {
+    whisper: {
+      whisperCliPath: "C:/app/vendor/whisper/bin/Release/whisper-cli.exe",
+      whisperModelPath: "C:/app/vendor/whisper/models/ggml-base.bin"
+    },
+    llm: {
+      ready: true,
+      cliPath: "C:/app/vendor/llm/bin/llama-cli.exe",
+      modelPath: "C:/app/vendor/llm/models/Qwen3-4B-Q4_K_M.gguf"
+    }
+  };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

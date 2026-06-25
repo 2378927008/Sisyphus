@@ -3,6 +3,8 @@ import path from "node:path";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { detectWhisperAssets } from "./whisper-assets.js";
 
+const defaultSetupTimeoutMs = 60 * 60 * 1000;
+
 const setupScripts = {
   whisper: {
     script: path.join("scripts", "setup-whisper.ps1"),
@@ -32,6 +34,7 @@ export function createModelSetupService({
   rootPath,
   spawnImpl,
   spawn,
+  setupTimeoutMs = defaultSetupTimeoutMs,
   refreshAssets = () => detectModelAssets(rootPath)
 }) {
   const spawnProcess = spawnImpl || spawn || nodeSpawn;
@@ -57,7 +60,7 @@ export function createModelSetupService({
 
     let result;
     try {
-      result = await runSetup(script, spawnProcess);
+      result = await runSetup(script, spawnProcess, setupTimeoutMs);
     } catch (error) {
       return failSetup(type, {
         output: error.output || [],
@@ -67,11 +70,12 @@ export function createModelSetupService({
 
     try {
       const assets = await refreshAssets();
+      const assetError = result.code === 0 ? getSetupAssetError(type, assets) : "";
       const nextState = {
         ...getStatus(type),
-        status: result.code === 0 ? "complete" : "failed",
+        status: result.code === 0 && !assetError ? "complete" : "failed",
         output: result.output,
-        error: result.code === 0 ? "" : `Setup exited with code ${result.code}.`,
+        error: result.code === 0 ? assetError : `Setup exited with code ${result.code}.`,
         completedAt: new Date().toISOString(),
         assets
       };
@@ -138,17 +142,41 @@ async function detectModelAssets(rootPath) {
   return { whisper, llm };
 }
 
-function runSetup(script, spawn) {
+function getSetupAssetError(type, assets) {
+  if (type === "whisper") {
+    return assets.whisper?.whisperCliPath && assets.whisper?.whisperModelPath
+      ? ""
+      : "Whisper setup finished but required assets were not found.";
+  }
+
+  if (type === "llm") {
+    return assets.llm?.ready
+      ? ""
+      : "Qwen setup finished but required assets were not found.";
+  }
+
+  return "Setup finished but required assets were not found.";
+}
+
+function runSetup(script, spawn, timeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const output = [];
     const stdoutBuffer = createLineBuffer(output);
     const stderrBuffer = createLineBuffer(output);
     let child;
+    let timeout = null;
 
     function flushOutput() {
       stdoutBuffer.flush();
       stderrBuffer.flush();
+    }
+
+    function clearSetupTimeout() {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
     }
 
     function fail(error) {
@@ -156,6 +184,7 @@ function runSetup(script, spawn) {
         return;
       }
       settled = true;
+      clearSetupTimeout();
       flushOutput();
       const setupError = error instanceof Error ? error : new Error(String(error));
       setupError.output = [...output];
@@ -167,8 +196,21 @@ function runSetup(script, spawn) {
         return;
       }
       settled = true;
+      clearSetupTimeout();
       flushOutput();
       resolve({ code, output });
+    }
+
+    function timeOut() {
+      if (settled) {
+        return;
+      }
+      try {
+        child?.kill?.();
+      } catch {
+        // The process may already be gone; the timeout failure still clears state.
+      }
+      fail(new Error(`Setup timed out after ${timeoutMs} ms.`));
     }
 
     try {
@@ -180,6 +222,11 @@ function runSetup(script, spawn) {
     } catch (error) {
       fail(error);
       return;
+    }
+
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timeout = setTimeout(timeOut, timeoutMs);
+      timeout.unref?.();
     }
 
     child.stdout?.on("data", (chunk) => stdoutBuffer.push(chunk));
