@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { detectLikelyLanguage } from "../shared/language-detection.js";
 import { isTargetOutputLanguage } from "../shared/languages.js";
 import { buildOutputPrompt, polishLocally } from "../shared/text-cleanup.js";
 
@@ -8,6 +9,7 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
   }
 
   const requiresOllama = isTargetOutputLanguage(settings.outputLanguage);
+  const usesMyMemory = settings.llmProvider === "mymemory";
   const prompt = buildOutputPrompt({
     mode: settings.polishMode || "polish",
     outputLanguage: settings.outputLanguage || "auto",
@@ -16,10 +18,17 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
   });
 
   if (settings.polishMode === "raw") {
+    if (requiresOllama && usesMyMemory) {
+      return polishWithMyMemory(transcript, settings, deps);
+    }
     if (requiresOllama) {
       return polishWithRequiredLlm(prompt, settings, deps);
     }
     return transcript.trim();
+  }
+
+  if (requiresOllama && usesMyMemory) {
+    return polishWithMyMemory(transcript, settings, deps);
   }
 
   if (hasEmbeddedLlm(settings)) {
@@ -30,7 +39,7 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
       }
     } catch (error) {
       if (requiresOllama) {
-        throw new Error(`Install the built-in local language model or enable Ollama to produce the selected output language: ${error.message}`);
+        throw new Error(`Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language: ${error.message}`);
       }
     }
   }
@@ -43,14 +52,14 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
       }
     } catch (error) {
       if (requiresOllama) {
-        throw new Error(`Install the built-in local language model or enable Ollama to produce the selected output language: ${error.message}`);
+        throw new Error(`Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language: ${error.message}`);
       }
       return polishLocally(transcript);
     }
   }
 
   if (requiresOllama) {
-    throw new Error("Install the built-in local language model or enable Ollama to produce the selected output language locally.");
+    throw new Error("Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language.");
   }
 
   return polishLocally(transcript);
@@ -61,7 +70,7 @@ async function polishWithRequiredLlm(prompt, settings, deps = {}) {
     try {
       return await polishWithEmbeddedLlm(prompt, settings, deps);
     } catch (error) {
-      throw new Error(`Install the built-in local language model or enable Ollama to produce the selected output language: ${error.message}`);
+      throw new Error(`Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language: ${error.message}`);
     }
   }
 
@@ -69,11 +78,11 @@ async function polishWithRequiredLlm(prompt, settings, deps = {}) {
     try {
       return await polishWithOllama(prompt, settings, deps);
     } catch (error) {
-      throw new Error(`Install the built-in local language model or enable Ollama to produce the selected output language: ${error.message}`);
+      throw new Error(`Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language: ${error.message}`);
     }
   }
 
-  throw new Error("Install the built-in local language model or enable Ollama to produce the selected output language locally.");
+  throw new Error("Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language.");
 }
 
 function hasEmbeddedLlm(settings = {}) {
@@ -182,4 +191,100 @@ async function polishWithOllama(prompt, settings, deps = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function polishWithMyMemory(transcript, settings, deps = {}) {
+  const fetchImpl = deps.fetch || fetch;
+  const sourceText = settings.polishMode === "raw" ? transcript.trim() : polishLocally(transcript);
+  const sourceLanguage = getMyMemorySourceLanguage(settings, sourceText);
+  const targetLanguage = toMyMemoryLanguage(settings.outputLanguage);
+
+  if (!targetLanguage) {
+    throw new Error("Unsupported MyMemory target language.");
+  }
+  if (sourceLanguage === targetLanguage) {
+    return sourceText;
+  }
+
+  const translated = [];
+  for (const chunk of splitUtf8Chunks(sourceText, 480)) {
+    translated.push(await translateMyMemoryChunk(chunk, sourceLanguage, targetLanguage, fetchImpl, deps));
+  }
+  return translated.join(" ").replace(/\s+([,.!?;:])/g, "$1").trim();
+}
+
+async function translateMyMemoryChunk(text, sourceLanguage, targetLanguage, fetchImpl, deps = {}) {
+  const url = new URL("https://api.mymemory.translated.net/get");
+  url.searchParams.set("q", text);
+  url.searchParams.set("langpair", `${sourceLanguage}|${targetLanguage}`);
+  url.searchParams.set("mt", "1");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.myMemoryTimeoutMs || 20000);
+
+  try {
+    const response = await fetchImpl(url.toString(), { signal: controller.signal });
+    const data = await response.json();
+    const responseStatus = Number(data.responseStatus || response.status || 200);
+    if (!response.ok || responseStatus >= 400) {
+      throw new Error(data.responseDetails || `MyMemory returned ${responseStatus}.`);
+    }
+
+    const translatedText = String(data.responseData?.translatedText || "").trim();
+    if (!translatedText) {
+      throw new Error("MyMemory returned an empty translation.");
+    }
+    return translatedText;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("MyMemory translation timed out.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function getMyMemorySourceLanguage(settings, text) {
+  const selectedLanguage = String(settings.whisperLanguage || "auto").trim();
+  const source = selectedLanguage && selectedLanguage !== "auto"
+    ? selectedLanguage
+    : detectLikelyLanguage(text);
+  return toMyMemoryLanguage(source) || "en";
+}
+
+function toMyMemoryLanguage(language) {
+  const normalized = String(language || "").trim();
+  const languageMap = {
+    en: "en",
+    zh: "zh-CN",
+    "zh-Hans": "zh-CN",
+    "zh-Hant": "zh-TW",
+    ja: "ja",
+    ko: "ko",
+    fr: "fr",
+    ru: "ru",
+    es: "es"
+  };
+  return languageMap[normalized] || "";
+}
+
+function splitUtf8Chunks(text, maxBytes) {
+  const chunks = [];
+  let current = "";
+
+  for (const char of text) {
+    const next = current + char;
+    if (current && Buffer.byteLength(next, "utf8") > maxBytes) {
+      chunks.push(current.trim());
+      current = char;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+  return chunks;
 }

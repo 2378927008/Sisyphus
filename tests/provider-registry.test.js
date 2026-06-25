@@ -17,6 +17,7 @@ test("normalizeTextProvider keeps embedded and ollama providers", () => {
   assert.equal(normalizeTextProvider(""), "embedded");
   assert.equal(normalizeTextProvider("embedded"), "embedded");
   assert.equal(normalizeTextProvider("ollama"), "ollama");
+  assert.equal(normalizeTextProvider("mymemory"), "mymemory");
   assert.equal(normalizeTextProvider("groq"), "groq");
   assert.equal(normalizeTextProvider("bad"), "embedded");
 });
@@ -248,6 +249,15 @@ const textProviderCases = [
     provider: "ollama",
     settings: { ollamaEnabled: true },
     mode: "local",
+    configured: true,
+    implemented: true,
+    ready: true,
+    blockedReason: ""
+  },
+  {
+    provider: "mymemory",
+    settings: {},
+    mode: "cloud",
     configured: true,
     implemented: true,
     ready: true,

@@ -1,6 +1,7 @@
 const cloudProviders = new Set(["cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
 const asrProviders = new Set(["localWhisper", "appleSpeech", ...cloudProviders]);
-const textProviders = new Set(["embedded", "ollama", ...cloudProviders]);
+const freeCloudTextProviders = new Set(["mymemory"]);
+const textProviders = new Set(["embedded", "ollama", ...freeCloudTextProviders, ...cloudProviders]);
 
 export function normalizeAsrProvider(value) {
   const provider = String(value || "").trim();
@@ -31,7 +32,7 @@ export function getProcessingProviderStatus(settings = {}) {
 
 function getMode(asrProvider, textProvider) {
   if (asrProvider === "appleSpeech") return "system";
-  if (isCloudProvider(asrProvider) || isCloudProvider(textProvider)) return "cloud";
+  if (isCloudProvider(asrProvider) || isCloudProvider(textProvider) || freeCloudTextProviders.has(textProvider)) return "cloud";
   return "local";
 }
 
@@ -84,6 +85,17 @@ function getTextStatus(provider, settings) {
       implemented: true,
       ready: configured,
       blockedReason: configured ? "" : "ollama_not_enabled"
+    };
+  }
+
+  if (provider === "mymemory") {
+    return {
+      provider,
+      label: "MyMemory Free",
+      configured: true,
+      implemented: true,
+      ready: true,
+      blockedReason: ""
     };
   }
 

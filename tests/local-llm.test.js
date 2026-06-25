@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { buildLlamaCliArgs, polishTranscript } from "../src/main/local-llm.js";
 
-test("polishTranscript requires Ollama for target output languages", async () => {
+test("polishTranscript requires a target-capable text provider for target output languages", async () => {
   await assert.rejects(
     polishTranscript("hello world", {
       polishMode: "polish",
@@ -68,6 +68,55 @@ test("polishTranscript uses embedded llama.cpp when configured", async () => {
   assert.equal(result, "你好，世界");
   assert.equal(calls[0].file, "C:/llama/llama-cli.exe");
   assert.ok(calls[0].args.includes("C:/models/Qwen3-4B-Q4_K_M.gguf"));
+});
+
+test("polishTranscript uses MyMemory for selected target output languages", async () => {
+  const requests = [];
+  const result = await polishTranscript(
+    "um hello world",
+    {
+      llmProvider: "mymemory",
+      polishMode: "polish",
+      outputLanguage: "zh-Hans",
+      whisperLanguage: "en"
+    },
+    {
+      fetch: async (url) => {
+        requests.push(new URL(url));
+        return {
+          ok: true,
+          json: async () => ({
+            responseStatus: 200,
+            responseData: { translatedText: "你好，世界" }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(result, "你好，世界");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].origin, "https://api.mymemory.translated.net");
+  assert.equal(requests[0].searchParams.get("q"), "hello world");
+  assert.equal(requests[0].searchParams.get("langpair"), "en|zh-CN");
+});
+
+test("polishTranscript keeps automatic output local when MyMemory is selected", async () => {
+  const result = await polishTranscript(
+    "um hello   world",
+    {
+      llmProvider: "mymemory",
+      polishMode: "polish",
+      outputLanguage: "auto"
+    },
+    {
+      fetch: async () => {
+        throw new Error("fetch should not run for automatic same-language output");
+      }
+    }
+  );
+
+  assert.equal(result, "hello world");
 });
 
 function createFakeChild({ stdout = "", stderr = "", code = 0 } = {}) {
