@@ -49,6 +49,34 @@ test("main window uses an Electron-compatible CommonJS preload script", async ()
   assert.doesNotMatch(preloadSource, /^\s*import\s/m);
 });
 
+test("renderer declares a strict content security policy", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const cspMatch = html.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/);
+
+  assert.ok(cspMatch, "renderer must declare a Content-Security-Policy meta tag");
+  assert.match(cspMatch[1], /default-src 'self'/);
+  assert.match(cspMatch[1], /script-src 'self'/);
+  assert.doesNotMatch(cspMatch[1], /unsafe-eval/);
+  assert.doesNotMatch(cspMatch[1], /unsafe-inline/);
+});
+
+test("renderer records audio with AudioWorklet instead of ScriptProcessorNode", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const workletSource = await readFile(new URL("../src/renderer/audio-recorder-worklet.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /audioWorklet\.addModule/);
+  assert.match(appSource, /AudioWorkletNode/);
+  assert.doesNotMatch(appSource, /createScriptProcessor/);
+  assert.match(workletSource, /registerProcessor\("wav-recorder-processor"/);
+});
+
+test("app smoke test uses the current Electron console-message event shape", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /webContents\.on\("console-message", \(_event, details\)/);
+  assert.doesNotMatch(smokeSource, /console-message", \(_event, level, message, line, sourceId\)/);
+});
+
 test("preload shortcut toggle callback does not receive the raw IPC event", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   const listeners = new Map();

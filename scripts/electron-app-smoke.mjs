@@ -79,8 +79,13 @@ app.whenReady().then(async () => {
     }
   });
 
-  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    rendererMessages.push({ level, message, line, sourceId });
+  window.webContents.on("console-message", (_event, details) => {
+    rendererMessages.push({
+      level: details.level,
+      message: details.message,
+      line: details.lineNumber,
+      sourceId: details.sourceId
+    });
   });
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     rendererMessages.push({
@@ -175,6 +180,11 @@ app.whenReady().then(async () => {
       throw new Error(`Output language was not applied before dictation. Saw ${settingsAtDictation?.outputLanguage || "unset"}.`);
     }
 
+    const blockedWarnings = rendererMessages.filter((item) => isBlockedRendererWarning(item.message));
+    if (blockedWarnings.length) {
+      throw new Error(`Renderer emitted blocked warnings: ${blockedWarnings.map((item) => item.message).join(" | ")}`);
+    }
+
     console.log(JSON.stringify({
       ok: true,
       initialState,
@@ -235,4 +245,9 @@ function readRendererState(window) {
       hasLocalFlow: Boolean(window.localFlow)
     }))()
   `);
+}
+
+function isBlockedRendererWarning(message) {
+  const text = String(message || "");
+  return text.includes("Electron Security Warning") || text.includes("ScriptProcessorNode is deprecated");
 }

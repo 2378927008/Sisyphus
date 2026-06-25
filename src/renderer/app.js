@@ -487,15 +487,22 @@ class WavRecorder {
     this.sampleRate = this.audioContext.sampleRate;
     this.chunks = [];
     this.source = this.audioContext.createMediaStreamSource(this.stream);
-    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-    this.processor.onaudioprocess = (event) => {
-      this.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    await this.audioContext.audioWorklet.addModule(new URL("./audio-recorder-worklet.js", import.meta.url).href);
+    this.processor = new AudioWorkletNode(this.audioContext, "wav-recorder-processor", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1]
+    });
+    this.processor.port.onmessage = (event) => {
+      this.chunks.push(new Float32Array(event.data));
     };
     this.source.connect(this.processor);
     this.processor.connect(this.audioContext.destination);
   }
 
   async stop() {
+    this.processor.port.onmessage = null;
+    this.processor.port.close();
     this.processor.disconnect();
     this.source.disconnect();
     this.stream.getTracks().forEach((track) => track.stop());
