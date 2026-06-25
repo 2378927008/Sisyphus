@@ -212,6 +212,32 @@ test("createModelSetupService records process errors as failed and allows retry"
   assert.equal(attempts, 2);
 });
 
+test("createModelSetupService records spawn failures as failed and allows retry", async () => {
+  let attempts = 0;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("spawn failed");
+      }
+      return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
+    },
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const failed = await service.start("whisper");
+
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /spawn failed/);
+  assert.equal(service.getStatus("whisper").status, "failed");
+
+  const retry = await service.start("whisper");
+
+  assert.equal(retry.status, "complete");
+  assert.equal(attempts, 2);
+});
+
 test("createModelSetupService records refresh failures as failed and allows retry", async () => {
   let refreshAttempts = 0;
   const service = createModelSetupService({
