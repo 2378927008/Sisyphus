@@ -21,8 +21,10 @@ const historyList = document.querySelector("#historyList");
 const refreshHistory = document.querySelector("#refreshHistory");
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
+const checkTextProvider = document.querySelector("#checkTextProvider");
 const diagnosticsList = document.querySelector("#diagnosticsList");
 const microphoneDiagnosticsList = document.querySelector("#microphoneDiagnosticsList");
+const textDiagnosticsList = document.querySelector("#textDiagnosticsList");
 const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
@@ -62,6 +64,7 @@ async function init() {
   refreshHistory.addEventListener("click", renderHistory);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
+  checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
   setupLocalModel.addEventListener("click", showLocalModelInstallCommand);
   installWhisper.addEventListener("click", () => runModelSetup("whisper"));
   installLlm.addEventListener("click", () => runModelSetup("llm"));
@@ -174,6 +177,25 @@ async function runMicrophoneDiagnostics() {
       }
     ]);
     setStatus(describeMicrophoneError(error));
+  }
+}
+
+async function runTextProviderDiagnostics() {
+  try {
+    setStatus(t("status.checkingTextProvider"));
+    await saveSettingsFromCurrentForm({ updateStatus: false });
+    const result = await window.localFlow.checkTextProvider();
+    textDiagnosticsList.innerHTML = renderChecks(result.checks);
+    setStatus(result.ready ? t("status.textProviderReady") : t("status.textProviderNeedsAttention"));
+  } catch (error) {
+    textDiagnosticsList.innerHTML = renderChecks([
+      {
+        label: t("diagnostic.textProvider"),
+        status: "fail",
+        message: error.message
+      }
+    ]);
+    setStatus(t("status.textProviderFailed", { message: error.message }));
   }
 }
 

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("localFlow", {
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   listHistory: () => ipcRenderer.invoke("history:list"),
   checkWhisper: () => ipcRenderer.invoke("diagnostics:whisper"),
+  checkTextProvider: () => ipcRenderer.invoke("diagnostics:text"),
   getProviderStatus: () => ipcRenderer.invoke("providers:status"),
   getLocalModelStatus: () => ipcRenderer.invoke("llm:status"),
   getModelSetupStatus: () => ipcRenderer.invoke("models:setup-status"),

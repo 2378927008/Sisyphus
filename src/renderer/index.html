@@ -120,6 +120,8 @@
                 <option value="ollama" data-i18n="model.provider.ollama">Ollama</option>
               </select>
             </label>
+            <button id="checkTextProvider" class="secondary" type="button" data-i18n="action.checkTextProvider">检查文本输出</button>
+            <div id="textDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
             <label>
               <span data-i18n="label.embeddedLlmCliPath">llama.cpp 可执行文件</span>
               <input id="embeddedLlmCliPath" name="embeddedLlmCliPath" placeholder="vendor\llm\bin\llama-cli.exe" />

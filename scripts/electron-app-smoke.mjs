@@ -69,6 +69,12 @@ function wireIpc() {
       { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
     ]
   }));
+  ipcMain.handle("diagnostics:text", () => ({
+    ready: true,
+    checks: [
+      { label: "MyMemory Free", status: "pass", message: "Text provider diagnostics stubbed." }
+    ]
+  }));
   ipcMain.handle("providers:status", () => getProcessingProviderStatus(settings));
   ipcMain.handle("llm:status", () => ({
     ready: false,
@@ -173,8 +179,19 @@ app.whenReady().then(async () => {
         state.installLlmHidden &&
         state.hasRefreshSetupButton &&
         state.hasCopyResultButton &&
+        state.hasCheckTextProviderButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
         state.providerStatusText.includes("MyMemory Free")
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
+    await waitForState(
+      window,
+      (state) => (
+        state.statusText === "文本输出服务已就绪。" &&
+        state.textDiagnosticsText.includes("MyMemory Free") &&
+        state.textDiagnosticsText.includes("Text provider diagnostics stubbed.")
       ),
       5000
     );
@@ -498,10 +515,12 @@ function readRendererState(window) {
       hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
       setupOutputText: document.querySelector('#setupOutput')?.textContent || '',
+      textDiagnosticsText: document.querySelector('#textDiagnosticsList')?.textContent || '',
       hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
       hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
+      hasCheckTextProviderButton: Boolean(document.querySelector('#checkTextProvider')),
       installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
       installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
       installLlmHidden: Boolean(document.querySelector('#installLlm')?.hidden),

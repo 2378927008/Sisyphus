@@ -65,6 +65,102 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
   return polishLocally(transcript);
 }
 
+export async function checkTextProvider(settings = {}, deps = {}) {
+  const provider = String(settings.llmProvider || "mymemory").trim() || "mymemory";
+
+  if (provider === "mymemory") {
+    return checkMyMemoryProvider(settings, deps);
+  }
+
+  if (provider === "embedded") {
+    const ready = hasEmbeddedLlm(settings);
+    return {
+      ready,
+      checks: [
+        {
+          label: "Built-in local language model",
+          status: ready ? "pass" : "fail",
+          message: ready
+            ? "llama.cpp executable and model paths are configured."
+            : "Set the llama.cpp executable and Qwen GGUF model paths before using the built-in model."
+        }
+      ]
+    };
+  }
+
+  if (provider === "ollama") {
+    const ready = Boolean(settings.ollamaEnabled);
+    return {
+      ready,
+      checks: [
+        {
+          label: "Ollama",
+          status: ready ? "pass" : "fail",
+          message: ready
+            ? "Ollama is enabled. Dictation will use the configured Ollama URL and model."
+            : "Enable Ollama in settings before using it for text cleanup."
+        }
+      ]
+    };
+  }
+
+  return {
+    ready: false,
+    checks: [
+      {
+        label: provider,
+        status: "fail",
+        message: "This text provider is not available in this build."
+      }
+    ]
+  };
+}
+
+async function checkMyMemoryProvider(settings, deps = {}) {
+  const targetLanguage = getMyMemoryDiagnosticTarget(settings.outputLanguage);
+
+  try {
+    const translated = await polishWithMyMemory("hello world", {
+      ...settings,
+      llmProvider: "mymemory",
+      polishMode: "raw",
+      whisperLanguage: "en",
+      outputLanguage: targetLanguage
+    }, {
+      ...deps,
+      myMemoryTimeoutMs: deps.myMemoryTimeoutMs || 10000
+    });
+
+    return {
+      ready: true,
+      checks: [
+        {
+          label: "MyMemory Free",
+          status: "pass",
+          message: `Sample target-language request succeeded: ${translated}`
+        }
+      ]
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      checks: [
+        {
+          label: "MyMemory Free",
+          status: "fail",
+          message: error.message
+        }
+      ]
+    };
+  }
+}
+
+function getMyMemoryDiagnosticTarget(outputLanguage) {
+  return isTargetOutputLanguage(outputLanguage) && outputLanguage !== "en"
+    ? outputLanguage
+    : "zh-Hans";
+}
+
 async function polishWithRequiredLlm(prompt, settings, deps = {}) {
   if (hasEmbeddedLlm(settings)) {
     try {

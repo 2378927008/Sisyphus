@@ -11,6 +11,7 @@ import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { getProcessingProviderStatus } from "./provider-registry.js";
 import { createModelSetupService } from "./model-setup.js";
 import { wireModelSetupIpc } from "./model-setup-ipc.js";
+import { checkTextProvider } from "./local-llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,6 +99,10 @@ function wireIpc() {
   ipcMain.handle("diagnostics:whisper", async () => {
     const settings = await settingsStore.getSettings();
     return validateWhisperSetup(settings);
+  });
+  ipcMain.handle("diagnostics:text", async () => {
+    const settings = await settingsStore.getSettings({ includeSecrets: true });
+    return checkTextProvider(settings);
   });
   ipcMain.handle("providers:status", async () => {
     const settings = await settingsStore.getSettings({ includeSecrets: true });
