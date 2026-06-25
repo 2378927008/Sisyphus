@@ -197,7 +197,11 @@ app.whenReady().then(async () => {
     setupStartResolvers.get("llm")?.({
       type: "llm",
       status: "failed",
-      output: ["model downloaded"],
+      output: [
+        "Downloading Qwen runtime...",
+        "Primary Hugging Face download failed. Trying mirror...",
+        "Model: C:\\partial\\Qwen3-4B-Q4_K_M.gguf"
+      ],
       error: "Qwen setup finished but required assets were not found.",
       assets: {
         whisper: {},
@@ -211,7 +215,12 @@ app.whenReady().then(async () => {
     });
     await waitForState(
       window,
-      (state) => state.statusText.includes("Qwen setup finished but required assets were not found."),
+      (state) => (
+        state.statusText.includes("Qwen setup finished but required assets were not found.") &&
+        state.setupOutputText.includes("Downloading Qwen runtime...") &&
+        state.setupOutputText.includes("Primary Hugging Face download failed. Trying mirror...") &&
+        !state.setupOutputText.includes("C:\\partial")
+      ),
       5000
     );
     if (setupIpcCalls.refresh !== failedSetupRefreshCalls) {
@@ -382,6 +391,7 @@ function readRendererState(window) {
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
       hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
+      setupOutputText: document.querySelector('#setupOutput')?.textContent || '',
       hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
       hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),

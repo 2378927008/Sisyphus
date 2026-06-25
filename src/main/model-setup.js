@@ -61,7 +61,15 @@ export function createModelSetupService({
 
     let result;
     try {
-      result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree);
+      result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree, (output) => {
+        const current = state.get(type);
+        if (current?.status === "running") {
+          setState(type, {
+            ...current,
+            output: [...output]
+          });
+        }
+      });
     } catch (error) {
       return failSetup(type, {
         output: error.output || [],
@@ -175,12 +183,12 @@ export function killSetupProcessTree(child, spawn = nodeSpawn, platform = proces
   child?.kill?.();
 }
 
-function runSetup(script, spawn, timeoutMs, killProcessTree) {
+function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const output = [];
-    const stdoutBuffer = createLineBuffer(output);
-    const stderrBuffer = createLineBuffer(output);
+    const stdoutBuffer = createLineBuffer(output, onOutput);
+    const stderrBuffer = createLineBuffer(output, onOutput);
     let child;
     let timeout = null;
 
@@ -264,33 +272,37 @@ function formatSetupError(error) {
   return String(error);
 }
 
-function createLineBuffer(output) {
+function createLineBuffer(output, onOutput = () => {}) {
   let pending = "";
 
   function push(chunk) {
     pending += String(chunk);
     const lines = pending.split(/\r?\n/);
     pending = lines.pop() || "";
-    pushCompletedLines(output, lines);
+    pushCompletedLines(output, lines, onOutput);
   }
 
   function flush() {
     if (!pending) {
       return;
     }
-    pushCompletedLines(output, [pending]);
+    pushCompletedLines(output, [pending], onOutput);
     pending = "";
   }
 
   return { push, flush };
 }
 
-function pushCompletedLines(output, lines) {
+function pushCompletedLines(output, lines, onOutput) {
   const completedLines = lines
     .map((line) => line.trim())
     .filter(Boolean);
+  if (!completedLines.length) {
+    return;
+  }
   output.push(...completedLines);
   trimOutput(output);
+  onOutput([...output]);
 }
 
 function trimOutput(output) {

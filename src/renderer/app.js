@@ -35,6 +35,7 @@ const llmSetupStatus = document.querySelector("#llmSetupStatus");
 const installWhisper = document.querySelector("#installWhisper");
 const installLlm = document.querySelector("#installLlm");
 const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
+const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
 
 let recorder = null;
@@ -294,17 +295,20 @@ async function runModelSetup(type) {
   setSetupBusy(true);
   setStatus(t(type === "whisper" ? "setup.whisper.installing" : "setup.llm.installing"));
 
+  const stopPolling = startSetupStatusPolling(type);
   try {
     const result = await window.localFlow.startModelSetup(type);
     if (result.status === "complete") {
-      currentSetupStatus = window.localFlow.refreshModelSetupStatus
+      const refreshedStatus = window.localFlow.refreshModelSetupStatus
         ? await window.localFlow.refreshModelSetupStatus()
         : { ...currentSetupStatus, assets: result.assets };
+      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
       await saveDetectedSetupPaths();
     } else {
-      currentSetupStatus = window.localFlow.getModelSetupStatus
+      const refreshedStatus = window.localFlow.getModelSetupStatus
         ? await window.localFlow.getModelSetupStatus()
         : { ...currentSetupStatus, assets: result.assets };
+      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
     }
     renderSetupChecklist();
     await renderLocalModelStatus();
@@ -315,8 +319,45 @@ async function runModelSetup(type) {
   } catch (error) {
     setStatus(error.message);
   } finally {
+    stopPolling();
     setSetupBusy(false);
   }
+}
+
+function startSetupStatusPolling(type) {
+  if (!window.localFlow.getModelSetupStatus) {
+    return () => {};
+  }
+
+  currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
+    type,
+    status: "running",
+    output: [],
+    error: ""
+  });
+  renderSetupChecklist();
+
+  const interval = window.setInterval(async () => {
+    try {
+      currentSetupStatus = await window.localFlow.getModelSetupStatus();
+      renderSetupChecklist();
+    } catch {
+      // Keep the last visible setup state while the setup process is still running.
+    }
+  }, 1000);
+
+  return () => window.clearInterval(interval);
+}
+
+function mergeSetupResult(status, type, result) {
+  return {
+    ...(status || {}),
+    assets: status?.assets || result.assets || {},
+    setups: {
+      ...(status?.setups || {}),
+      [type]: result
+    }
+  };
 }
 
 async function saveDetectedSetupPaths() {
@@ -354,6 +395,49 @@ function renderSetupChecklist() {
   installWhisper.disabled = isSetupBusy || whisperStatus === "running";
   installLlm.disabled = isSetupBusy || llmStatus === "running";
   refreshSetupStatus.disabled = isSetupBusy;
+  renderSetupOutput(getActiveSetupStatus(whisperStatus, llmStatus));
+}
+
+function getActiveSetupStatus(whisperStatus, llmStatus) {
+  if (whisperStatus === "running") return currentSetupStatus.setups?.whisper;
+  if (llmStatus === "running") return currentSetupStatus.setups?.llm;
+  const setups = [currentSetupStatus.setups?.whisper, currentSetupStatus.setups?.llm]
+    .filter((setup) => setup?.completedAt || setup?.output?.length);
+  return setups.at(-1) || null;
+}
+
+function renderSetupOutput(setup) {
+  if (!setupOutput) return;
+
+  const lines = getVisibleSetupOutput(setup);
+  if (!lines.length) {
+    setupOutput.hidden = true;
+    setupOutput.textContent = "";
+    return;
+  }
+
+  setupOutput.hidden = false;
+  setupOutput.textContent = lines.join("\n");
+}
+
+function getVisibleSetupOutput(setup) {
+  const lines = (setup?.output || [])
+    .map(sanitizeSetupOutputLine)
+    .filter(Boolean)
+    .slice(-8);
+
+  if (!lines.length && setup?.status === "running") {
+    return [t("setup.progress.wait")];
+  }
+  return lines;
+}
+
+function sanitizeSetupOutputLine(line) {
+  const text = String(line || "").trim();
+  if (!text) return "";
+  if (/[A-Za-z]:\\/.test(text)) return "";
+  if (/Paste these paths/i.test(text)) return "";
+  return text;
 }
 
 function setSetupBusy(busy) {

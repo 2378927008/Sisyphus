@@ -130,6 +130,32 @@ test("createModelSetupService rejects duplicate setup requests for the same type
   await firstRun;
 });
 
+test("createModelSetupService exposes setup output while the process is still running", async () => {
+  let closeProcess = null;
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakePendingChildProcess((close) => {
+      closeProcess = close;
+    }, {
+      stdout: ["Fetching latest whisper.cpp release metadata...\n"],
+      stderr: ["Downloaded 5.0 MB / 141.1 MB\n"]
+    }),
+    refreshAssets: async () => readyAssets()
+  });
+
+  const firstRun = service.start("whisper");
+  await delay(0);
+
+  assert.deepEqual(service.getStatus("whisper").output, [
+    "Fetching latest whisper.cpp release metadata...",
+    "Downloaded 5.0 MB / 141.1 MB"
+  ]);
+  assert.equal(service.getStatus("whisper").status, "running");
+
+  closeProcess(0);
+  await firstRun;
+});
+
 test("createModelSetupService reports failed setup with captured output", async () => {
   const service = createModelSetupService({
     rootPath: "C:/app",
@@ -493,10 +519,10 @@ function fakeControlledStream(handlers) {
   };
 }
 
-function fakePendingChildProcess(registerClose) {
+function fakePendingChildProcess(registerClose, { stdout = [], stderr = [] } = {}) {
   const child = {
-    stdout: fakeStream([]),
-    stderr: fakeStream([]),
+    stdout: fakeStream(stdout),
+    stderr: fakeStream(stderr),
     on(event, callback) {
       if (event === "close") {
         registerClose(callback);

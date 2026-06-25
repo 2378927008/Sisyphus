@@ -149,6 +149,20 @@ h3 {
   border-left-color: var(--accent);
 }
 
+.setup-output {
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f1720;
+  color: #dce7e7;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 label {
   display: grid;
   gap: 7px;
