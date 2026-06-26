@@ -492,3 +492,55 @@ textarea {
     flex-direction: column;
   }
 }
+
+.hud-body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.hud-shell {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 18px 20px;
+  color: #f7f3ea;
+  background: #171717;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.hud-shell strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.hud-shell p {
+  margin: 4px 0 0;
+  color: rgba(247, 243, 234, 0.72);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hud-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.hud-shell[data-phase="recording"] .hud-dot {
+  background: #ef4444;
+}
+
+.hud-shell[data-phase="done"] .hud-dot {
+  background: #22c55e;
+}
+
+.hud-shell[data-phase="error"] .hud-dot {
+  background: #f59e0b;
+}
