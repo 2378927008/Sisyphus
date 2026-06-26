@@ -32,6 +32,28 @@ test("system input controller toggles recording through injected callbacks", asy
   assert.deepEqual(calls, ["start", "stop"]);
 });
 
+test("system input controller ignores concurrent recording starts while pending", async () => {
+  let resolveStart;
+  const calls = [];
+  const startPending = new Promise((resolve) => {
+    resolveStart = resolve;
+  });
+  const controller = createSystemInputController({
+    startRecording: async () => {
+      calls.push("start");
+      await startPending;
+    }
+  });
+
+  const firstToggle = controller.toggle();
+  const secondToggle = controller.toggle();
+
+  assert.deepEqual(calls, ["start"]);
+  resolveStart();
+  await Promise.all([firstToggle, secondToggle]);
+  assert.deepEqual(calls, ["start"]);
+});
+
 test("system input controller does not start when setup is not ready", async () => {
   const controller = createSystemInputController({
     isReadyToRecord: () => false,
@@ -44,4 +66,13 @@ test("system input controller does not start when setup is not ready", async () 
 
   assert.equal(controller.getState().phase, "error");
   assert.equal(controller.getState().reason, "not_ready");
+});
+
+test("system input controller preserves warning renderer status", () => {
+  const controller = createSystemInputController();
+
+  controller.handleRendererStatus({ phase: "warning", message: "Raw transcript saved" });
+
+  assert.equal(controller.getState().phase, "warning");
+  assert.equal(controller.getState().message, "Raw transcript saved");
 });

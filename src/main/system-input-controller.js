@@ -1,4 +1,4 @@
-const validPhases = new Set(["idle", "recording", "transcribing", "pasting", "done", "error"]);
+const validPhases = new Set(["idle", "recording", "transcribing", "pasting", "done", "error", "warning"]);
 
 export function createSystemInputController({
   sendToMain = () => {},
@@ -13,6 +13,7 @@ export function createSystemInputController({
     reason: "",
     updatedAt: new Date().toISOString()
   };
+  let startRecordingPending = false;
 
   function getState() {
     return { ...state };
@@ -38,6 +39,10 @@ export function createSystemInputController({
       return;
     }
 
+    if (startRecordingPending) {
+      return;
+    }
+
     if (!isReadyToRecord()) {
       setPhase("error", {
         reason: "not_ready",
@@ -46,7 +51,12 @@ export function createSystemInputController({
       return;
     }
 
-    await startRecording();
+    startRecordingPending = true;
+    try {
+      await startRecording();
+    } finally {
+      startRecordingPending = false;
+    }
   }
 
   function handleRendererStatus(payload = {}) {
@@ -74,6 +84,7 @@ export function createSystemInputController({
 function normalizeRendererPhase(phase) {
   if (phase === "done") return "done";
   if (phase === "error") return "error";
+  if (phase === "warning") return "warning";
   if (phase === "pasting") return "pasting";
   if (phase === "transcribing" || phase === "polishing") return "transcribing";
   return "idle";
