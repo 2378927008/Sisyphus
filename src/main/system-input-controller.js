@@ -39,7 +39,7 @@ export function createSystemInputController({
       return;
     }
 
-    if (startRecordingPending) {
+    if (startRecordingPending || isBusyPhase(state.phase)) {
       return;
     }
 
@@ -82,10 +82,15 @@ export function createSystemInputController({
 }
 
 function normalizeRendererPhase(phase) {
+  if (phase === "recording") return "recording";
   if (phase === "done") return "done";
   if (phase === "error") return "error";
   if (phase === "warning") return "warning";
   if (phase === "pasting") return "pasting";
   if (phase === "transcribing" || phase === "polishing") return "transcribing";
   return "idle";
+}
+
+function isBusyPhase(phase) {
+  return phase === "transcribing" || phase === "pasting";
 }

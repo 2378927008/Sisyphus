@@ -623,8 +623,11 @@ async function startRecording() {
     document.body.classList.add("recording");
     updateRecordLabel();
     setStatus(t("status.recording"));
+    reportRecordingLifecycle({ phase: "recording", message: t("status.recording") });
   } catch (error) {
-    setStatus(describeMicrophoneError(error));
+    const message = describeMicrophoneError(error);
+    setStatus(message);
+    reportRecordingLifecycle({ phase: "error", message });
   }
 }
 
@@ -635,6 +638,7 @@ async function stopRecording() {
     updateRecordLabel();
     applyRecordReadiness();
     setStatus(t("status.preparing"));
+    reportRecordingLifecycle({ phase: "transcribing", message: t("status.preparing") });
 
     const wav = await recorder.stop();
     recorder = null;
@@ -644,6 +648,7 @@ async function stopRecording() {
     await renderHistory();
   } catch (error) {
     setStatus(error.message);
+    reportRecordingLifecycle({ phase: "error", message: error.message });
   }
 }
 
@@ -824,6 +829,10 @@ function ensureMediaDevicesApi() {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function reportRecordingLifecycle(payload) {
+  window.localFlow.reportRecordingStatus?.(payload);
 }
 
 function t(key, replacements = {}) {

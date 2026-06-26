@@ -206,6 +206,41 @@ test("preload exposes system input status listener without raw ipcRenderer acces
   assert.deepEqual(states, [{ phase: "recording" }]);
 });
 
+test("preload exposes safe renderer recording status reporting without raw ipcRenderer access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const sent = [];
+  let exposedApi = null;
+
+  const sandbox = {
+    require: () => ({
+      contextBridge: {
+        exposeInMainWorld: (_name, api) => {
+          exposedApi = api;
+        }
+      },
+      ipcRenderer: {
+        invoke: () => undefined,
+        on: () => undefined,
+        send: (channel, payload) => {
+          sent.push({ channel, payload });
+        }
+      }
+    })
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  exposedApi.reportRecordingStatus({ phase: "recording", message: "Recording" });
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(sent, [
+    {
+      channel: "recording:status",
+      payload: { phase: "recording", message: "Recording" }
+    }
+  ]);
+});
+
 test("main process delegates model setup IPC wiring to the setup IPC module", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
@@ -218,15 +253,44 @@ test("main process delegates model setup IPC wiring to the setup IPC module", as
   assert.match(mainSource, /settingsStore/);
 });
 
-test("main process marks system input recording before shortcut toggle reaches renderer", async () => {
+test("main process waits for renderer recording lifecycle reports before marking recording", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*stopRecording:/);
 
   assert.ok(startRecordingMatch, "system input controller should use a block startRecording handler");
-  assert.match(startRecordingMatch.groups.body, /systemInputController\.setPhase\("recording",\s*\{\s*message:/);
+  assert.doesNotMatch(startRecordingMatch.groups.body, /setPhase\("recording"/);
+  assert.match(startRecordingMatch.groups.body, /toggleRecording\(\)/);
+  assert.match(mainSource, /ipcMain\.on\("recording:status"/);
+  assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(sanitizeRecordingStatusPayload\(payload\)\)/);
+});
+
+test("main process hides HUD when system input returns idle", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(/function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
+  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
+  assert.match(mainSource, /function hideHud\(\) \{/);
+});
+
+test("renderer reports recording lifecycle only after start succeeds and before stop processing", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(startRecordingMatch, "startRecording should be defined");
+  assert.ok(stopRecordingMatch, "stopRecording should be defined");
+  assert.match(appSource, /function reportRecordingLifecycle\(payload\) \{/);
   assert.ok(
-    startRecordingMatch.groups.body.indexOf("systemInputController.setPhase") <
-      startRecordingMatch.groups.body.indexOf("toggleRecording()"),
-    "recording phase should be broadcast before renderer toggle"
+    startRecordingMatch.groups.body.indexOf("await recorder.start()") <
+      startRecordingMatch.groups.body.indexOf('reportRecordingLifecycle({ phase: "recording"'),
+    "renderer should report recording only after recorder.start resolves"
   );
+  assert.ok(
+    stopRecordingMatch.groups.body.indexOf('reportRecordingLifecycle({ phase: "transcribing"') <
+      stopRecordingMatch.groups.body.indexOf("await recorder.stop()"),
+    "renderer should report transcribing before awaiting recorder.stop"
+  );
+  assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
+  assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
 });

@@ -16,6 +16,7 @@ import { createSystemInputController } from "./system-input-controller.js";
 import { buildHudWindowOptions, getHudHtmlPath } from "./hud-window.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rendererRecordingPhases = new Set(["idle", "recording", "transcribing", "pasting", "done", "error", "warning"]);
 
 applyElectronRuntimeSwitches(app);
 
@@ -105,6 +106,11 @@ function sendSystemInputStatus(state) {
   sendWindowMessage(mainWindow, "system-input:status", state);
   sendWindowMessage(hudWindow, "system-input:status", state);
 
+  if (state?.phase === "idle") {
+    hideHud();
+    return;
+  }
+
   if (isActiveSystemInputPhase(state?.phase)) {
     showHud();
   }
@@ -122,6 +128,12 @@ function showHud() {
   }
 }
 
+function hideHud() {
+  if (isUsableWindow(hudWindow)) {
+    hudWindow.hide();
+  }
+}
+
 function sendWindowMessage(window, channel, payload) {
   if (isUsableWindow(window)) {
     window.webContents.send(channel, payload);
@@ -136,7 +148,20 @@ function isActiveSystemInputPhase(phase) {
   return Boolean(phase && phase !== "idle");
 }
 
+function sanitizeRecordingStatusPayload(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const phase = rendererRecordingPhases.has(source.phase) ? source.phase : "idle";
+  return {
+    phase,
+    message: typeof source.message === "string" ? source.message : "",
+    reason: typeof source.reason === "string" ? source.reason : ""
+  };
+}
+
 function wireIpc() {
+  ipcMain.on("recording:status", (_event, payload) => {
+    systemInputController?.handleRendererStatus(sanitizeRecordingStatusPayload(payload));
+  });
   ipcMain.handle("settings:get", () => settingsStore.getSettings());
   ipcMain.handle("settings:save", async (_event, settings) => {
     const next = await settingsStore.saveSettings(settings);
@@ -189,9 +214,6 @@ app.whenReady().then(async () => {
     sendToMain: sendSystemInputStatus,
     sendToHud: () => {},
     startRecording: async () => {
-      systemInputController.setPhase("recording", {
-        message: "Recording..."
-      });
       toggleRecording();
     },
     stopRecording: async () => toggleRecording(),

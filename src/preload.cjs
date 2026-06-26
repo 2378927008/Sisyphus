@@ -21,5 +21,8 @@ contextBridge.exposeInMainWorld("localFlow", {
   },
   onSystemInputStatus: (callback) => {
     ipcRenderer.on("system-input:status", (_event, payload) => callback(payload));
+  },
+  reportRecordingStatus: (payload) => {
+    ipcRenderer.send("recording:status", payload);
   }
 });

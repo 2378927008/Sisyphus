@@ -54,6 +54,21 @@ test("system input controller ignores concurrent recording starts while pending"
   assert.deepEqual(calls, ["start"]);
 });
 
+test("system input controller ignores toggles while renderer is processing audio", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start"),
+    stopRecording: async () => calls.push("stop")
+  });
+
+  controller.setPhase("transcribing");
+  await controller.toggle();
+  controller.setPhase("pasting");
+  await controller.toggle();
+
+  assert.deepEqual(calls, []);
+});
+
 test("system input controller does not start when setup is not ready", async () => {
   const controller = createSystemInputController({
     isReadyToRecord: () => false,
