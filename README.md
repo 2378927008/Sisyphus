@@ -34,7 +34,33 @@ Recommended on Windows:
 .\Start-LocalFlow.cmd
 ```
 
-The launcher switches into this project folder, installs the Electron runtime if it is missing, and then starts the app. Use it if `npm` reports that it cannot find `package.json`.
+The launcher switches into this project folder and starts the app first. If the Electron runtime is missing, it falls back to dependency installation and starts again. Use it if `npm` reports that it cannot find `package.json`.
+
+## 中文试用步骤
+
+在这个工作区中打开 PowerShell：
+
+```powershell
+cd C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github
+.\Start-LocalFlow.cmd
+```
+
+试用时优先保持默认设置：
+
+- `界面语言`: 简体中文。
+- `语音识别语言`: 自动。
+- `输出语言`: 自动（同语音）。
+- `文本模型提供方`: MyMemory Free。
+
+这时它是语音输入软件，不是默认翻译软件。你说中文就输出中文，你说英文就输出英文。只有主动选择某个目标输出语言时，才会尝试把结果转换成目标语言。
+
+如果 `开始录音` 按钮不可用，通常只需要处理 Whisper 语音模型：
+
+1. 点击首页的 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。
+2. 点击 `检查麦克风`，确认 Windows 已允许桌面应用访问麦克风。
+3. 点击 `刷新安装状态`，再回到首页录音。
+
+Qwen3 是可选的本地文本模型，不是录音必需项。默认试用可以先不安装 Qwen；如果 Qwen 安装卡住，可以点 `取消安装`，继续使用 Whisper + MyMemory Free/本地清理路径。
 
 Manual command-line startup:
 
