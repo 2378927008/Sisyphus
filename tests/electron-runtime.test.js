@@ -40,6 +40,16 @@ test("package exposes full app smoke test script", async () => {
   );
 });
 
+test("Windows launcher starts from the project directory and installs dependencies if needed", async () => {
+  const launcher = await readFile(new URL("../Start-LocalFlow.cmd", import.meta.url), "utf8");
+
+  assert.match(launcher, /cd \/d "%~dp0"/);
+  assert.match(launcher, /node_modules\\electron\\dist\\electron\.exe/);
+  assert.match(launcher, /set "ELECTRON_MIRROR=https:\/\/npmmirror\.com\/mirrors\/electron\/"/);
+  assert.match(launcher, /npm\.cmd install/);
+  assert.match(launcher, /npm\.cmd start/);
+});
+
 test("main window uses an Electron-compatible CommonJS preload script", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");

@@ -28,6 +28,16 @@ Local-first Windows voice dictation MVP inspired by Typeless and Wispr Flow. It 
 
 ## Run
 
+Recommended on Windows:
+
+```powershell
+.\Start-LocalFlow.cmd
+```
+
+The launcher switches into this project folder, installs the Electron runtime if it is missing, and then starts the app. Use it if `npm` reports that it cannot find `package.json`.
+
+Manual command-line startup:
+
 ```powershell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'
 npm.cmd install

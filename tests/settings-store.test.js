@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createSettingsStore, mergeSettings, defaultSettings } from "../src/main/settings-store.js";
@@ -97,6 +97,84 @@ test("mergeSettings reports recording ready when Whisper paths are configured", 
   });
 
   assert.equal(settings.providerStatus.readyToRecord, true);
+});
+
+test("getSettings repairs missing persisted local model paths from detected vendor defaults", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+  const vendorPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-vendor-"));
+
+  try {
+    const whisperCliPath = path.join(vendorPath, "vendor", "whisper", "bin", "Release", "whisper-cli.exe");
+    const whisperModelPath = path.join(vendorPath, "vendor", "whisper", "models", "ggml-base.bin");
+    const embeddedLlmCliPath = path.join(vendorPath, "vendor", "llm", "bin", "llama-cli.exe");
+    const embeddedLlmModelPath = path.join(vendorPath, "vendor", "llm", "models", "Qwen3-4B-Q4_K_M.gguf");
+    await mkdir(path.dirname(whisperCliPath), { recursive: true });
+    await mkdir(path.dirname(whisperModelPath), { recursive: true });
+    await mkdir(path.dirname(embeddedLlmCliPath), { recursive: true });
+    await mkdir(path.dirname(embeddedLlmModelPath), { recursive: true });
+    await writeFile(whisperCliPath, "exe", "utf8");
+    await writeFile(whisperModelPath, "model", "utf8");
+    await writeFile(embeddedLlmCliPath, "exe", "utf8");
+    await writeFile(embeddedLlmModelPath, "model", "utf8");
+
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      whisperCliPath: path.join(vendorPath, "missing", "old-whisper-cli.exe"),
+      whisperModelPath: path.join(vendorPath, "missing", "old-ggml-base.bin"),
+      embeddedLlmCliPath: path.join(vendorPath, "missing", "old-llama-cli.exe"),
+      embeddedLlmModelPath: path.join(vendorPath, "missing", "old-qwen.gguf")
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath, {
+      ...defaultSettings,
+      whisperCliPath,
+      whisperModelPath,
+      embeddedLlmCliPath,
+      embeddedLlmModelPath
+    });
+    const settings = await store.getSettings();
+
+    assert.equal(settings.whisperCliPath, whisperCliPath);
+    assert.equal(settings.whisperModelPath, whisperModelPath);
+    assert.equal(settings.embeddedLlmCliPath, embeddedLlmCliPath);
+    assert.equal(settings.embeddedLlmModelPath, embeddedLlmModelPath);
+    assert.equal(settings.providerStatus.readyToRecord, true);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+    await rm(vendorPath, { recursive: true, force: true });
+  }
+});
+
+test("getSettings keeps existing custom local model paths", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+  const vendorPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-vendor-"));
+
+  try {
+    const customWhisperCliPath = path.join(vendorPath, "custom", "whisper-cli.exe");
+    const customWhisperModelPath = path.join(vendorPath, "custom", "ggml-small.bin");
+    await mkdir(path.dirname(customWhisperCliPath), { recursive: true });
+    await writeFile(customWhisperCliPath, "exe", "utf8");
+    await writeFile(customWhisperModelPath, "model", "utf8");
+
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      whisperCliPath: customWhisperCliPath,
+      whisperModelPath: customWhisperModelPath
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath, {
+      ...defaultSettings,
+      whisperCliPath: path.join(vendorPath, "vendor", "whisper", "bin", "Release", "whisper-cli.exe"),
+      whisperModelPath: path.join(vendorPath, "vendor", "whisper", "models", "ggml-base.bin")
+    });
+    const settings = await store.getSettings();
+
+    assert.equal(settings.whisperCliPath, customWhisperCliPath);
+    assert.equal(settings.whisperModelPath, customWhisperModelPath);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+    await rm(vendorPath, { recursive: true, force: true });
+  }
 });
 
 test("saveSettings preserves persisted provider settings across partial saves", async () => {
