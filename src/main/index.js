@@ -105,12 +105,6 @@ async function registerHotkey() {
   }
 }
 
-function toggleRecording() {
-  if (mainWindow) {
-    mainWindow.webContents.send("recording:toggle");
-  }
-}
-
 function sendRecordingStartCommand() {
   systemInputController.setPhase("starting", {
     message: "Starting recording..."
@@ -192,6 +186,7 @@ function scheduleRecordingCommandTimeout(expectedPhase, message) {
   clearRecordingCommandTimeout();
   recordingCommandTimeout = setTimeout(() => {
     if (systemInputController?.getState().phase === expectedPhase) {
+      sendWindowMessage(mainWindow, "recording:reset");
       systemInputController.setPhase("error", {
         reason: "renderer_timeout",
         message
@@ -242,6 +237,10 @@ function sanitizeRendererStatusText(value) {
 
 function wireIpc() {
   ipcMain.on("recording:status", (_event, payload) => {
+    if (_event.sender !== mainWindow?.webContents) {
+      return;
+    }
+
     const status = sanitizeRecordingStatusPayload(payload);
     if (!["starting", "stopping"].includes(status.phase)) {
       clearRecordingCommandTimeout();

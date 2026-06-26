@@ -45,6 +45,7 @@ const copyResult = document.querySelector("#copyResult");
 let recorder = null;
 let isRecording = false;
 let recordingLifecyclePhase = "idle";
+let recordingOperationToken = 0;
 let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
@@ -81,6 +82,7 @@ async function init() {
   window.localFlow.onShortcutToggle(toggleRecording);
   window.localFlow.onRecordingStart(startRecording);
   window.localFlow.onRecordingStop(stopRecording);
+  window.localFlow.onRecordingReset(resetRecordingLifecycle);
   window.localFlow.onStatus(handleMainStatus);
 
   await renderHistory();
@@ -618,11 +620,13 @@ async function toggleRecording() {
 async function startRecording() {
   if (recordingLifecyclePhase !== "idle") return;
 
-  setRecordingLifecyclePhase("starting");
+  const operationToken = beginRecordingOperation("starting");
   reportRecordingLifecycle({ phase: "starting", message: t("status.preparing") });
 
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
     if (!ensureRecordReady()) {
       const message = recordButton.title || statusText.textContent || "Recording is not ready.";
       setRecordingLifecyclePhase("idle");
@@ -634,8 +638,14 @@ async function startRecording() {
       return;
     }
 
-    recorder = new WavRecorder();
-    await recorder.start();
+    const nextRecorder = new WavRecorder();
+    recorder = nextRecorder;
+    await nextRecorder.start();
+    if (!isCurrentRecordingOperation(operationToken)) {
+      cleanupRecorder(nextRecorder);
+      return;
+    }
+
     isRecording = true;
     setRecordingLifecyclePhase("recording");
     document.body.classList.add("recording");
@@ -643,9 +653,11 @@ async function startRecording() {
     setStatus(t("status.recording"));
     reportRecordingLifecycle({ phase: "recording", message: t("status.recording") });
   } catch (error) {
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
     const message = describeMicrophoneError(error);
     setStatus(message);
-    recorder = null;
+    cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
     document.body.classList.remove("recording");
@@ -658,7 +670,7 @@ async function startRecording() {
 async function stopRecording() {
   if (recordingLifecyclePhase !== "recording") return;
 
-  setRecordingLifecyclePhase("stopping");
+  const operationToken = beginRecordingOperation("stopping");
   reportRecordingLifecycle({ phase: "stopping", message: t("status.preparing") });
 
   try {
@@ -669,16 +681,27 @@ async function stopRecording() {
     setStatus(t("status.preparing"));
     reportRecordingLifecycle({ phase: "transcribing", message: t("status.preparing") });
 
-    const wav = await recorder.stop();
-    recorder = null;
+    const activeRecorder = recorder;
+    const wav = await activeRecorder.stop();
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
+    if (recorder === activeRecorder) {
+      recorder = null;
+    }
 
     const entry = await window.localFlow.processWav(wav);
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
     renderDictationResult(entry);
     await renderHistory();
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
     setRecordingLifecyclePhase("idle");
   } catch (error) {
+    if (!isCurrentRecordingOperation(operationToken)) return;
+
     setStatus(error.message);
-    recorder = null;
+    cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
     document.body.classList.remove("recording");
@@ -871,6 +894,36 @@ function reportRecordingLifecycle(payload) {
   window.localFlow.reportRecordingStatus?.(payload);
 }
 
+function beginRecordingOperation(phase) {
+  recordingOperationToken += 1;
+  setRecordingLifecyclePhase(phase);
+  return recordingOperationToken;
+}
+
+function isCurrentRecordingOperation(operationToken) {
+  return operationToken === recordingOperationToken;
+}
+
+function resetRecordingLifecycle() {
+  recordingOperationToken += 1;
+  cleanupRecorder();
+  isRecording = false;
+  setRecordingLifecyclePhase("idle");
+  document.body.classList.remove("recording");
+  updateRecordLabel();
+  applyRecordReadiness();
+}
+
+function cleanupRecorder(targetRecorder = recorder) {
+  if (!targetRecorder) return;
+
+  if (recorder === targetRecorder) {
+    recorder = null;
+  }
+
+  targetRecorder.dispose?.();
+}
+
 function setRecordingLifecyclePhase(phase) {
   recordingLifecyclePhase = phase;
 }
@@ -929,6 +982,31 @@ class WavRecorder {
     const merged = mergeFloat32(this.chunks);
     const downsampled = downsample(merged, this.sampleRate, 16000);
     return encodeWav(downsampled, 16000);
+  }
+
+  dispose() {
+    try {
+      if (this.processor?.port) {
+        this.processor.port.onmessage = null;
+        this.processor.port.close();
+      }
+    } catch {}
+
+    try {
+      this.processor?.disconnect();
+    } catch {}
+
+    try {
+      this.source?.disconnect();
+    } catch {}
+
+    try {
+      this.stream?.getTracks().forEach((track) => track.stop());
+    } catch {}
+
+    try {
+      this.audioContext?.close?.().catch(() => {});
+    } catch {}
   }
 }
 

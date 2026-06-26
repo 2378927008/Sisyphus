@@ -416,14 +416,15 @@ app.whenReady().then(async () => {
         outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
       })()
     `);
-    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    window.webContents.send("recording:start");
+    window.webContents.send("recording:start");
     const recordingState = await waitForState(
       window,
       (state) => state.isRecording && state.recordLabel === "停止并转写",
       10000
     );
 
-    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    window.webContents.send("recording:stop");
     const completedState = await waitForState(
       window,
       (state) => (

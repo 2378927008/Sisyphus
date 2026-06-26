@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("localFlow", {
   onRecordingStop: (callback) => {
     ipcRenderer.on("recording:stop", () => callback());
   },
+  onRecordingReset: (callback) => {
+    ipcRenderer.on("recording:reset", () => callback());
+  },
   onStatus: (callback) => {
     ipcRenderer.on("dictation:status", (_event, payload) => callback(payload));
   },
