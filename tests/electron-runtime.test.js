@@ -174,6 +174,38 @@ test("preload exposes model setup IPC without raw ipcRenderer access", async () 
   ]);
 });
 
+test("preload exposes system input status listener without raw ipcRenderer access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  let exposedApi = null;
+  const channels = [];
+
+  const sandbox = {
+    require: () => ({
+      contextBridge: {
+        exposeInMainWorld: (_name, api) => {
+          exposedApi = api;
+        }
+      },
+      ipcRenderer: {
+        invoke: () => undefined,
+        on: (channel, callback) => {
+          channels.push(channel);
+          callback({}, { phase: "recording" });
+        }
+      }
+    })
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  const states = [];
+  exposedApi.onSystemInputStatus((state) => states.push(state));
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(channels, ["system-input:status"]);
+  assert.deepEqual(states, [{ phase: "recording" }]);
+});
+
 test("main process delegates model setup IPC wiring to the setup IPC module", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 

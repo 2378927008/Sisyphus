@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld("localFlow", {
   },
   onStatus: (callback) => {
     ipcRenderer.on("dictation:status", (_event, payload) => callback(payload));
+  },
+  onSystemInputStatus: (callback) => {
+    ipcRenderer.on("system-input:status", (_event, payload) => callback(payload));
   }
 });

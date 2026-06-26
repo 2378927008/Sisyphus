@@ -9,6 +9,7 @@ import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, "..");
 const htmlPath = path.join(projectRoot, "src", "renderer", "index.html");
+const hudHtmlPath = path.join(projectRoot, "src", "renderer", "hud.html");
 const preloadPath = path.join(projectRoot, "src", "preload.cjs");
 
 applyElectronRuntimeSwitches(app);
@@ -123,10 +124,21 @@ app.whenReady().then(async () => {
   wireIpc();
 
   const rendererMessages = [];
+  const hudMessages = [];
   const window = new BrowserWindow({
     show: false,
     width: 980,
     height: 720,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  const hudWindow = new BrowserWindow({
+    show: false,
+    width: 360,
+    height: 112,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -156,8 +168,41 @@ app.whenReady().then(async () => {
       sourceId: ""
     });
   });
+  hudWindow.webContents.on("console-message", (_event, details) => {
+    hudMessages.push({
+      level: details.level,
+      message: details.message,
+      line: details.lineNumber,
+      sourceId: details.sourceId
+    });
+  });
+  hudWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    hudMessages.push({
+      level: 3,
+      message: `did-fail-load ${errorCode}: ${errorDescription}`,
+      sourceId: validatedURL
+    });
+  });
+  hudWindow.webContents.on("render-process-gone", (_event, details) => {
+    hudMessages.push({
+      level: 3,
+      message: `render-process-gone: ${details.reason}`,
+      sourceId: ""
+    });
+  });
 
   try {
+    await hudWindow.loadFile(hudHtmlPath);
+    const hudState = await waitForHudState(
+      hudWindow,
+      (state) => state.ready && state.hasSystemInputStatusListener && state.hasHudRoot,
+      5000
+    );
+    const hudErrors = hudMessages.filter((item) => item.level >= 3);
+    if (hudErrors.length) {
+      throw new Error(`HUD emitted console errors: ${hudErrors.map((item) => item.message).join(" | ")}`);
+    }
+
     await window.loadFile(htmlPath);
 
     const initialState = await waitForState(
@@ -467,6 +512,7 @@ app.whenReady().then(async () => {
       recordingState,
       completedState,
       failedTargetOutputState,
+      hudState,
       settingsAtDictation,
       rendererMessages: rendererMessages.filter((item) => item.level >= 2)
     }, null, 2));
@@ -481,7 +527,8 @@ app.whenReady().then(async () => {
       name: error.name,
       message: error.message,
       state,
-      rendererMessages
+      rendererMessages,
+      hudMessages
     }, null, 2));
     clearTimeout(timeout);
     app.exit(1);
@@ -501,6 +548,21 @@ async function waitForState(window, predicate, timeoutMs) {
   }
 
   throw new Error(`Timed out waiting for renderer state. Last state: ${JSON.stringify(lastState)}`);
+}
+
+async function waitForHudState(window, predicate, timeoutMs) {
+  const startedAt = Date.now();
+  let lastState = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await readHudState(window);
+    if (predicate(lastState)) {
+      return lastState;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for HUD state. Last state: ${JSON.stringify(lastState)}`);
 }
 
 function readRendererState(window) {
@@ -539,6 +601,16 @@ function readRendererState(window) {
       execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)
+    }))()
+  `);
+}
+
+function readHudState(window) {
+  return window.webContents.executeJavaScript(`
+    (() => ({
+      ready: Boolean(window.localFlow),
+      hasSystemInputStatusListener: typeof window.localFlow?.onSystemInputStatus === 'function',
+      hasHudRoot: Boolean(document.querySelector('#hudRoot'))
     }))()
   `);
 }

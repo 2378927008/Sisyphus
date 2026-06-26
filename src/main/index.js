@@ -12,6 +12,8 @@ import { getProcessingProviderStatus } from "./provider-registry.js";
 import { createModelSetupService } from "./model-setup.js";
 import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
+import { createSystemInputController } from "./system-input-controller.js";
+import { buildHudWindowOptions, getHudHtmlPath } from "./hud-window.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +24,8 @@ let tray;
 let settingsStore;
 let dictationService;
 let modelSetupService;
+let hudWindow;
+let systemInputController;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -48,12 +52,20 @@ function createWindow() {
   });
 }
 
+function createHudWindow() {
+  hudWindow = new BrowserWindow(buildHudWindowOptions({
+    preloadPath: path.join(__dirname, "../preload.cjs")
+  }));
+
+  hudWindow.loadFile(getHudHtmlPath(__dirname));
+}
+
 function createTray() {
   tray = new Tray(nativeImage.createEmpty());
   tray.setToolTip("Local Flow Dictation");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Show", click: () => mainWindow.show() },
-    { label: "Start/stop dictation", click: () => toggleRecording() },
+    { label: "Start/stop dictation", click: () => systemInputController?.toggle() },
     { type: "separator" },
     {
       label: "Quit",
@@ -69,7 +81,7 @@ function createTray() {
 async function registerHotkey() {
   globalShortcut.unregisterAll();
   const settings = await settingsStore.getSettings();
-  const ok = globalShortcut.register(settings.hotkey, () => toggleRecording());
+  const ok = globalShortcut.register(settings.hotkey, () => systemInputController?.toggle());
 
   if (!ok) {
     sendStatus({ phase: "error", message: `Could not register hotkey: ${settings.hotkey}` });
@@ -83,9 +95,45 @@ function toggleRecording() {
 }
 
 function sendStatus(payload) {
-  if (mainWindow) {
+  if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", payload);
   }
+  systemInputController?.handleRendererStatus(payload);
+}
+
+function sendSystemInputStatus(state) {
+  sendWindowMessage(mainWindow, "system-input:status", state);
+  sendWindowMessage(hudWindow, "system-input:status", state);
+
+  if (isActiveSystemInputPhase(state?.phase)) {
+    showHud();
+  }
+}
+
+function showHud() {
+  if (!isUsableWindow(hudWindow)) {
+    return;
+  }
+
+  if (typeof hudWindow.showInactive === "function") {
+    hudWindow.showInactive();
+  } else {
+    hudWindow.show();
+  }
+}
+
+function sendWindowMessage(window, channel, payload) {
+  if (isUsableWindow(window)) {
+    window.webContents.send(channel, payload);
+  }
+}
+
+function isUsableWindow(window) {
+  return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed());
+}
+
+function isActiveSystemInputPhase(phase) {
+  return Boolean(phase && phase !== "idle");
 }
 
 function wireIpc() {
@@ -137,9 +185,17 @@ app.whenReady().then(async () => {
   modelSetupService = createModelSetupService({
     rootPath: process.cwd()
   });
+  systemInputController = createSystemInputController({
+    sendToMain: sendSystemInputStatus,
+    sendToHud: () => {},
+    startRecording: async () => toggleRecording(),
+    stopRecording: async () => toggleRecording(),
+    isReadyToRecord: () => true
+  });
 
   wireIpc();
   createWindow();
+  createHudWindow();
   createTray();
   await registerHotkey();
 });
