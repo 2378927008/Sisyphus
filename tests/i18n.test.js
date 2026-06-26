@@ -20,3 +20,8 @@ test("getUiText returns localized language setting labels", () => {
   assert.equal(getUiText("ru", "label.outputLanguage"), "Язык вывода");
   assert.equal(getUiText("es", "label.recognitionLanguage"), "Idioma de reconocimiento de voz");
 });
+
+test("getUiText returns MyMemory provider labels", () => {
+  assert.equal(getUiText("en", "model.provider.mymemory"), "MyMemory Free (cloud)");
+  assert.equal(getUiText("fr", "model.provider.mymemory"), "MyMemory Free (cloud)");
+});

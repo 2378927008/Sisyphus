@@ -9,6 +9,9 @@ import { detectWhisperAssets } from "./whisper-assets.js";
 import { configureMediaPermissions } from "./media-permissions.js";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { getProcessingProviderStatus } from "./provider-registry.js";
+import { createModelSetupService } from "./model-setup.js";
+import { wireModelSetupIpc } from "./model-setup-ipc.js";
+import { checkTextProvider } from "./local-llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +21,7 @@ let mainWindow;
 let tray;
 let settingsStore;
 let dictationService;
+let modelSetupService;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -96,11 +100,20 @@ function wireIpc() {
     const settings = await settingsStore.getSettings();
     return validateWhisperSetup(settings);
   });
+  ipcMain.handle("diagnostics:text", async () => {
+    const settings = await settingsStore.getSettings({ includeSecrets: true });
+    return checkTextProvider(settings);
+  });
   ipcMain.handle("providers:status", async () => {
     const settings = await settingsStore.getSettings({ includeSecrets: true });
     return getProcessingProviderStatus(settings);
   });
   ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(process.cwd()));
+  wireModelSetupIpc({
+    ipcMain,
+    modelSetupService,
+    settingsStore
+  });
   ipcMain.handle("dictation:wav", async (_event, wavBytes) => {
     const buffer = Buffer.from(wavBytes);
     return dictationService.processWav(buffer);
@@ -112,8 +125,7 @@ app.whenReady().then(async () => {
   const whisperAssetDefaults = await detectWhisperAssets(process.cwd());
   const embeddedLlmDefaults = await detectEmbeddedLlmAssets(process.cwd());
   settingsStore = createSettingsStore(app.getPath("userData"), {
-    ...whisperAssetDefaults
-    ,
+    ...whisperAssetDefaults,
     embeddedLlmCliPath: embeddedLlmDefaults.cliPath,
     embeddedLlmModelPath: embeddedLlmDefaults.modelPath
   }, createSafeStorageSecretCodec(safeStorage));
@@ -121,6 +133,9 @@ app.whenReady().then(async () => {
     settingsStore,
     clipboard,
     notifyStatus: sendStatus
+  });
+  modelSetupService = createModelSetupService({
+    rootPath: process.cwd()
   });
 
   wireIpc();

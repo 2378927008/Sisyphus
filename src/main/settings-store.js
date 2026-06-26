@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   defaultInterfaceLanguage,
@@ -29,12 +29,19 @@ export const defaultSettings = {
   ollamaEnabled: false,
   ollamaBaseUrl: "http://localhost:11434",
   ollamaModel: "qwen3:4b",
-  llmProvider: "embedded",
+  llmProvider: "mymemory",
   embeddedLlmCliPath: "",
   embeddedLlmModelPath: "",
   dictionary: [],
   historyLimit: 20
 };
+
+const localAssetPathKeys = [
+  "whisperCliPath",
+  "whisperModelPath",
+  "embeddedLlmCliPath",
+  "embeddedLlmModelPath"
+];
 
 export function createSafeStorageSecretCodec(safeStorage) {
   try {
@@ -131,7 +138,42 @@ function normalizeDictionary(value) {
 
 async function loadSettings(settingsPath, baseSettings, secretCodec) {
   const persisted = await loadJson(settingsPath, baseSettings);
-  return mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
+  const settings = mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
+  return repairMissingLocalAssetPaths(settings, baseSettings);
+}
+
+async function repairMissingLocalAssetPaths(settings, baseSettings) {
+  let changed = false;
+  const next = { ...settings };
+
+  for (const key of localAssetPathKeys) {
+    const currentPath = String(next[key] || "").trim();
+    const detectedPath = String(baseSettings[key] || "").trim();
+
+    if (!detectedPath || currentPath === detectedPath) {
+      continue;
+    }
+
+    if (currentPath && await isFile(currentPath)) {
+      continue;
+    }
+
+    if (await isFile(detectedPath)) {
+      next[key] = detectedPath;
+      changed = true;
+    }
+  }
+
+  return changed ? mergeSettings(next, baseSettings) : settings;
+}
+
+async function isFile(filePath) {
+  try {
+    const file = await fsStat(filePath);
+    return file.isFile();
+  } catch {
+    return false;
+  }
 }
 
 function hydratePersistedSecrets(settings, secretCodec) {

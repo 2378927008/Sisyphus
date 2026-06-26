@@ -5,8 +5,13 @@ contextBridge.exposeInMainWorld("localFlow", {
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   listHistory: () => ipcRenderer.invoke("history:list"),
   checkWhisper: () => ipcRenderer.invoke("diagnostics:whisper"),
+  checkTextProvider: () => ipcRenderer.invoke("diagnostics:text"),
   getProviderStatus: () => ipcRenderer.invoke("providers:status"),
   getLocalModelStatus: () => ipcRenderer.invoke("llm:status"),
+  getModelSetupStatus: () => ipcRenderer.invoke("models:setup-status"),
+  startModelSetup: (type) => ipcRenderer.invoke("models:setup-start", type),
+  cancelModelSetup: (type) => ipcRenderer.invoke("models:setup-cancel", type),
+  refreshModelSetupStatus: () => ipcRenderer.invoke("models:setup-refresh"),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
   onShortcutToggle: (callback) => {
     ipcRenderer.on("recording:toggle", () => callback());

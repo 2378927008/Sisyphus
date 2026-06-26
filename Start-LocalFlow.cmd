@@ -1,15 +1,36 @@
 @echo off
 setlocal
 
-set "TARGET=%~dp0.worktrees\windows-usable-mvp-onboarding\Start-LocalFlow.cmd"
+cd /d "%~dp0"
 
-if not exist "%TARGET%" (
-  echo Local Flow launcher was not found:
-  echo %TARGET%
-  echo.
-  echo Make sure the windows-usable-mvp-onboarding worktree exists.
+if not exist "package.json" (
+  echo Local Flow package.json was not found.
+  echo This launcher must stay in the Local Flow project folder.
   pause
   exit /b 1
 )
 
-call "%TARGET%"
+npm.cmd start
+if not errorlevel 1 (
+  exit /b 0
+)
+
+echo.
+echo Local Flow did not start. Installing desktop runtime, then trying again...
+set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
+npm.cmd install
+if errorlevel 1 (
+  echo.
+  echo npm install failed. The npm cache or node_modules folder may be locked by another process.
+  echo Close other Local Flow/Electron windows, then run this launcher again.
+  pause
+  exit /b 1
+)
+
+npm.cmd start
+if errorlevel 1 (
+  echo.
+  echo Local Flow failed to start.
+  pause
+  exit /b 1
+)

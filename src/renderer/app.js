@@ -21,19 +21,34 @@ const historyList = document.querySelector("#historyList");
 const refreshHistory = document.querySelector("#refreshHistory");
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
+const checkTextProvider = document.querySelector("#checkTextProvider");
 const diagnosticsList = document.querySelector("#diagnosticsList");
 const microphoneDiagnosticsList = document.querySelector("#microphoneDiagnosticsList");
+const textDiagnosticsList = document.querySelector("#textDiagnosticsList");
 const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
 const localModelStatus = document.querySelector("#localModelStatus");
 const setupLocalModel = document.querySelector("#setupLocalModel");
 const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
+const setupChecklist = document.querySelector("#setupChecklist");
+const whisperSetupStatus = document.querySelector("#whisperSetupStatus");
+const llmSetupTitle = document.querySelector("[data-setup-type='llm'] strong");
+const llmSetupStatus = document.querySelector("#llmSetupStatus");
+const installWhisper = document.querySelector("#installWhisper");
+const installLlm = document.querySelector("#installLlm");
+const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
+const cancelSetup = document.querySelector("#cancelSetup");
+const setupOutput = document.querySelector("#setupOutput");
+const copyResult = document.querySelector("#copyResult");
 
 let recorder = null;
 let isRecording = false;
 let currentSettings = null;
 let currentProviderStatus = null;
+let currentSetupStatus = null;
+let isSetupBusy = false;
+let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
 
 init();
@@ -44,10 +59,6 @@ async function init() {
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
   setReadyStatus();
-  await renderHistory();
-  await renderLocalModelStatus();
-  await refreshProviderStatus();
-
   recordButton.addEventListener("click", toggleRecording);
   openSettings.addEventListener("click", () => setSettingsDrawer(true));
   closeSettings.addEventListener("click", () => setSettingsDrawer(false));
@@ -55,18 +66,40 @@ async function init() {
   refreshHistory.addEventListener("click", renderHistory);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
+  checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
   setupLocalModel.addEventListener("click", showLocalModelInstallCommand);
+  installWhisper.addEventListener("click", () => runModelSetup("whisper"));
+  installLlm.addEventListener("click", () => runModelSetup("llm"));
+  refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
+  cancelSetup.addEventListener("click", cancelActiveModelSetup);
+  copyResult.addEventListener("click", copyLatestResult);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
+  form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
+  form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
   window.localFlow.onShortcutToggle(toggleRecording);
   window.localFlow.onStatus(handleMainStatus);
+
+  await renderHistory();
+  await renderLocalModelStatus();
+  await refreshProviderStatus();
+  await refreshSetupStatusView({ updateStatus: false });
 }
 
 function changeInterfaceLanguage() {
   currentLanguage = normalizeInterfaceLanguage(form.interfaceLanguage.value);
   applyInterfaceLanguage(currentLanguage);
   setReadyStatus();
+  renderSetupChecklist();
   renderHistory();
+}
+
+async function refreshProcessingProviderPreview() {
+  try {
+    await saveSettingsFromCurrentForm({ updateStatus: false });
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 function handleMainStatus(payload) {
@@ -150,6 +183,25 @@ async function runMicrophoneDiagnostics() {
   }
 }
 
+async function runTextProviderDiagnostics() {
+  try {
+    setStatus(t("status.checkingTextProvider"));
+    await saveSettingsFromCurrentForm({ updateStatus: false });
+    const result = await window.localFlow.checkTextProvider();
+    textDiagnosticsList.innerHTML = renderChecks(result.checks);
+    setStatus(result.ready ? t("status.textProviderReady") : t("status.textProviderNeedsAttention"));
+  } catch (error) {
+    textDiagnosticsList.innerHTML = renderChecks([
+      {
+        label: t("diagnostic.textProvider"),
+        status: "fail",
+        message: error.message
+      }
+    ]);
+    setStatus(t("status.textProviderFailed", { message: error.message }));
+  }
+}
+
 async function renderLocalModelStatus() {
   if (!window.localFlow.getLocalModelStatus) return;
 
@@ -180,6 +232,7 @@ async function refreshProviderStatus() {
   if (!window.localFlow.getProviderStatus) return;
   currentProviderStatus = await window.localFlow.getProviderStatus();
   renderProviderStatus();
+  renderSetupChecklist();
   applyRecordReadiness();
 }
 
@@ -187,7 +240,9 @@ function renderProviderStatus() {
   if (!providerStatusText || !currentProviderStatus) return;
   providerStatusText.textContent = t("status.providerMode", {
     mode: t(`provider.mode.${currentProviderStatus.mode}`),
-    asr: currentProviderStatus.asr.label
+    asr: [currentProviderStatus.asr?.label, currentProviderStatus.text?.label]
+      .filter(Boolean)
+      .join(" + ")
   });
 }
 
@@ -238,6 +293,306 @@ function showLocalModelInstallCommand() {
   setStatus(t("model.installCommandShown"));
 }
 
+async function refreshSetupStatusView({ updateStatus = true } = {}) {
+  if (!window.localFlow.getModelSetupStatus) return;
+
+  try {
+    currentSetupStatus = await window.localFlow.getModelSetupStatus();
+  } catch (error) {
+    currentSetupStatus = createFailedSetupStatus(error);
+    if (updateStatus) {
+      setStatus(t("setup.failed"));
+    }
+  }
+  renderSetupChecklist();
+}
+
+async function refreshSetupStatusAndSettings() {
+  if (isSetupBusy) return;
+  if (!window.localFlow.refreshModelSetupStatus) {
+    await refreshSetupStatusView();
+    return;
+  }
+
+  setSetupBusy(true);
+  try {
+    currentSetupStatus = await window.localFlow.refreshModelSetupStatus();
+    await saveDetectedSetupPaths();
+    renderSetupChecklist();
+    await renderLocalModelStatus();
+    await refreshProviderStatus();
+    setStatus(t("setup.refreshed"));
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    setSetupBusy(false);
+  }
+}
+
+async function runModelSetup(type) {
+  if (isSetupBusy) return;
+  if (!window.localFlow.startModelSetup) return;
+
+  setSetupBusy(true);
+  activeSetupType = type;
+  setStatus(t(type === "whisper" ? "setup.whisper.installing" : "setup.llm.installing"));
+
+  const stopPolling = startSetupStatusPolling(type);
+  try {
+    const result = await window.localFlow.startModelSetup(type);
+    if (result.status === "complete") {
+      const refreshedStatus = window.localFlow.refreshModelSetupStatus
+        ? await window.localFlow.refreshModelSetupStatus()
+        : { ...currentSetupStatus, assets: result.assets };
+      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
+      await saveDetectedSetupPaths();
+    } else {
+      const refreshedStatus = window.localFlow.getModelSetupStatus
+        ? await window.localFlow.getModelSetupStatus()
+        : { ...currentSetupStatus, assets: result.assets };
+      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
+    }
+    renderSetupChecklist();
+    await renderLocalModelStatus();
+    await refreshProviderStatus();
+    setStatus(result.status === "complete"
+      ? t(type === "whisper" ? "setup.whisper.complete" : "setup.llm.complete")
+      : result.error || t("setup.failed"));
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    stopPolling();
+    activeSetupType = "";
+    setSetupBusy(false);
+  }
+}
+
+async function cancelActiveModelSetup() {
+  if (!isSetupBusy || !activeSetupType || !window.localFlow.cancelModelSetup) return;
+
+  setStatus(t("setup.cancelling"));
+  try {
+    const result = await window.localFlow.cancelModelSetup(activeSetupType);
+    currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
+    renderSetupChecklist();
+    setStatus(result.error || t("setup.cancelled"));
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+function startSetupStatusPolling(type) {
+  if (!window.localFlow.getModelSetupStatus) {
+    return () => {};
+  }
+
+  currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
+    type,
+    status: "running",
+    output: [],
+    error: ""
+  });
+  renderSetupChecklist();
+
+  const interval = window.setInterval(async () => {
+    try {
+      currentSetupStatus = await window.localFlow.getModelSetupStatus();
+      renderSetupChecklist();
+    } catch {
+      // Keep the last visible setup state while the setup process is still running.
+    }
+  }, 1000);
+
+  return () => window.clearInterval(interval);
+}
+
+function mergeSetupResult(status, type, result) {
+  return {
+    ...(status || {}),
+    assets: status?.assets || result.assets || {},
+    setups: {
+      ...(status?.setups || {}),
+      [type]: result
+    }
+  };
+}
+
+async function saveDetectedSetupPaths() {
+  const assets = currentSetupStatus?.assets || {};
+  const next = {};
+
+  if (assets.whisper?.whisperCliPath) next.whisperCliPath = assets.whisper.whisperCliPath;
+  if (assets.whisper?.whisperModelPath) next.whisperModelPath = assets.whisper.whisperModelPath;
+  if (assets.llm?.cliPath) next.embeddedLlmCliPath = assets.llm.cliPath;
+  if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
+
+  if (Object.keys(next).length) {
+    currentSettings = await window.localFlow.saveSettings(next);
+    fillSettings(currentSettings);
+  }
+}
+
+function renderSetupChecklist() {
+  if (!currentSetupStatus || !setupChecklist) return;
+
+  const whisperReady = Boolean(
+    currentSetupStatus.assets?.whisper?.whisperCliPath &&
+    currentSetupStatus.assets?.whisper?.whisperModelPath
+  );
+  const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
+  const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
+  const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
+  const textSetupState = getTextSetupState(llmReady, llmStatus);
+
+  whisperSetupStatus.textContent = t(getSetupStatusKey("whisper", whisperReady, whisperStatus));
+  llmSetupTitle.textContent = t(`model.provider.${textSetupState.provider}`);
+  llmSetupStatus.textContent = t(textSetupState.statusKey);
+  setupChecklist.dataset.whisperReady = String(whisperReady);
+  setupChecklist.dataset.llmReady = String(textSetupState.ready);
+  installWhisper.hidden = whisperReady;
+  installLlm.hidden = !textSetupState.showInstall;
+  installWhisper.disabled = isSetupBusy || whisperStatus === "running";
+  installLlm.disabled = isSetupBusy || llmStatus === "running";
+  refreshSetupStatus.disabled = isSetupBusy;
+  cancelSetup.hidden = !isSetupBusy;
+  cancelSetup.disabled = !isSetupBusy;
+  renderSetupOutput(getActiveSetupStatus(whisperStatus, llmStatus));
+}
+
+function getTextSetupState(llmReady, llmStatus) {
+  const provider = currentSettings?.llmProvider || form.llmProvider?.value || "mymemory";
+
+  if (provider === "embedded") {
+    return {
+      provider,
+      ready: llmReady,
+      showInstall: !llmReady,
+      statusKey: getSetupStatusKey("llm", llmReady, llmStatus)
+    };
+  }
+
+  if (provider === "ollama") {
+    const ready = Boolean(currentProviderStatus?.text?.ready);
+    return {
+      provider,
+      ready,
+      showInstall: false,
+      statusKey: ready ? "setup.text.ollama.ready" : "setup.text.ollama.missing"
+    };
+  }
+
+  return {
+    provider: "mymemory",
+    ready: true,
+    showInstall: false,
+    statusKey: "setup.text.mymemory.ready"
+  };
+}
+
+function getActiveSetupStatus(whisperStatus, llmStatus) {
+  if (whisperStatus === "running") return currentSetupStatus.setups?.whisper;
+  if (llmStatus === "running") return currentSetupStatus.setups?.llm;
+  const setups = [currentSetupStatus.setups?.whisper, currentSetupStatus.setups?.llm]
+    .filter((setup) => setup?.completedAt || setup?.output?.length);
+  return setups.at(-1) || null;
+}
+
+function renderSetupOutput(setup) {
+  if (!setupOutput) return;
+
+  const lines = getVisibleSetupOutput(setup);
+  if (!lines.length) {
+    setupOutput.hidden = true;
+    setupOutput.textContent = "";
+    return;
+  }
+
+  setupOutput.hidden = false;
+  setupOutput.textContent = lines.join("\n");
+}
+
+function getVisibleSetupOutput(setup) {
+  const lines = (setup?.output || [])
+    .map(sanitizeSetupOutputLine)
+    .filter(Boolean)
+    .slice(-8);
+
+  if (!lines.length && setup?.status === "running") {
+    return [t("setup.progress.wait")];
+  }
+  return lines;
+}
+
+function sanitizeSetupOutputLine(line) {
+  const text = String(line || "").trim();
+  if (!text) return "";
+  if (/[A-Za-z]:\\/.test(text)) return "";
+  if (/Paste these paths/i.test(text)) return "";
+  return text;
+}
+
+function setSetupBusy(busy) {
+  isSetupBusy = busy;
+  renderSetupChecklist();
+}
+
+function createFailedSetupStatus(error) {
+  const message = error?.message || t("setup.failed");
+  return {
+    assets: currentSetupStatus?.assets || {},
+    setups: {
+      whisper: { type: "whisper", status: "failed", output: [], error: message },
+      llm: { type: "llm", status: "failed", output: [], error: message }
+    }
+  };
+}
+
+function getSetupStatusKey(type, ready, status) {
+  if (ready) return `setup.${type}.ready`;
+  if (status === "running") return `setup.${type}.installing`;
+  if (status === "failed") return `setup.${type}.failed`;
+  return `setup.${type}.missing`;
+}
+
+async function copyLatestResult() {
+  const text = resultText.textContent.trim();
+  if (!text || resultText.dataset.emptyResult === "true") return;
+
+  try {
+    await writeClipboardText(text);
+    setStatus(t("status.copied"));
+  } catch {
+    setStatus(t("status.copyFailed"));
+  }
+}
+
+async function writeClipboardText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to the focused-document copy path below.
+    }
+  }
+
+  if (copyTextWithTextarea(text)) return;
+  throw new Error("Copy failed.");
+}
+
+function copyTextWithTextarea(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied;
+}
+
 function setSettingsDrawer(open) {
   settingsDrawer.classList.toggle("open", open);
   settingsDrawer.setAttribute("aria-hidden", open ? "false" : "true");
@@ -285,12 +640,25 @@ async function stopRecording() {
     recorder = null;
 
     const entry = await window.localFlow.processWav(wav);
-    resultText.dataset.emptyResult = "false";
-    resultText.textContent = entry.text;
+    renderDictationResult(entry);
     await renderHistory();
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function renderDictationResult(entry) {
+  if (entry?.status === "failed") {
+    resultText.dataset.emptyResult = "true";
+    resultText.textContent = t("result.outputFailed");
+    setStatus(t("status.outputFailed", {
+      message: entry.processingError || "Unknown text model error."
+    }));
+    return;
+  }
+
+  resultText.dataset.emptyResult = "false";
+  resultText.textContent = entry.text;
 }
 
 async function saveSettings(event) {
@@ -377,6 +745,7 @@ function applyInterfaceLanguage(language) {
   }
 
   renderProviderStatus();
+  renderSetupChecklist();
   updateRecordLabel();
 
   if (resultText.dataset.emptyResult === "true") {

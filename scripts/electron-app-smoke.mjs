@@ -26,10 +26,39 @@ let settings = mergeSettings({
   whisperModelPath: "C:\\smoke\\ggml-base.bin"
 });
 let settingsAtDictation = null;
+let dictationResult = {
+  createdAt: new Date().toISOString(),
+  status: "complete",
+  text: "smoke transcript"
+};
+const settingsSaveCalls = [];
+
+const missingSetupStatus = {
+  assets: {
+    whisper: {},
+    llm: {
+      ready: false,
+      runtimeReady: false,
+      modelReady: false,
+      setupCommand: "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1"
+    }
+  },
+  setups: {
+    whisper: { type: "whisper", status: "idle", output: [], error: "" },
+    llm: { type: "llm", status: "idle", output: [], error: "" }
+  }
+};
+const setupIpcCalls = {
+  status: 0,
+  refresh: 0,
+  start: []
+};
+const setupStartResolvers = new Map();
 
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
   ipcMain.handle("settings:save", (_event, next) => {
+    settingsSaveCalls.push(next);
     settings = mergeSettings(next, settings);
     return settings;
   });
@@ -38,6 +67,12 @@ function wireIpc() {
     ready: true,
     checks: [
       { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
+    ]
+  }));
+  ipcMain.handle("diagnostics:text", () => ({
+    ready: true,
+    checks: [
+      { label: "MyMemory Free", status: "pass", message: "Text provider diagnostics stubbed." }
     ]
   }));
   ipcMain.handle("providers:status", () => getProcessingProviderStatus(settings));
@@ -54,12 +89,32 @@ function wireIpc() {
     cliPath: "",
     modelPath: ""
   }));
+  ipcMain.handle("models:setup-status", () => {
+    setupIpcCalls.status += 1;
+    if (setupIpcCalls.status === 1) {
+      throw new Error("setup status unavailable");
+    }
+    return missingSetupStatus;
+  });
+  ipcMain.handle("models:setup-refresh", () => {
+    setupIpcCalls.refresh += 1;
+    return missingSetupStatus;
+  });
+  ipcMain.handle("models:setup-start", (_event, type) => {
+    setupIpcCalls.start.push(type);
+    return new Promise((resolve) => {
+      setupStartResolvers.set(type, (result) => resolve(result || {
+        type,
+        status: "complete",
+        output: [`${type} setup completed`],
+        error: "",
+        assets: missingSetupStatus.assets
+      }));
+    });
+  });
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
-    return {
-      createdAt: new Date().toISOString(),
-      text: "smoke transcript"
-    };
+    return dictationResult;
   });
 }
 
@@ -110,15 +165,114 @@ app.whenReady().then(async () => {
       (state) => (
         state.ready &&
         state.recordLabel === "开始录音" &&
+        state.statusText === "就绪。快捷键：Ctrl + Alt + Space" &&
         state.interfaceLanguage === "zh-Hans" &&
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&
         state.hasSettingsDrawer &&
         state.hasLocalModelStatus &&
-        state.providerStatusText.includes("Local whisper.cpp")
+        state.hasSetupChecklist &&
+        state.setupChecklistText.includes("Whisper") &&
+        state.llmSetupTitle === "MyMemory Free（云端）" &&
+        state.llmSetupStatusText.includes("自动输出会保持说话语言") &&
+        state.hasInstallWhisperButton &&
+        state.hasInstallLlmButton &&
+        state.installLlmHidden &&
+        state.hasRefreshSetupButton &&
+        state.hasCancelSetupButton &&
+        state.cancelSetupHidden &&
+        state.hasCopyResultButton &&
+        state.hasCheckTextProviderButton &&
+        state.providerStatusText.includes("Local whisper.cpp") &&
+        state.providerStatusText.includes("MyMemory Free")
       ),
       5000
     );
+    await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
+    await waitForState(
+      window,
+      (state) => (
+        state.statusText === "文本输出服务已就绪。" &&
+        state.textDiagnosticsText.includes("MyMemory Free") &&
+        state.textDiagnosticsText.includes("Text provider diagnostics stubbed.")
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
+    await waitForState(window, () => setupIpcCalls.refresh >= 1, 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: (text) => {
+              window.__copyAttempts.push(text);
+              return Promise.resolve();
+            }
+          }
+        });
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(window, (state) => state.copyAttempts === 0, 5000);
+    const failedSetupRefreshCalls = setupIpcCalls.refresh;
+    const failedSetupSaveCalls = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript("document.querySelector('#installLlm').click()");
+    await waitForState(window, () => setupIpcCalls.start.includes("llm"), 5000);
+    setupStartResolvers.get("llm")?.({
+      type: "llm",
+      status: "failed",
+      output: [
+        "Downloading Qwen runtime...",
+        "Primary Hugging Face download failed. Trying mirror...",
+        "Model: C:\\partial\\Qwen3-4B-Q4_K_M.gguf"
+      ],
+      error: "Qwen setup finished but required assets were not found.",
+      assets: {
+        whisper: {},
+        llm: {
+          ready: false,
+          runtimeReady: false,
+          modelReady: true,
+          modelPath: "C:\\partial\\Qwen3-4B-Q4_K_M.gguf"
+        }
+      }
+    });
+    await waitForState(
+      window,
+      (state) => (
+        state.statusText.includes("Qwen setup finished but required assets were not found.") &&
+        state.setupOutputText.includes("Downloading Qwen runtime...") &&
+        state.setupOutputText.includes("Primary Hugging Face download failed. Trying mirror...") &&
+        !state.setupOutputText.includes("C:\\partial")
+      ),
+      5000
+    );
+    if (setupIpcCalls.refresh !== failedSetupRefreshCalls) {
+      throw new Error("Failed setup should not call persistent setup refresh.");
+    }
+    if (settingsSaveCalls.length !== failedSetupSaveCalls) {
+      throw new Error("Failed setup should not save detected setup paths.");
+    }
+    if (settings.embeddedLlmModelPath) {
+      throw new Error(`Failed setup persisted partial LLM model path: ${settings.embeddedLlmModelPath}`);
+    }
+
+    await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
+    await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
+    await waitForState(
+      window,
+      (state) => (
+        state.installWhisperDisabled &&
+        state.installLlmDisabled &&
+        state.refreshSetupDisabled &&
+        !state.cancelSetupHidden
+      ),
+      5000
+    );
+    setupStartResolvers.get("whisper")?.();
+    await waitForState(window, (state) => state.statusText === "Whisper 安装完成。", 5000);
     await window.webContents.executeJavaScript(`
       (() => {
         const interfaceLanguage = document.querySelector('#interfaceLanguage');
@@ -131,7 +285,66 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "en" &&
         state.recordLabel === "Start recording" &&
-        state.providerStatusText === "Local mode · Local whisper.cpp"
+        state.llmSetupTitle === "MyMemory Free (cloud)" &&
+        state.installLlmHidden &&
+        state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'zh-Hans';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const myMemoryTargetPreviewState = await waitForState(
+      window,
+      (state) => (
+        state.outputLanguage === "zh-Hans" &&
+        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'auto';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'mymemory';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    const myMemoryProviderState = await waitForState(
+      window,
+      (state) => (
+        state.llmProvider === "mymemory" &&
+        state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'embedded';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.llmProvider === "embedded" &&
+        state.llmSetupTitle === "Built-in Qwen3" &&
+        !state.installLlmHidden &&
+        state.providerStatusText.includes("Built-in local language model")
       ),
       5000
     );
@@ -175,6 +388,66 @@ app.whenReady().then(async () => {
       ),
       10000
     );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        window.__execCommands = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: (text) => {
+              window.__copyAttempts.push(text);
+              return Promise.reject(new Error('clipboard denied'));
+            }
+          }
+        });
+        document.execCommand = (command) => {
+          window.__execCommands.push(command);
+          return true;
+        };
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.statusText === "已复制。" && state.execCommands.includes("copy"),
+      5000
+    );
+
+    dictationResult = {
+      createdAt: new Date().toISOString(),
+      status: "failed",
+      text: "",
+      transcript: "hello world",
+      processingError: "Local language model exited with code 3221225477."
+    };
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const interfaceLanguage = document.querySelector('#interfaceLanguage');
+        interfaceLanguage.value = 'en';
+        interfaceLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(window, (state) => state.interfaceLanguage === "en", 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    await waitForState(window, (state) => state.isRecording, 10000);
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    const failedTargetOutputState = await waitForState(
+      window,
+      (state) => (
+        !state.isRecording &&
+        state.resultText.includes("Target language output failed") &&
+        state.statusText.includes("Local language model exited with code 3221225477")
+      ),
+      10000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(window, (state) => state.copyAttempts === 0, 5000);
 
     if (settingsAtDictation?.outputLanguage !== "zh-Hans") {
       throw new Error(`Output language was not applied before dictation. Saw ${settingsAtDictation?.outputLanguage || "unset"}.`);
@@ -189,8 +462,11 @@ app.whenReady().then(async () => {
       ok: true,
       initialState,
       englishLanguageState,
+      myMemoryTargetPreviewState,
+      myMemoryProviderState,
       recordingState,
       completedState,
+      failedTargetOutputState,
       settingsAtDictation,
       rendererMessages: rendererMessages.filter((item) => item.level >= 2)
     }, null, 2));
@@ -238,9 +514,29 @@ function readRendererState(window) {
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
+      llmProvider: document.querySelector('#llmProvider')?.value || '',
+      llmSetupTitle: document.querySelector('[data-setup-type="llm"] strong')?.textContent || '',
+      llmSetupStatusText: document.querySelector('#llmSetupStatus')?.textContent || '',
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
+      hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
+      setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
+      setupOutputText: document.querySelector('#setupOutput')?.textContent || '',
+      textDiagnosticsText: document.querySelector('#textDiagnosticsList')?.textContent || '',
+      hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
+      hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
+      hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),
+      hasCancelSetupButton: Boolean(document.querySelector('#cancelSetup')),
+      cancelSetupHidden: Boolean(document.querySelector('#cancelSetup')?.hidden),
+      hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
+      hasCheckTextProviderButton: Boolean(document.querySelector('#checkTextProvider')),
+      installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
+      installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
+      installLlmHidden: Boolean(document.querySelector('#installLlm')?.hidden),
+      refreshSetupDisabled: Boolean(document.querySelector('#refreshSetupStatus')?.disabled),
+      copyAttempts: window.__copyAttempts?.length || 0,
+      execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)
     }))()

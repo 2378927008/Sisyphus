@@ -87,7 +87,8 @@ export function buildOutputPrompt({
   const normalizedOutputLanguage = normalizeOutputLanguage(outputLanguage);
 
   if (normalizedOutputLanguage === defaultOutputLanguage) {
-    return buildPolishPrompt({ mode, transcript, dictionary });
+    const sameLanguageMode = mode === "translate" ? "polish" : mode;
+    return buildPolishPrompt({ mode: sameLanguageMode, transcript, dictionary });
   }
 
   const targetLanguageName = getOutputLanguageName(normalizedOutputLanguage);

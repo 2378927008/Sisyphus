@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseWhisperOutput, buildWhisperArgs } from "../src/main/local-asr.js";
+import { parseWhisperOutput, buildWhisperArgs, transcribeWithWhisper } from "../src/main/local-asr.js";
 
 test("parseWhisperOutput strips timestamp prefixes and joins transcript lines", () => {
   const output = `
@@ -48,3 +48,97 @@ test("buildWhisperArgs includes explicit language when configured", () => {
 
   assert.deepEqual(args, ["-m", "C:/models/ggml-base.bin", "-f", "C:/tmp/input.wav", "-nt", "-l", "zh"]);
 });
+
+test("transcribeWithWhisper retries Chinese recognition when auto returns Latin text for Chinese settings", async () => {
+  const calls = [];
+  const transcript = await transcribeWithWhisper(Buffer.from("wav"), {
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    whisperLanguage: "auto",
+    interfaceLanguage: "zh-Hans",
+    outputLanguage: "auto"
+  }, {
+    spawn: (_file, args) => {
+      calls.push(args);
+      return fakeWhisperProcess(calls.length === 1 ? " Hello world" : " 这是一个测试");
+    },
+    timeoutMs: 1000
+  });
+
+  assert.equal(transcript, "这是一个测试");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].includes("-l"), false);
+  assert.deepEqual(calls[1].slice(-2), ["-l", "zh"]);
+});
+
+test("transcribeWithWhisper replaces Latin-dominant mixed Chinese output with a better Chinese retry", async () => {
+  const calls = [];
+  const transcript = await transcribeWithWhisper(Buffer.from("wav"), {
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    whisperLanguage: "auto",
+    interfaceLanguage: "zh-Hans",
+    outputLanguage: "auto"
+  }, {
+    spawn: (_file, args) => {
+      calls.push(args);
+      return fakeWhisperProcess(calls.length === 1 ? " This is a本地语音输入测试" : " 这是一个本地语音输入测试");
+    },
+    timeoutMs: 1000
+  });
+
+  assert.equal(transcript, "这是一个本地语音输入测试");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].slice(-2), ["-l", "zh"]);
+});
+
+test("transcribeWithWhisper keeps English dictation when Chinese retry is not more Chinese", async () => {
+  const calls = [];
+  const transcript = await transcribeWithWhisper(Buffer.from("wav"), {
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    whisperLanguage: "auto",
+    interfaceLanguage: "zh-Hans",
+    outputLanguage: "auto"
+  }, {
+    spawn: (_file, args) => {
+      calls.push(args);
+      return fakeWhisperProcess(calls.length === 1
+        ? " Hello world this is a test"
+        : " Hello world this is a test");
+    },
+    timeoutMs: 1000
+  });
+
+  assert.equal(transcript, "Hello world this is a test");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].slice(-2), ["-l", "zh"]);
+});
+
+function fakeWhisperProcess(stdoutText) {
+  const child = {
+    stdout: fakeStream([stdoutText]),
+    stderr: fakeStream([]),
+    kill() {},
+    on(event, callback) {
+      if (event === "close") {
+        queueMicrotask(() => callback(0));
+      }
+      return child;
+    }
+  };
+  return child;
+}
+
+function fakeStream(chunks) {
+  return {
+    on(event, callback) {
+      if (event === "data") {
+        for (const chunk of chunks) {
+          queueMicrotask(() => callback(Buffer.from(chunk)));
+        }
+      }
+      return this;
+    }
+  };
+}

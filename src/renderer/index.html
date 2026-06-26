@@ -32,6 +32,26 @@
           </label>
         </div>
 
+        <section id="setupChecklist" class="setup-checklist" aria-live="polite">
+          <div class="setup-row" data-setup-type="whisper">
+            <div>
+              <strong data-i18n="setup.whisper.title">Whisper 语音模型</strong>
+              <p id="whisperSetupStatus" data-i18n="setup.whisper.missing">录音前需要安装。</p>
+            </div>
+            <button id="installWhisper" class="secondary" type="button" data-i18n="setup.installWhisper">安装 Whisper</button>
+          </div>
+          <div class="setup-row" data-setup-type="llm">
+            <div>
+              <strong data-i18n="setup.llm.title">Qwen 本地文本模型</strong>
+              <p id="llmSetupStatus" data-i18n="setup.llm.missing">用于整理和翻译，建议安装。</p>
+            </div>
+            <button id="installLlm" class="secondary" type="button" data-i18n="setup.installLlm">安装 Qwen</button>
+          </div>
+          <button id="refreshSetupStatus" class="ghost" type="button" data-i18n="setup.refresh">刷新安装状态</button>
+          <button id="cancelSetup" class="ghost danger-action" type="button" data-i18n="setup.cancel" hidden>取消安装</button>
+          <pre id="setupOutput" class="setup-output" aria-live="polite" hidden></pre>
+        </section>
+
         <button id="recordButton" class="record-orb" type="button" aria-live="polite">
           <span class="record-ring"></span>
           <span class="record-dot"></span>
@@ -52,6 +72,7 @@
               <p class="eyebrow" data-i18n="label.latestResult">最新结果</p>
               <h2 data-i18n="section.result">可编辑结果</h2>
             </div>
+            <button id="copyResult" type="button" class="ghost" data-i18n="action.copy">复制</button>
           </div>
           <p id="resultText" class="result-text" contenteditable="true" data-empty-result="true" data-i18n="empty.result">还没有转写结果。</p>
         </section>
@@ -95,10 +116,13 @@
             <label>
               <span data-i18n="label.llmProvider">文本模型提供方</span>
               <select id="llmProvider" name="llmProvider">
+                <option value="mymemory" data-i18n="model.provider.mymemory">MyMemory Free</option>
                 <option value="embedded" data-i18n="model.provider.embedded">内置 Qwen3</option>
                 <option value="ollama" data-i18n="model.provider.ollama">Ollama</option>
               </select>
             </label>
+            <button id="checkTextProvider" class="secondary" type="button" data-i18n="action.checkTextProvider">检查文本输出</button>
+            <div id="textDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
             <label>
               <span data-i18n="label.embeddedLlmCliPath">llama.cpp 可执行文件</span>
               <input id="embeddedLlmCliPath" name="embeddedLlmCliPath" placeholder="vendor\llm\bin\llama-cli.exe" />

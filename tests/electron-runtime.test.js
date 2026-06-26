@@ -40,6 +40,18 @@ test("package exposes full app smoke test script", async () => {
   );
 });
 
+test("Windows launcher starts from the project directory before falling back to dependency install", async () => {
+  const launcher = await readFile(new URL("../Start-LocalFlow.cmd", import.meta.url), "utf8");
+  const startIndex = launcher.indexOf("npm.cmd start");
+  const installIndex = launcher.indexOf("npm.cmd install");
+
+  assert.match(launcher, /cd \/d "%~dp0"/);
+  assert.match(launcher, /set "ELECTRON_MIRROR=https:\/\/npmmirror\.com\/mirrors\/electron\/"/);
+  assert.notEqual(startIndex, -1);
+  assert.notEqual(installIndex, -1);
+  assert.ok(startIndex < installIndex, "launcher should try npm start before npm install");
+});
+
 test("main window uses an Electron-compatible CommonJS preload script", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
@@ -108,4 +120,68 @@ test("preload shortcut toggle callback does not receive the raw IPC event", asyn
   listeners.get("recording:toggle")({ sender: "main" }, "unexpected");
 
   assert.deepEqual(calls, [[]]);
+});
+
+test("preload exposes model setup IPC without raw ipcRenderer access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const invoked = [];
+  let exposedApi = null;
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return { channel, payload };
+          },
+          on: () => undefined
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(await exposedApi.getModelSetupStatus(), {
+    channel: "models:setup-status",
+    payload: undefined
+  });
+  assert.deepEqual(await exposedApi.startModelSetup("whisper"), {
+    channel: "models:setup-start",
+    payload: "whisper"
+  });
+  assert.deepEqual(await exposedApi.cancelModelSetup("llm"), {
+    channel: "models:setup-cancel",
+    payload: "llm"
+  });
+  assert.deepEqual(await exposedApi.refreshModelSetupStatus(), {
+    channel: "models:setup-refresh",
+    payload: undefined
+  });
+  assert.deepEqual(invoked.map((item) => item.channel), [
+    "models:setup-status",
+    "models:setup-start",
+    "models:setup-cancel",
+    "models:setup-refresh"
+  ]);
+});
+
+test("main process delegates model setup IPC wiring to the setup IPC module", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /import \{ createModelSetupService \} from "\.\/model-setup\.js";/);
+  assert.match(mainSource, /import \{ wireModelSetupIpc \} from "\.\/model-setup-ipc\.js";/);
+  assert.match(mainSource, /let modelSetupService;/);
+  assert.match(mainSource, /modelSetupService = createModelSetupService\(\{/);
+  assert.match(mainSource, /wireModelSetupIpc\(\{/);
+  assert.match(mainSource, /modelSetupService,/);
+  assert.match(mainSource, /settingsStore/);
 });

@@ -76,6 +76,37 @@ test("processWav keeps partial failure reason in final warning status", async ()
   assert.equal(history[0].processingError, "Install a language model");
 });
 
+test("processWav does not expose raw transcript as output when target language processing fails", async () => {
+  const history = [];
+  const events = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      outputLanguage: "zh-Hans",
+      pasteAfterTranscribe: true,
+      historyLimit: 20
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => {
+      throw new Error("Local language model exited with code 3221225477.");
+    },
+    paste: async () => {
+      throw new Error("paste should not run when target output fails");
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.status, "failed");
+  assert.equal(entry.text, "");
+  assert.equal(entry.transcript, "hello world");
+  assert.equal(entry.outputLanguage, "zh-Hans");
+  assert.equal(entry.processingError, "Local language model exited with code 3221225477.");
+  assert.equal(history[0], entry);
+  assert.equal(events.at(-1).phase, "error");
+});
+
 test("processWav stores detected language metadata for automatic output", async () => {
   const history = [];
   const service = new DictationService({
