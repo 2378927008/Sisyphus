@@ -156,6 +156,10 @@ test("preload exposes model setup IPC without raw ipcRenderer access", async () 
     channel: "models:setup-start",
     payload: "whisper"
   });
+  assert.deepEqual(await exposedApi.cancelModelSetup("llm"), {
+    channel: "models:setup-cancel",
+    payload: "llm"
+  });
   assert.deepEqual(await exposedApi.refreshModelSetupStatus(), {
     channel: "models:setup-refresh",
     payload: undefined
@@ -163,6 +167,7 @@ test("preload exposes model setup IPC without raw ipcRenderer access", async () 
   assert.deepEqual(invoked.map((item) => item.channel), [
     "models:setup-status",
     "models:setup-start",
+    "models:setup-cancel",
     "models:setup-refresh"
   ]);
 });

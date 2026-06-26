@@ -40,6 +40,7 @@ export function createModelSetupService({
 }) {
   const spawnProcess = spawnImpl || spawn || nodeSpawn;
   const state = new Map();
+  const activeRuns = new Map();
 
   async function start(type) {
     const script = getModelSetupScript(type, rootPath);
@@ -59,6 +60,13 @@ export function createModelSetupService({
       completedAt: ""
     });
 
+    const activeRun = {
+      cancelled: false,
+      cancel: null,
+      getOutput: () => []
+    };
+    activeRuns.set(type, activeRun);
+
     let result;
     try {
       result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree, (output) => {
@@ -69,12 +77,26 @@ export function createModelSetupService({
             output: [...output]
           });
         }
+      }, (controls) => {
+        activeRun.cancel = controls.cancel;
+        activeRun.getOutput = controls.getOutput;
       });
     } catch (error) {
+      if (activeRun.cancelled) {
+        return getStatus(type);
+      }
       return failSetup(type, {
         output: error.output || [],
         error: formatSetupError(error)
       });
+    } finally {
+      if (activeRuns.get(type) === activeRun) {
+        activeRuns.delete(type);
+      }
+    }
+
+    if (activeRun.cancelled) {
+      return getStatus(type);
     }
 
     try {
@@ -96,6 +118,27 @@ export function createModelSetupService({
         error: formatSetupError(error)
       });
     }
+  }
+
+  function cancel(type) {
+    const current = getStatus(type);
+    const activeRun = activeRuns.get(type);
+
+    if (current.status !== "running" || !activeRun) {
+      return current;
+    }
+
+    activeRun.cancelled = true;
+    activeRun.cancel?.();
+    setState(type, {
+      ...current,
+      status: "failed",
+      output: activeRun.getOutput(),
+      error: "Setup cancelled.",
+      completedAt: new Date().toISOString()
+    });
+    activeRuns.delete(type);
+    return getStatus(type);
   }
 
   async function refresh() {
@@ -138,6 +181,7 @@ export function createModelSetupService({
 
   return {
     start,
+    cancel,
     refresh,
     getStatus
   };
@@ -183,7 +227,7 @@ export function killSetupProcessTree(child, spawn = nodeSpawn, platform = proces
   child?.kill?.();
 }
 
-function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput) {
+function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput, onControls = () => {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const output = [];
@@ -244,6 +288,20 @@ function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput) {
         ["-ExecutionPolicy", "Bypass", "-File", script.scriptPath, ...script.args],
         { windowsHide: true }
       );
+      onControls({
+        cancel() {
+          try {
+            killProcessTree(child);
+          } catch {
+            child?.kill?.();
+          }
+          fail(new Error("Setup cancelled."));
+        },
+        getOutput() {
+          flushOutput();
+          return [...output];
+        }
+      });
     } catch (error) {
       fail(error);
       return;

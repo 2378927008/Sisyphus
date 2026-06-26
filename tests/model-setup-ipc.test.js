@@ -201,6 +201,39 @@ test("model setup status IPC only refreshes setup status without saving settings
   assert.equal(saveCalls, 0);
 });
 
+test("model setup cancel IPC delegates to the setup service", async () => {
+  const handlers = new Map();
+  const calls = [];
+  const cancelled = {
+    type: "llm",
+    status: "failed",
+    error: "Setup cancelled.",
+    output: ["download started"]
+  };
+
+  wireModelSetupIpc({
+    ipcMain: fakeIpcMain(handlers),
+    modelSetupService: {
+      refresh: async () => ({ assets: {}, setups: {} }),
+      start: async () => ({ status: "complete" }),
+      cancel: (type) => {
+        calls.push(type);
+        return cancelled;
+      }
+    },
+    settingsStore: {
+      saveSettings: async () => {
+        throw new Error("cancel should not save settings");
+      }
+    }
+  });
+
+  const result = await handlers.get("models:setup-cancel")(null, "llm");
+
+  assert.equal(result, cancelled);
+  assert.deepEqual(calls, ["llm"]);
+});
+
 function fakeIpcMain(handlers) {
   return {
     handle(channel, handler) {

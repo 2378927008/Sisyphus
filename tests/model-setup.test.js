@@ -130,6 +130,53 @@ test("createModelSetupService rejects duplicate setup requests for the same type
   await firstRun;
 });
 
+test("createModelSetupService cancels a running setup and allows retry", async () => {
+  let attempts = 0;
+  const killedPids = [];
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    killProcessTree: (child) => {
+      killedPids.push(child.pid);
+    },
+    spawn: () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return fakeStuckChildProcess();
+      }
+      return fakeChildProcess({ code: 0, stdout: ["retry ok\n"] });
+    },
+    refreshAssets: async () => readyAssets()
+  });
+
+  const firstRun = service.start("llm");
+  await delay(0);
+
+  const cancelled = service.cancel("llm");
+
+  assert.equal(cancelled.status, "failed");
+  assert.equal(cancelled.error, "Setup cancelled.");
+  assert.deepEqual(killedPids, [2468]);
+  assert.equal((await firstRun).status, "failed");
+  assert.equal(service.getStatus("llm").status, "failed");
+
+  const retry = await service.start("llm");
+
+  assert.equal(retry.status, "complete");
+  assert.equal(attempts, 2);
+});
+
+test("createModelSetupService returns current status when cancelling an idle setup", () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakeChildProcess({ code: 0 }),
+    refreshAssets: async () => readyAssets()
+  });
+
+  const status = service.cancel("llm");
+
+  assert.equal(status.status, "idle");
+});
+
 test("createModelSetupService exposes setup output while the process is still running", async () => {
   let closeProcess = null;
   const service = createModelSetupService({

@@ -411,6 +411,10 @@ textarea {
   font-weight: 700;
 }
 
+.danger-action {
+  color: var(--danger);
+}
+
 .model-status,
 .diagnostic {
   display: grid;

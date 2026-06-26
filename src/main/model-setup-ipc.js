@@ -11,6 +11,7 @@ export function wireModelSetupIpc({ ipcMain, modelSetupService, settingsStore })
     }
     return result;
   });
+  ipcMain.handle("models:setup-cancel", (_event, type) => modelSetupService.cancel(type));
 }
 
 export async function refreshDetectedModelPaths({ modelSetupService, settingsStore }) {

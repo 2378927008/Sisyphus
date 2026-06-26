@@ -179,6 +179,8 @@ app.whenReady().then(async () => {
         state.hasInstallLlmButton &&
         state.installLlmHidden &&
         state.hasRefreshSetupButton &&
+        state.hasCancelSetupButton &&
+        state.cancelSetupHidden &&
         state.hasCopyResultButton &&
         state.hasCheckTextProviderButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
@@ -261,7 +263,12 @@ app.whenReady().then(async () => {
     await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
     await waitForState(
       window,
-      (state) => state.installWhisperDisabled && state.installLlmDisabled && state.refreshSetupDisabled,
+      (state) => (
+        state.installWhisperDisabled &&
+        state.installLlmDisabled &&
+        state.refreshSetupDisabled &&
+        !state.cancelSetupHidden
+      ),
       5000
     );
     setupStartResolvers.get("whisper")?.();
@@ -520,6 +527,8 @@ function readRendererState(window) {
       hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
       hasRefreshSetupButton: Boolean(document.querySelector('#refreshSetupStatus')),
+      hasCancelSetupButton: Boolean(document.querySelector('#cancelSetup')),
+      cancelSetupHidden: Boolean(document.querySelector('#cancelSetup')?.hidden),
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
       hasCheckTextProviderButton: Boolean(document.querySelector('#checkTextProvider')),
       installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),

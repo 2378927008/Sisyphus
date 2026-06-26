@@ -38,6 +38,7 @@ const llmSetupStatus = document.querySelector("#llmSetupStatus");
 const installWhisper = document.querySelector("#installWhisper");
 const installLlm = document.querySelector("#installLlm");
 const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
+const cancelSetup = document.querySelector("#cancelSetup");
 const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
 
@@ -47,6 +48,7 @@ let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
 let isSetupBusy = false;
+let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
 
 init();
@@ -69,6 +71,7 @@ async function init() {
   installWhisper.addEventListener("click", () => runModelSetup("whisper"));
   installLlm.addEventListener("click", () => runModelSetup("llm"));
   refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
+  cancelSetup.addEventListener("click", cancelActiveModelSetup);
   copyResult.addEventListener("click", copyLatestResult);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
   form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
@@ -331,6 +334,7 @@ async function runModelSetup(type) {
   if (!window.localFlow.startModelSetup) return;
 
   setSetupBusy(true);
+  activeSetupType = type;
   setStatus(t(type === "whisper" ? "setup.whisper.installing" : "setup.llm.installing"));
 
   const stopPolling = startSetupStatusPolling(type);
@@ -358,7 +362,22 @@ async function runModelSetup(type) {
     setStatus(error.message);
   } finally {
     stopPolling();
+    activeSetupType = "";
     setSetupBusy(false);
+  }
+}
+
+async function cancelActiveModelSetup() {
+  if (!isSetupBusy || !activeSetupType || !window.localFlow.cancelModelSetup) return;
+
+  setStatus(t("setup.cancelling"));
+  try {
+    const result = await window.localFlow.cancelModelSetup(activeSetupType);
+    currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
+    renderSetupChecklist();
+    setStatus(result.error || t("setup.cancelled"));
+  } catch (error) {
+    setStatus(error.message);
   }
 }
 
@@ -435,6 +454,8 @@ function renderSetupChecklist() {
   installWhisper.disabled = isSetupBusy || whisperStatus === "running";
   installLlm.disabled = isSetupBusy || llmStatus === "running";
   refreshSetupStatus.disabled = isSetupBusy;
+  cancelSetup.hidden = !isSetupBusy;
+  cancelSetup.disabled = !isSetupBusy;
   renderSetupOutput(getActiveSetupStatus(whisperStatus, llmStatus));
 }
 
