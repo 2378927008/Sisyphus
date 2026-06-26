@@ -188,7 +188,12 @@ app.whenReady().then(async () => {
   systemInputController = createSystemInputController({
     sendToMain: sendSystemInputStatus,
     sendToHud: () => {},
-    startRecording: async () => toggleRecording(),
+    startRecording: async () => {
+      systemInputController.setPhase("recording", {
+        message: "Recording..."
+      });
+      toggleRecording();
+    },
     stopRecording: async () => toggleRecording(),
     isReadyToRecord: () => true
   });

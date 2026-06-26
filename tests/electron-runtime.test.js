@@ -217,3 +217,16 @@ test("main process delegates model setup IPC wiring to the setup IPC module", as
   assert.match(mainSource, /modelSetupService,/);
   assert.match(mainSource, /settingsStore/);
 });
+
+test("main process marks system input recording before shortcut toggle reaches renderer", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*stopRecording:/);
+
+  assert.ok(startRecordingMatch, "system input controller should use a block startRecording handler");
+  assert.match(startRecordingMatch.groups.body, /systemInputController\.setPhase\("recording",\s*\{\s*message:/);
+  assert.ok(
+    startRecordingMatch.groups.body.indexOf("systemInputController.setPhase") <
+      startRecordingMatch.groups.body.indexOf("toggleRecording()"),
+    "recording phase should be broadcast before renderer toggle"
+  );
+});
