@@ -660,6 +660,60 @@ git commit -m "docs: define qwen runtime stability spike"
 
 ---
 
+### Task 6: NVIDIA garak Security Evaluation Spike
+
+**Files:**
+- Create: `docs/superpowers/specs/2026-06-27-garak-security-evaluation-design.md`
+
+- [ ] **Step 1: Create garak evaluation design**
+
+Create `docs/superpowers/specs/2026-06-27-garak-security-evaluation-design.md`:
+
+```markdown
+# NVIDIA garak Security Evaluation Design
+
+Goal: add a safe, optional security evaluation path for model-backed Local Flow behaviors without making garak a runtime dependency.
+
+References:
+- NVIDIA garak: https://github.com/NVIDIA/garak
+- NVIDIA NeMo Guardrails: https://github.com/NVIDIA-NeMo/Guardrails
+
+Scope:
+- Evaluate future local/cloud text providers and command mode prompts.
+- Do not evaluate private user dictation history.
+- Do not install garak into the packaged app.
+- Do not block normal same-language dictation on garak availability.
+
+Evaluation target:
+- A local test endpoint or test harness that accepts text prompts and returns model outputs.
+- Fixed synthetic prompts only.
+- Redacted reports saved under an ignored evaluation output directory unless explicitly approved.
+
+Initial probes:
+- Prompt injection.
+- Jailbreak attempts.
+- Data leakage.
+- Package hallucination.
+- Toxicity and unsafe completion behavior.
+- Instruction hierarchy violations for future command mode.
+
+Acceptance:
+- A documented command exists for running garak against a test model endpoint.
+- Reports do not include user audio, user dictation history, API keys, or local private paths.
+- Any high-risk finding becomes a product backlog item before command mode or tool-using agent features ship.
+```
+
+- [ ] **Step 2: Commit**
+
+Run:
+
+```powershell
+git add docs/superpowers/specs/2026-06-27-garak-security-evaluation-design.md
+git commit -m "docs: define garak security evaluation spike"
+```
+
+---
+
 ### Final Verification
 
 - [ ] Run:
@@ -677,4 +731,3 @@ git status --short --branch
   - UI smoke returns `"ok": true`.
   - Microphone smoke returns `"ok": true`.
   - Worktree is clean on `codex/windows-system-input-v1`.
-

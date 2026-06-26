@@ -14,6 +14,8 @@ These projects are useful for product and architecture patterns:
 - VoiceInk: https://github.com/Beingpax/VoiceInk
 - whisper.cpp: https://github.com/ggml-org/whisper.cpp
 - WhisperKit / Argmax OSS Swift: https://github.com/argmaxinc/WhisperKit
+- NVIDIA garak: https://github.com/NVIDIA/garak
+- NVIDIA NeMo Guardrails: https://github.com/NVIDIA-NeMo/Guardrails
 
 ## Reuse Rules
 
@@ -71,6 +73,21 @@ For code borrowed into Local Flow:
 - Logs must not include raw API keys, full tokens, or private audio paths unless the user explicitly exports diagnostics.
 - Any model installer must support cancellation and failure recovery.
 
+## NVIDIA Security Tooling
+
+NVIDIA `garak` is the relevant reference for LLM vulnerability scanning. It probes LLMs or dialogue systems for jailbreaks, prompt injection, data leakage, toxicity, hallucination, package hallucination, and related failure modes. Treat it as a red-team scanner for model-backed behaviors, not as a replacement for source-code review.
+
+NVIDIA NeMo Guardrails is a separate guardrails framework. It is useful as an architecture reference for input rails, output rails, execution rails, and dialog rails, especially if Local Flow later exposes tool-using agents or richer command mode behavior.
+
+For Local Flow, use NVIDIA tooling this way:
+
+- Do not install `garak` into the main app runtime.
+- Add a separate security-evaluation environment when we have a stable local or cloud text provider to test.
+- Run `garak` only against an explicit test endpoint or local model wrapper, never against private user dictation history.
+- Keep reports under ignored or redacted evaluation output unless the user explicitly wants them committed.
+- Use NeMo Guardrails patterns to design boundaries for future command mode, not for the current same-language dictation path.
+- Keep normal dictation independent of guardrails frameworks so voice input remains fast and local-first.
+
 ## Current Local Flow Decision
 
 For the next Windows phase, Local Flow will not import third-party code. It will borrow these patterns:
@@ -83,4 +100,3 @@ For the next Windows phase, Local Flow will not import third-party code. It will
 - Third-party model setup remains optional and failure-tolerant.
 
 Qwen/llama.cpp is handled as a separate stability spike. It must not block the Windows system-level input experience.
-
