@@ -1,9 +1,18 @@
 import path from "node:path";
 
-export function buildHudWindowOptions({ preloadPath }) {
+const hudSize = {
+  width: 360,
+  height: 112
+};
+const hudBottomOffset = 48;
+
+export function buildHudWindowOptions({ preloadPath, workArea } = {}) {
+  const position = getHudWindowPosition(workArea);
+
   return {
-    width: 360,
-    height: 112,
+    width: hudSize.width,
+    height: hudSize.height,
+    ...position,
     frame: false,
     resizable: false,
     movable: false,
@@ -26,4 +35,19 @@ export function buildHudWindowOptions({ preloadPath }) {
 
 export function getHudHtmlPath(rootDir) {
   return path.join(rootDir, "../renderer/hud.html");
+}
+
+export function getHudPreloadPath(rootDir) {
+  return path.join(rootDir, "../hud-preload.cjs");
+}
+
+function getHudWindowPosition(workArea) {
+  if (!workArea) {
+    return {};
+  }
+
+  return {
+    x: Math.round(workArea.x + (workArea.width - hudSize.width) / 2),
+    y: Math.round(workArea.y + workArea.height - hudSize.height - hudBottomOffset)
+  };
 }

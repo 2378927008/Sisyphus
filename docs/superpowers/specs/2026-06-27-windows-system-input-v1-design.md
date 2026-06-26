@@ -182,4 +182,3 @@ Manual tests should cover:
 - Qwen missing or broken does not prevent recording.
 - The main window remains available for setup and recovery.
 - Automated tests, app smoke, and microphone smoke pass.
-

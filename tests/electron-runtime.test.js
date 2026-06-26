@@ -281,6 +281,46 @@ test("preload exposes system input status listener without raw ipcRenderer acces
   assert.deepEqual(states, [{ phase: "recording" }]);
 });
 
+test("HUD preload exposes only system input status subscription", async () => {
+  const preloadSource = await readFile(new URL("../src/hud-preload.cjs", import.meta.url), "utf8");
+  let exposedApi = null;
+  const channels = [];
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          on: (channel, callback) => {
+            channels.push(channel);
+            callback({ sender: "main" }, { phase: "warning" });
+          }
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "hud-preload.cjs" });
+
+  const states = [];
+  exposedApi.onSystemInputStatus((state) => states.push(state));
+
+  assert.deepEqual(Object.keys(exposedApi), ["onSystemInputStatus"]);
+  assert.deepEqual(channels, ["system-input:status"]);
+  assert.deepEqual(states, [{ phase: "warning" }]);
+});
+
+test("HUD renderer names warning lifecycle states", async () => {
+  const hudSource = await readFile(new URL("../src/renderer/hud.js", import.meta.url), "utf8");
+
+  assert.match(hudSource, /warning:\s*"[^"]+"/);
+});
+
 test("preload exposes safe renderer recording status reporting without raw ipcRenderer access", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   const sent = [];
@@ -345,6 +385,16 @@ test("main process uses explicit renderer commands for system input start and st
   assert.match(mainSource, /ipcMain\.on\("recording:status"/);
   assert.match(mainSource, /const status = sanitizeRecordingStatusPayload\(payload\)/);
   assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
+});
+
+test("main process creates HUD with dedicated least-privilege preload", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const createHudMatch = mainSource.match(/function createHudWindow\(\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(createHudMatch, "createHudWindow should be defined");
+  assert.match(mainSource, /import \{ buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath \} from "\.\/hud-window\.js";/);
+  assert.match(createHudMatch.groups.body, /preloadPath: getHudPreloadPath\(__dirname\)/);
+  assert.doesNotMatch(createHudMatch.groups.body, /\.\.\/preload\.cjs/);
 });
 
 test("main process only accepts recording status from the main renderer", async () => {

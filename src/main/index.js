@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, session, Tray } from "electron";
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-store.js";
@@ -13,7 +13,7 @@ import { createModelSetupService } from "./model-setup.js";
 import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
 import { createSystemInputController } from "./system-input-controller.js";
-import { buildHudWindowOptions, getHudHtmlPath } from "./hud-window.js";
+import { buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath } from "./hud-window.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererRecordingPhases = new Set([
@@ -71,7 +71,8 @@ function createWindow() {
 
 function createHudWindow() {
   hudWindow = new BrowserWindow(buildHudWindowOptions({
-    preloadPath: path.join(__dirname, "../preload.cjs")
+    preloadPath: getHudPreloadPath(__dirname),
+    workArea: screen.getPrimaryDisplay().workArea
   }));
 
   hudWindow.loadFile(getHudHtmlPath(__dirname));

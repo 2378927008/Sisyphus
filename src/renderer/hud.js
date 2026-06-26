@@ -10,6 +10,7 @@ const titleByPhase = {
   transcribing: "正在转写",
   pasting: "正在粘贴",
   done: "已输入",
+  warning: "需要确认",
   error: "需要处理"
 };
 
