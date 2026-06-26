@@ -1,4 +1,14 @@
-const validPhases = new Set(["idle", "recording", "transcribing", "pasting", "done", "error", "warning"]);
+const validPhases = new Set([
+  "idle",
+  "starting",
+  "recording",
+  "stopping",
+  "transcribing",
+  "pasting",
+  "done",
+  "error",
+  "warning"
+]);
 
 export function createSystemInputController({
   sendToMain = () => {},
@@ -82,7 +92,9 @@ export function createSystemInputController({
 }
 
 function normalizeRendererPhase(phase) {
+  if (phase === "starting") return "starting";
   if (phase === "recording") return "recording";
+  if (phase === "stopping") return "stopping";
   if (phase === "done") return "done";
   if (phase === "error") return "error";
   if (phase === "warning") return "warning";
@@ -92,5 +104,5 @@ function normalizeRendererPhase(phase) {
 }
 
 function isBusyPhase(phase) {
-  return phase === "transcribing" || phase === "pasting";
+  return phase === "starting" || phase === "stopping" || phase === "transcribing" || phase === "pasting";
 }

@@ -32,6 +32,15 @@ test("system input controller toggles recording through injected callbacks", asy
   assert.deepEqual(calls, ["start", "stop"]);
 });
 
+test("system input controller exposes starting and stopping lifecycle phases", () => {
+  const controller = createSystemInputController();
+
+  controller.setPhase("starting", { message: "Starting" });
+  assert.equal(controller.getState().phase, "starting");
+  controller.handleRendererStatus({ phase: "stopping", message: "Stopping" });
+  assert.equal(controller.getState().phase, "stopping");
+});
+
 test("system input controller ignores concurrent recording starts while pending", async () => {
   let resolveStart;
   const calls = [];
@@ -67,6 +76,37 @@ test("system input controller ignores toggles while renderer is processing audio
   await controller.toggle();
 
   assert.deepEqual(calls, []);
+});
+
+test("system input controller ignores toggles while start or stop command is pending", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start"),
+    stopRecording: async () => calls.push("stop")
+  });
+
+  controller.setPhase("starting");
+  await controller.toggle();
+  controller.setPhase("stopping");
+  await controller.toggle();
+
+  assert.deepEqual(calls, []);
+});
+
+test("system input controller terminal phases allow a new start", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start")
+  });
+
+  controller.setPhase("done");
+  await controller.toggle();
+  controller.setPhase("warning");
+  await controller.toggle();
+  controller.setPhase("error");
+  await controller.toggle();
+
+  assert.deepEqual(calls, ["start", "start", "start"]);
 });
 
 test("system input controller does not start when setup is not ready", async () => {

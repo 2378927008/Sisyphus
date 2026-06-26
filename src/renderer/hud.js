@@ -4,7 +4,9 @@ const hudMessage = document.querySelector("#hudMessage");
 
 const titleByPhase = {
   idle: "Local Flow",
+  starting: "正在启动",
   recording: "正在录音",
+  stopping: "正在停止",
   transcribing: "正在转写",
   pasting: "正在粘贴",
   done: "已输入",

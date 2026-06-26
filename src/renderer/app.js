@@ -44,6 +44,7 @@ const copyResult = document.querySelector("#copyResult");
 
 let recorder = null;
 let isRecording = false;
+let recordingLifecyclePhase = "idle";
 let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
@@ -78,6 +79,8 @@ async function init() {
   form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
   window.localFlow.onShortcutToggle(toggleRecording);
+  window.localFlow.onRecordingStart(startRecording);
+  window.localFlow.onRecordingStop(stopRecording);
   window.localFlow.onStatus(handleMainStatus);
 
   await renderHistory();
@@ -605,21 +608,36 @@ function closeSettingsFromBackdrop(event) {
 }
 
 async function toggleRecording() {
-  if (isRecording) {
+  if (recordingLifecyclePhase === "recording") {
     await stopRecording();
-  } else {
+  } else if (recordingLifecyclePhase === "idle") {
     await startRecording();
   }
 }
 
 async function startRecording() {
+  if (recordingLifecyclePhase !== "idle") return;
+
+  setRecordingLifecyclePhase("starting");
+  reportRecordingLifecycle({ phase: "starting", message: t("status.preparing") });
+
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
-    if (!ensureRecordReady()) return;
+    if (!ensureRecordReady()) {
+      const message = recordButton.title || statusText.textContent || "Recording is not ready.";
+      setRecordingLifecyclePhase("idle");
+      reportRecordingLifecycle({
+        phase: "error",
+        reason: "not_ready",
+        message
+      });
+      return;
+    }
 
     recorder = new WavRecorder();
     await recorder.start();
     isRecording = true;
+    setRecordingLifecyclePhase("recording");
     document.body.classList.add("recording");
     updateRecordLabel();
     setStatus(t("status.recording"));
@@ -627,11 +645,22 @@ async function startRecording() {
   } catch (error) {
     const message = describeMicrophoneError(error);
     setStatus(message);
+    recorder = null;
+    isRecording = false;
+    setRecordingLifecyclePhase("idle");
+    document.body.classList.remove("recording");
+    updateRecordLabel();
+    applyRecordReadiness();
     reportRecordingLifecycle({ phase: "error", message });
   }
 }
 
 async function stopRecording() {
+  if (recordingLifecyclePhase !== "recording") return;
+
+  setRecordingLifecyclePhase("stopping");
+  reportRecordingLifecycle({ phase: "stopping", message: t("status.preparing") });
+
   try {
     isRecording = false;
     document.body.classList.remove("recording");
@@ -646,8 +675,15 @@ async function stopRecording() {
     const entry = await window.localFlow.processWav(wav);
     renderDictationResult(entry);
     await renderHistory();
+    setRecordingLifecyclePhase("idle");
   } catch (error) {
     setStatus(error.message);
+    recorder = null;
+    isRecording = false;
+    setRecordingLifecyclePhase("idle");
+    document.body.classList.remove("recording");
+    updateRecordLabel();
+    applyRecordReadiness();
     reportRecordingLifecycle({ phase: "error", message: error.message });
   }
 }
@@ -833,6 +869,10 @@ function setStatus(message) {
 
 function reportRecordingLifecycle(payload) {
   window.localFlow.reportRecordingStatus?.(payload);
+}
+
+function setRecordingLifecyclePhase(phase) {
+  recordingLifecyclePhase = phase;
 }
 
 function t(key, replacements = {}) {

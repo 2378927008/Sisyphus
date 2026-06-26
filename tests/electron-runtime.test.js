@@ -122,6 +122,46 @@ test("preload shortcut toggle callback does not receive the raw IPC event", asyn
   assert.deepEqual(calls, [[]]);
 });
 
+test("preload exposes explicit recording command listeners without raw IPC events", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const listeners = new Map();
+  let exposedApi = null;
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: () => undefined,
+          on: (channel, listener) => {
+            listeners.set(channel, listener);
+          },
+          send: () => undefined
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  const calls = [];
+  exposedApi.onRecordingStart((...args) => calls.push(["start", args]));
+  exposedApi.onRecordingStop((...args) => calls.push(["stop", args]));
+  listeners.get("recording:start")({ sender: "main" }, "unexpected");
+  listeners.get("recording:stop")({ sender: "main" }, "unexpected");
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(calls, [
+    ["start", []],
+    ["stop", []]
+  ]);
+});
+
 test("preload exposes model setup IPC without raw ipcRenderer access", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   const invoked = [];
@@ -253,15 +293,36 @@ test("main process delegates model setup IPC wiring to the setup IPC module", as
   assert.match(mainSource, /settingsStore/);
 });
 
-test("main process waits for renderer recording lifecycle reports before marking recording", async () => {
+test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*stopRecording:/);
+  const stopRecordingMatch = mainSource.match(/stopRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*isReadyToRecord:/);
 
   assert.ok(startRecordingMatch, "system input controller should use a block startRecording handler");
+  assert.ok(stopRecordingMatch, "system input controller should use a block stopRecording handler");
   assert.doesNotMatch(startRecordingMatch.groups.body, /setPhase\("recording"/);
-  assert.match(startRecordingMatch.groups.body, /toggleRecording\(\)/);
+  assert.doesNotMatch(startRecordingMatch.groups.body, /toggleRecording\(\)/);
+  assert.doesNotMatch(stopRecordingMatch.groups.body, /toggleRecording\(\)/);
+  assert.match(startRecordingMatch.groups.body, /sendRecordingStartCommand\(\)/);
+  assert.match(stopRecordingMatch.groups.body, /sendRecordingStopCommand\(\)/);
+  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:start"\)/);
+  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:stop"\)/);
   assert.match(mainSource, /ipcMain\.on\("recording:status"/);
-  assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(sanitizeRecordingStatusPayload\(payload\)\)/);
+  assert.match(mainSource, /const status = sanitizeRecordingStatusPayload\(payload\)/);
+  assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
+});
+
+test("main process sets command busy phases and times out missing renderer acknowledgements", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /systemInputController\.setPhase\("starting"/);
+  assert.match(mainSource, /systemInputController\.setPhase\("stopping"/);
+  assert.match(mainSource, /scheduleRecordingCommandTimeout\("starting"/);
+  assert.match(mainSource, /scheduleRecordingCommandTimeout\("stopping"/);
+  assert.match(mainSource, /setTimeout\(\(\) => \{/);
+  assert.match(mainSource, /reason: "renderer_timeout"/);
+  assert.match(mainSource, /clearRecordingCommandTimeout\(\)/);
+  assert.match(mainSource, /if \(!\["starting", "stopping"\]\.includes\(status\.phase\)\) \{\s*clearRecordingCommandTimeout\(\);\s*\}/);
 });
 
 test("main process hides HUD when system input returns idle", async () => {
@@ -269,8 +330,21 @@ test("main process hides HUD when system input returns idle", async () => {
   const sendStatusMatch = mainSource.match(/function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
-  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
+  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*clearTerminalAutoIdle\(\);\s*hideHud\(\);\s*return;\s*\}/);
   assert.match(mainSource, /function hideHud\(\) \{/);
+});
+
+test("main process auto-idles terminal HUD states and caps renderer status payloads", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /const terminalSystemInputPhases = new Set\(\["done", "warning", "error"\]\)/);
+  assert.match(mainSource, /scheduleTerminalAutoIdle\(state\)/);
+  assert.match(mainSource, /systemInputController\?\.setPhase\("idle"/);
+  assert.match(mainSource, /clearTerminalAutoIdle\(\)/);
+  assert.match(mainSource, /slice\(0, maxRendererStatusTextLength\)/);
+  assert.match(mainSource, /const maxRendererStatusTextLength = 240/);
+  assert.match(mainSource, /"starting"/);
+  assert.match(mainSource, /"stopping"/);
 });
 
 test("renderer reports recording lifecycle only after start succeeds and before stop processing", async () => {
@@ -293,4 +367,25 @@ test("renderer reports recording lifecycle only after start succeeds and before 
   );
   assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
   assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
+});
+
+test("renderer uses explicit command handlers and local lifecycle guards", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const toggleRecordingMatch = appSource.match(/async function toggleRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.match(appSource, /let recordingLifecyclePhase = "idle";/);
+  assert.match(appSource, /window\.localFlow\.onRecordingStart\(startRecording\)/);
+  assert.match(appSource, /window\.localFlow\.onRecordingStop\(stopRecording\)/);
+  assert.match(toggleRecordingMatch.groups.body, /recordingLifecyclePhase === "idle"/);
+  assert.match(toggleRecordingMatch.groups.body, /recordingLifecyclePhase === "recording"/);
+  assert.match(startRecordingMatch.groups.body, /if \(recordingLifecyclePhase !== "idle"\) return;/);
+  assert.match(startRecordingMatch.groups.body, /setRecordingLifecyclePhase\("starting"\)/);
+  assert.match(startRecordingMatch.groups.body, /if \(!ensureRecordReady\(\)\) \{/);
+  assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{\s*phase: "error",[\s\S]*reason: "not_ready"/);
+  assert.match(stopRecordingMatch.groups.body, /if \(recordingLifecyclePhase !== "recording"\) return;/);
+  assert.match(stopRecordingMatch.groups.body, /setRecordingLifecyclePhase\("stopping"\)/);
+  assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "stopping"/);
+  assert.match(appSource, /function setRecordingLifecyclePhase\(phase\) \{/);
 });
