@@ -40,14 +40,16 @@ test("package exposes full app smoke test script", async () => {
   );
 });
 
-test("Windows launcher starts from the project directory and installs dependencies if needed", async () => {
+test("Windows launcher starts from the project directory before falling back to dependency install", async () => {
   const launcher = await readFile(new URL("../Start-LocalFlow.cmd", import.meta.url), "utf8");
+  const startIndex = launcher.indexOf("npm.cmd start");
+  const installIndex = launcher.indexOf("npm.cmd install");
 
   assert.match(launcher, /cd \/d "%~dp0"/);
-  assert.match(launcher, /node_modules\\electron\\dist\\electron\.exe/);
   assert.match(launcher, /set "ELECTRON_MIRROR=https:\/\/npmmirror\.com\/mirrors\/electron\/"/);
-  assert.match(launcher, /npm\.cmd install/);
-  assert.match(launcher, /npm\.cmd start/);
+  assert.notEqual(startIndex, -1);
+  assert.notEqual(installIndex, -1);
+  assert.ok(startIndex < installIndex, "launcher should try npm start before npm install");
 });
 
 test("main window uses an Electron-compatible CommonJS preload script", async () => {
