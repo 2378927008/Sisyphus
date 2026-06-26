@@ -165,6 +165,7 @@ app.whenReady().then(async () => {
       (state) => (
         state.ready &&
         state.recordLabel === "开始录音" &&
+        state.statusText === "就绪。快捷键：Ctrl + Alt + Space" &&
         state.interfaceLanguage === "zh-Hans" &&
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&

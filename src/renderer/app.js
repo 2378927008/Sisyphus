@@ -80,7 +80,7 @@ async function init() {
   await renderHistory();
   await renderLocalModelStatus();
   await refreshProviderStatus();
-  await refreshSetupStatusView();
+  await refreshSetupStatusView({ updateStatus: false });
 }
 
 function changeInterfaceLanguage() {
@@ -290,14 +290,16 @@ function showLocalModelInstallCommand() {
   setStatus(t("model.installCommandShown"));
 }
 
-async function refreshSetupStatusView() {
+async function refreshSetupStatusView({ updateStatus = true } = {}) {
   if (!window.localFlow.getModelSetupStatus) return;
 
   try {
     currentSetupStatus = await window.localFlow.getModelSetupStatus();
   } catch (error) {
     currentSetupStatus = createFailedSetupStatus(error);
-    setStatus(t("setup.failed"));
+    if (updateStatus) {
+      setStatus(t("setup.failed"));
+    }
   }
   renderSetupChecklist();
 }
