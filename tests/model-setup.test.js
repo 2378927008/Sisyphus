@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   createModelSetupService,
@@ -22,6 +23,43 @@ test("getModelSetupScript returns only known local setup scripts", () => {
   });
   assert.equal(getModelSetupScript("bad", rootPath), null);
   assert.equal(getModelSetupScript("toString", rootPath), null);
+});
+
+test("getModelSetupScript supports packaged script and asset roots", () => {
+  const scriptRootPath = "C:/Program Files/Local Flow/resources/app";
+  const assetRootPath = "C:/Program Files/Local Flow/resources";
+  const nodeExecutable = "C:/Program Files/Local Flow/Local Flow.exe";
+
+  assert.deepEqual(getModelSetupScript("whisper", {
+    scriptRootPath,
+    assetRootPath,
+    nodeExecutable
+  }), {
+    type: "whisper",
+    scriptPath: path.join(scriptRootPath, "scripts", "setup-whisper.ps1"),
+    args: [
+      "-Model",
+      "base",
+      "-InstallDir",
+      path.join(assetRootPath, "vendor", "whisper"),
+      "-NodeExe",
+      nodeExecutable
+    ]
+  });
+  assert.deepEqual(getModelSetupScript("llm", {
+    scriptRootPath,
+    assetRootPath,
+    nodeExecutable
+  }), {
+    type: "llm",
+    scriptPath: path.join(scriptRootPath, "scripts", "setup-llm.ps1"),
+    args: [
+      "-InstallDir",
+      path.join(assetRootPath, "vendor", "llm"),
+      "-NodeExe",
+      nodeExecutable
+    ]
+  });
 });
 
 test("killSetupProcessTree uses taskkill for Windows child process trees", () => {
@@ -86,9 +124,61 @@ test("createModelSetupService starts PowerShell with a known setup script only",
     "-File",
     path.join("C:/app", "scripts", "setup-whisper.ps1"),
     "-Model",
-    "base"
+    "base",
+    "-InstallDir",
+    path.join("C:/app", "vendor", "whisper")
   ]);
   assert.equal(spawned[0].options.windowsHide, true);
+});
+
+test("createModelSetupService passes packaged setup roots and Electron node env", async () => {
+  const spawned = [];
+  const scriptRootPath = "C:/Program Files/Local Flow/resources/app";
+  const assetRootPath = "C:/Program Files/Local Flow/resources";
+  const nodeExecutable = "C:/Program Files/Local Flow/Local Flow.exe";
+  const service = createModelSetupService({
+    rootPath: "C:/fallback",
+    scriptRootPath,
+    assetRootPath,
+    nodeExecutable,
+    setupEnv: { ELECTRON_RUN_AS_NODE: "1" },
+    spawn: (file, args, options) => {
+      spawned.push({ file, args, options });
+      return fakeChildProcess({ code: 0, stdout: ["ok"] });
+    },
+    refreshAssets: async () => readyAssets()
+  });
+
+  const result = await service.start("llm");
+
+  assert.equal(result.status, "complete");
+  assert.equal(spawned[0].file, "powershell.exe");
+  assert.deepEqual(spawned[0].args, [
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    path.join(scriptRootPath, "scripts", "setup-llm.ps1"),
+    "-InstallDir",
+    path.join(assetRootPath, "vendor", "llm"),
+    "-NodeExe",
+    nodeExecutable
+  ]);
+  assert.equal(spawned[0].options.windowsHide, true);
+  assert.equal(spawned[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+});
+
+test("setup scripts accept a NodeExe parameter for packaged builds", () => {
+  const setupScripts = [
+    readFileSync(path.join(process.cwd(), "scripts", "setup-whisper.ps1"), "utf8"),
+    readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8")
+  ];
+
+  for (const script of setupScripts) {
+    assert.match(script, /\[string\]\$NodeExe = "node"/);
+    assert.doesNotMatch(script, /&\s+node\b/);
+    assert.doesNotMatch(script, /\|\s+node\b/);
+    assert.match(script, /&\s+\$NodeExe\b/);
+  }
 });
 
 test("createModelSetupService rejects inherited setup type names without spawning", async () => {

@@ -1,7 +1,8 @@
 param(
   [string]$InstallDir = "",
   [ValidateSet("Q4_K_M")]
-  [string]$Quantization = "Q4_K_M"
+  [string]$Quantization = "Q4_K_M",
+  [string]$NodeExe = "node"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,14 +26,14 @@ $modelPath = Join-Path $modelDir $modelFile
 New-Item -ItemType Directory -Force -Path $binDir, $modelDir, $downloadDir | Out-Null
 
 Write-Host "Fetching latest llama.cpp release metadata..."
-$releaseJson = & node -e "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());" $releaseApi
+$releaseJson = & $NodeExe -e "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());" $releaseApi
 if ($LASTEXITCODE -ne 0) {
   throw "Failed to fetch llama.cpp release metadata."
 }
 
 $release = $releaseJson | ConvertFrom-Json
 $assetsJson = $release.assets | ConvertTo-Json -Depth 10 -Compress
-$assetJson = $assetsJson | node $assetSelector
+$assetJson = $assetsJson | & $NodeExe $assetSelector
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($assetJson)) {
   throw "Could not find a Windows x64 llama.cpp runtime zip asset in the latest release."
 }
@@ -41,7 +42,7 @@ $asset = $assetJson | ConvertFrom-Json
 $zipPath = Join-Path $downloadDir $asset.name
 if (-not (Test-Path -LiteralPath $zipPath)) {
   Write-Host "Downloading $($asset.name)..."
-  & node $downloadScript $asset.browser_download_url $zipPath
+  & $NodeExe $downloadScript $asset.browser_download_url $zipPath
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to download $($asset.name)."
   }
@@ -67,10 +68,10 @@ if ($server -and $server.DirectoryName -ne $binDir) {
 
 if (-not (Test-Path -LiteralPath $modelPath)) {
   Write-Host "Downloading $modelFile. This is about 2.5 GB..."
-  & node $downloadScript $modelUrl $modelPath
+  & $NodeExe $downloadScript $modelUrl $modelPath
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Primary Hugging Face download failed. Trying mirror..."
-    & node $downloadScript $modelMirrorUrl $modelPath
+    & $NodeExe $downloadScript $modelMirrorUrl $modelPath
     if ($LASTEXITCODE -ne 0) {
       throw "Failed to download $modelFile from primary and mirror URLs."
     }

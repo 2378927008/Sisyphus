@@ -8,42 +8,63 @@ const defaultSetupTimeoutMs = 60 * 60 * 1000;
 const setupScripts = {
   whisper: {
     script: path.join("scripts", "setup-whisper.ps1"),
-    args: ["-Model", "base"]
+    args: ["-Model", "base"],
+    installDir: path.join("vendor", "whisper")
   },
   llm: {
     script: path.join("scripts", "setup-llm.ps1"),
-    args: []
+    args: [],
+    installDir: path.join("vendor", "llm")
   }
 };
 
-export function getModelSetupScript(type, rootPath) {
+export function getModelSetupScript(type, setupRoot) {
   if (!Object.hasOwn(setupScripts, type)) {
     return null;
   }
 
   const config = setupScripts[type];
+  const roots = resolveSetupRoots(setupRoot);
+  const args = [...config.args];
+
+  if (!roots.legacyRoot && roots.assetRootPath) {
+    args.push("-InstallDir", path.join(roots.assetRootPath, config.installDir));
+  }
+  if (!roots.legacyRoot && roots.nodeExecutable) {
+    args.push("-NodeExe", roots.nodeExecutable);
+  }
 
   return {
     type,
-    scriptPath: path.join(rootPath, config.script),
-    args: [...config.args]
+    scriptPath: path.join(roots.scriptRootPath, config.script),
+    args
   };
 }
 
 export function createModelSetupService({
   rootPath,
+  scriptRootPath = rootPath,
+  assetRootPath = rootPath,
+  nodeExecutable,
+  setupEnv,
   spawnImpl,
   spawn,
   setupTimeoutMs = defaultSetupTimeoutMs,
   killProcessTree = killSetupProcessTree,
-  refreshAssets = () => detectModelAssets(rootPath)
+  refreshAssets
 }) {
   const spawnProcess = spawnImpl || spawn || nodeSpawn;
+  const refreshModelAssets = refreshAssets || (() => detectModelAssets(assetRootPath || rootPath));
   const state = new Map();
   const activeRuns = new Map();
 
   async function start(type) {
-    const script = getModelSetupScript(type, rootPath);
+    const script = getModelSetupScript(type, {
+      rootPath,
+      scriptRootPath,
+      assetRootPath,
+      nodeExecutable
+    });
     if (!script) {
       throw new Error(`Unknown setup type: ${type}`);
     }
@@ -80,7 +101,7 @@ export function createModelSetupService({
       }, (controls) => {
         activeRun.cancel = controls.cancel;
         activeRun.getOutput = controls.getOutput;
-      });
+      }, setupEnv);
     } catch (error) {
       if (activeRun.cancelled) {
         return getStatus(type);
@@ -100,7 +121,7 @@ export function createModelSetupService({
     }
 
     try {
-      const assets = await refreshAssets();
+      const assets = await refreshModelAssets();
       const assetError = result.code === 0 ? getSetupAssetError(type, assets) : "";
       const nextState = {
         ...getStatus(type),
@@ -142,7 +163,7 @@ export function createModelSetupService({
   }
 
   async function refresh() {
-    const assets = await refreshAssets();
+    const assets = await refreshModelAssets();
     return {
       assets,
       setups: {
@@ -187,6 +208,24 @@ export function createModelSetupService({
   };
 }
 
+function resolveSetupRoots(setupRoot) {
+  if (typeof setupRoot === "string") {
+    return {
+      legacyRoot: true,
+      scriptRootPath: setupRoot
+    };
+  }
+
+  const rootPath = setupRoot?.rootPath;
+  const scriptRootPath = setupRoot?.scriptRootPath || rootPath;
+  return {
+    legacyRoot: false,
+    scriptRootPath,
+    assetRootPath: setupRoot?.assetRootPath || rootPath || scriptRootPath,
+    nodeExecutable: setupRoot?.nodeExecutable
+  };
+}
+
 async function detectModelAssets(rootPath) {
   const [whisper, llm] = await Promise.all([
     detectWhisperAssets(rootPath),
@@ -227,7 +266,7 @@ export function killSetupProcessTree(child, spawn = nodeSpawn, platform = proces
   child?.kill?.();
 }
 
-function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput, onControls = () => {}) {
+function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput, onControls = () => {}, setupEnv) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const output = [];
@@ -283,10 +322,13 @@ function runSetup(script, spawn, timeoutMs, killProcessTree, onOutput, onControl
     }
 
     try {
+      const spawnOptions = setupEnv
+        ? { windowsHide: true, env: { ...process.env, ...setupEnv } }
+        : { windowsHide: true };
       child = spawn(
         "powershell.exe",
         ["-ExecutionPolicy", "Bypass", "-File", script.scriptPath, ...script.args],
-        { windowsHide: true }
+        spawnOptions
       );
       onControls({
         cancel() {
