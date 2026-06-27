@@ -30,6 +30,7 @@ const PHASE_LABELS = {
     recording: "Recording",
     stopping: "Stopping",
     transcribing: "Transcribing",
+    pasting: "Pasting",
     done: "Done",
     warning: "Warning",
     error: "Error"
@@ -40,6 +41,7 @@ const PHASE_LABELS = {
     recording: "正在录音",
     stopping: "正在停止",
     transcribing: "正在转写",
+    pasting: "正在粘贴",
     done: "完成",
     warning: "警告",
     error: "错误"

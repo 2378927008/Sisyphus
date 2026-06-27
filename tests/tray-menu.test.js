@@ -81,10 +81,15 @@ function getVisibleMenuText(item) {
 
 test("getTrayTooltip returns localized phase status and fallback", () => {
   assert.equal(getTrayTooltip({ state: { phase: "recording" } }), "Local Flow - Recording");
+  assert.equal(getTrayTooltip({ state: { phase: "pasting" } }), "Local Flow - Pasting");
   assert.equal(getTrayTooltip({
     language: "zh-Hans",
     state: { phase: "error" }
   }), "Local Flow - 错误");
+  assert.equal(getTrayTooltip({
+    language: "zh-Hans",
+    state: { phase: "pasting" }
+  }), "Local Flow - 正在粘贴");
   assert.equal(getTrayTooltip({
     language: "unknown",
     state: { phase: "unknown" }
