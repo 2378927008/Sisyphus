@@ -83,6 +83,9 @@ async function init() {
   window.localFlow.onRecordingStart(startRecording);
   window.localFlow.onRecordingStop(stopRecording);
   window.localFlow.onRecordingReset(resetRecordingLifecycle);
+  window.localFlow.onOpenSettings?.(() => {
+    setSettingsDrawer(true);
+  });
   window.localFlow.onStatus(handleMainStatus);
 
   await renderHistory();

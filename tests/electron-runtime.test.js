@@ -465,6 +465,16 @@ test("app smoke reads product settings controls with null-safe fallbacks", async
   assert.match(smokeSource, /launchAtLogin:\s*document\.querySelector\('#launchAtLogin'\)\?\.checked \?\? null/);
   assert.match(smokeSource, /startMinimizedToTray:\s*document\.querySelector\('#startMinimizedToTray'\)\?\.checked \?\? null/);
   assert.match(smokeSource, /globalShortcutPaused:\s*document\.querySelector\('#globalShortcutPaused'\)\?\.checked \?\? null/);
+  assert.match(smokeSource, /settingsDrawerOpen:\s*document\.querySelector\('#settingsDrawer'\)\?\.classList\.contains\('open'\) \|\| false/);
+});
+
+test("app smoke covers settings open IPC behavior", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /window\.webContents\.send\("settings:open"\)/);
+  assert.match(smokeSource, /state\.settingsDrawerOpen === true/);
+  assert.match(smokeSource, /document\.querySelector\('#closeSettings'\)\.click\(\)/);
+  assert.match(smokeSource, /state\.settingsDrawerOpen === false/);
 });
 
 test("main process uses explicit renderer commands for system input start and stop", async () => {
@@ -601,6 +611,12 @@ test("renderer uses explicit command handlers and local lifecycle guards", async
   assert.match(stopRecordingMatch.groups.body, /beginRecordingOperation\("stopping"\)/);
   assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "stopping"/);
   assert.match(appSource, /function setRecordingLifecyclePhase\(phase\) \{/);
+});
+
+test("renderer opens the settings drawer when main process requests settings", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /window\.localFlow\.onOpenSettings\?\.\(\(\) => \{\s*setSettingsDrawer\(true\);\s*\}\)/);
 });
 
 test("renderer resets stale recording operations and ignores late completions", async () => {

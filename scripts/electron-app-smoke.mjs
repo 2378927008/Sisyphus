@@ -233,6 +233,10 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    window.webContents.send("settings:open");
+    await waitForState(window, (state) => state.settingsDrawerOpen === true, 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#closeSettings').click()");
+    await waitForState(window, (state) => state.settingsDrawerOpen === false, 5000);
     await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
     await waitForState(
       window,
@@ -585,6 +589,7 @@ function readRendererState(window) {
       llmSetupStatusText: document.querySelector('#llmSetupStatus')?.textContent || '',
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
+      settingsDrawerOpen: document.querySelector('#settingsDrawer')?.classList.contains('open') || false,
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
       hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
