@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld("localFlow", {
   onSystemInputStatus: (callback) => {
     ipcRenderer.on("system-input:status", (_event, payload) => callback(payload));
   },
+  onOpenSettings: (callback) => {
+    ipcRenderer.on("settings:open", () => callback());
+  },
   reportRecordingStatus: (payload) => {
     ipcRenderer.send("recording:status", payload);
   }

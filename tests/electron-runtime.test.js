@@ -281,6 +281,44 @@ test("preload exposes system input status listener without raw ipcRenderer acces
   assert.deepEqual(states, [{ phase: "recording" }]);
 });
 
+test("preload exposes settings open listener without raw IPC event access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  let exposedApi = null;
+  const channels = [];
+  const listeners = new Map();
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: () => undefined,
+          on: (channel, callback) => {
+            channels.push(channel);
+            listeners.set(channel, callback);
+          },
+          send: () => undefined
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  const calls = [];
+  exposedApi.onOpenSettings((...args) => calls.push(args));
+  listeners.get("settings:open")({ sender: "main" }, "unexpected");
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(channels, ["settings:open"]);
+  assert.deepEqual(calls, [[]]);
+});
+
 test("HUD preload exposes only system input status subscription", async () => {
   const preloadSource = await readFile(new URL("../src/hud-preload.cjs", import.meta.url), "utf8");
   let exposedApi = null;
@@ -368,6 +406,67 @@ test("main process delegates model setup IPC wiring to the setup IPC module", as
   assert.match(mainSource, /settingsStore/);
 });
 
+test("main process imports Windows productization modules", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /import \{ getRuntimeRoot, getVendorRoot, getAppRoot \} from "\.\/runtime-root\.js";/);
+  assert.match(mainSource, /import \{ applyStartupSettings, shouldStartMinimized \} from "\.\/startup-settings\.js";/);
+  assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
+  assert.match(mainSource, /import \{ buildTrayMenuTemplate, getTrayTooltip \} from "\.\/tray-menu\.js";/);
+});
+
+test("main process wires packaged runtime roots into asset detection and setup", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const modelSetupMatch = mainSource.match(/createModelSetupService\(\{(?<body>[\s\S]*?)\n\s*\}\)/);
+
+  assert.match(mainSource, /runtimeRoot = getRuntimeRoot\(\{ app \}\)/);
+  assert.match(mainSource, /vendorRoot = getVendorRoot\(runtimeRoot\)/);
+  assert.match(mainSource, /appRoot = getAppRoot\(\{ app \}\)/);
+  assert.match(mainSource, /detectWhisperAssets\(runtimeRoot\)/);
+  assert.match(mainSource, /detectEmbeddedLlmAssets\(runtimeRoot\)/);
+  assert.match(mainSource, /ipcMain\.handle\("llm:status", \(\) => detectEmbeddedLlmAssets\(runtimeRoot\)\)/);
+  assert.ok(modelSetupMatch, "createModelSetupService options should be inline and inspectable");
+  assert.match(modelSetupMatch.groups.body, /rootPath: runtimeRoot/);
+  assert.match(modelSetupMatch.groups.body, /scriptRootPath: appRoot/);
+  assert.match(modelSetupMatch.groups.body, /assetRootPath: runtimeRoot/);
+  assert.match(modelSetupMatch.groups.body, /nodeExecutable: process\.execPath/);
+  assert.match(modelSetupMatch.groups.body, /setupEnv:\s*\{\s*ELECTRON_RUN_AS_NODE: "1"\s*\}/);
+});
+
+test("main process delegates hotkeys startup settings and tray state to product modules", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /let hotkeyManager;/);
+  assert.match(mainSource, /let lastSettings;/);
+  assert.match(mainSource, /let lastSystemInputState/);
+  assert.match(mainSource, /function refreshTrayMenu\(\)/);
+  assert.match(mainSource, /buildTrayMenuTemplate\(\{/);
+  assert.match(mainSource, /getTrayTooltip\(\{/);
+  assert.match(mainSource, /applyStartupSettings\(app, lastSettings\)/);
+  assert.match(mainSource, /shouldStartMinimized\(process\.argv, lastSettings\)/);
+  assert.match(mainSource, /hotkeyManager = createHotkeyManager\(\{/);
+  assert.match(mainSource, /await hotkeyManager\.register\(settings\)/);
+  assert.doesNotMatch(mainSource, /globalShortcut\.unregisterAll\(\)/);
+});
+
+test("settings save handler preserves previous startup values if system startup apply fails", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+
+  assert.ok(settingsSaveMatch, "settings:save handler should be defined inline");
+  assert.match(settingsSaveMatch.groups.body, /saveSettingsWithSystemEffects|restoreStartupSettings/);
+  assert.match(mainSource, /launchAtLogin/);
+  assert.match(mainSource, /startMinimizedToTray/);
+});
+
+test("app smoke reads product settings controls with null-safe fallbacks", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /launchAtLogin:\s*document\.querySelector\('#launchAtLogin'\)\?\.checked \?\? null/);
+  assert.match(smokeSource, /startMinimizedToTray:\s*document\.querySelector\('#startMinimizedToTray'\)\?\.checked \?\? null/);
+  assert.match(smokeSource, /globalShortcutPaused:\s*document\.querySelector\('#globalShortcutPaused'\)\?\.checked \?\? null/);
+});
+
 test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);
@@ -397,15 +496,18 @@ test("main process creates HUD with dedicated least-privilege preload", async ()
   assert.doesNotMatch(createHudMatch.groups.body, /\.\.\/preload\.cjs/);
 });
 
-test("main process explicitly shows and focuses the primary window on startup", async () => {
+test("main process can suppress primary window display for hidden startup", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const createWindowMatch = mainSource.match(/function createWindow\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const createWindowMatch = mainSource.match(/function createWindow\(\{ showOnReady = true \} = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(createWindowMatch, "createWindow should be defined");
   assert.match(createWindowMatch.groups.body, /show: false/);
   assert.match(createWindowMatch.groups.body, /mainWindow\.once\("ready-to-show"/);
+  assert.match(createWindowMatch.groups.body, /if \(!showOnReady\) \{\s*return;\s*\}/);
   assert.match(createWindowMatch.groups.body, /mainWindow\.show\(\)/);
   assert.match(createWindowMatch.groups.body, /mainWindow\.focus\(\)/);
+  assert.match(mainSource, /const startHidden = shouldStartMinimized\(process\.argv, lastSettings\)/);
+  assert.match(mainSource, /createWindow\(\{ showOnReady: !startHidden \}\)/);
 });
 
 test("main process only accepts recording status from the main renderer", async () => {

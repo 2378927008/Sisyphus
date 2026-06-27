@@ -14,6 +14,10 @@ import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
 import { createSystemInputController } from "./system-input-controller.js";
 import { buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath } from "./hud-window.js";
+import { getRuntimeRoot, getVendorRoot, getAppRoot } from "./runtime-root.js";
+import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.js";
+import { createHotkeyManager } from "./hotkey-manager.js";
+import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererRecordingPhases = new Set([
@@ -43,8 +47,14 @@ let hudWindow;
 let systemInputController;
 let recordingCommandTimeout;
 let terminalAutoIdleTimeout;
+let runtimeRoot;
+let vendorRoot;
+let appRoot;
+let hotkeyManager;
+let lastSettings;
+let lastSystemInputState = { phase: "idle" };
 
-function createWindow() {
+function createWindow({ showOnReady = true } = {}) {
   mainWindow = new BrowserWindow({
     width: 980,
     height: 720,
@@ -61,6 +71,10 @@ function createWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
+    if (!showOnReady) {
+      return;
+    }
+
     mainWindow.show();
     mainWindow.focus();
   });
@@ -86,30 +100,75 @@ function createHudWindow() {
 
 function createTray() {
   tray = new Tray(nativeImage.createEmpty());
-  tray.setToolTip("Local Flow Dictation");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show", click: () => mainWindow.show() },
-    { label: "Start/stop dictation", click: () => systemInputController?.toggle() },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => {
+  refreshTrayMenu();
+  tray.on("click", () => showMainWindow());
+}
+
+function refreshTrayMenu() {
+  if (!tray) {
+    return;
+  }
+
+  const language = lastSettings?.interfaceLanguage;
+  tray.setToolTip(getTrayTooltip({
+    language,
+    state: lastSystemInputState
+  }));
+  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({
+    language,
+    state: lastSystemInputState,
+    settings: lastSettings || {},
+    handlers: {
+      showMainWindow,
+      toggleDictation: () => systemInputController?.toggle(),
+      toggleShortcutPaused: () => updateSettingsFromTray({
+        globalShortcutPaused: !lastSettings?.globalShortcutPaused
+      }),
+      toggleLaunchAtLogin: () => updateSettingsFromTray({
+        launchAtLogin: !lastSettings?.launchAtLogin
+      }),
+      toggleStartMinimized: () => updateSettingsFromTray({
+        startMinimizedToTray: !lastSettings?.startMinimizedToTray
+      }),
+      openSettings: () => {
+        showMainWindow();
+        sendWindowMessage(mainWindow, "settings:open");
+      },
+      quit: () => {
         app.isQuitting = true;
         app.quit();
       }
     }
-  ]));
-  tray.on("click", () => mainWindow.show());
+  })));
 }
 
-async function registerHotkey() {
-  globalShortcut.unregisterAll();
-  const settings = await settingsStore.getSettings();
-  const ok = globalShortcut.register(settings.hotkey, () => systemInputController?.toggle());
-
-  if (!ok) {
-    sendStatus({ phase: "error", message: `Could not register hotkey: ${settings.hotkey}` });
+function showMainWindow() {
+  if (!isUsableWindow(mainWindow)) {
+    return;
   }
+
+  if (typeof mainWindow.restore === "function" && mainWindow.isMinimized?.()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function registerHotkey(settings = lastSettings) {
+  if (!settings) {
+    settings = await settingsStore.getSettings();
+  }
+
+  lastSettings = settings;
+  const status = await hotkeyManager.register(settings);
+  refreshTrayMenu();
+
+  if (!status.ok) {
+    sendStatus({ phase: "error", message: status.message, reason: status.reason });
+  }
+
+  return status;
 }
 
 function sendRecordingStartCommand() {
@@ -136,6 +195,8 @@ function sendStatus(payload) {
 }
 
 function sendSystemInputStatus(state) {
+  lastSystemInputState = state && typeof state === "object" ? state : { phase: "idle" };
+  refreshTrayMenu();
   sendWindowMessage(mainWindow, "system-input:status", state);
   sendWindowMessage(hudWindow, "system-input:status", state);
 
@@ -242,6 +303,57 @@ function sanitizeRendererStatusText(value) {
   return typeof value === "string" ? value.slice(0, maxRendererStatusTextLength) : "";
 }
 
+async function saveSettingsWithSystemEffects(settings) {
+  const previousSettings = lastSettings || await settingsStore.getSettings();
+  const next = await settingsStore.saveSettings(settings);
+  lastSettings = next;
+
+  try {
+    applyStartupSettings(app, lastSettings);
+  } catch (error) {
+    const restored = await restoreStartupSettings(previousSettings);
+    await registerHotkey(restored);
+    reportSystemError(error, "startup_settings_failed");
+    error.localFlowStatusReported = true;
+    throw error;
+  }
+
+  await registerHotkey(lastSettings);
+  refreshTrayMenu();
+  return lastSettings;
+}
+
+async function restoreStartupSettings(previousSettings) {
+  const restored = await settingsStore.saveSettings({
+    launchAtLogin: previousSettings.launchAtLogin,
+    startMinimizedToTray: previousSettings.startMinimizedToTray
+  });
+  lastSettings = restored;
+  refreshTrayMenu();
+  return restored;
+}
+
+function updateSettingsFromTray(settingsPatch) {
+  void saveSettingsWithSystemEffects(settingsPatch).catch((error) => {
+    if (!error?.localFlowStatusReported) {
+      reportSystemError(error, "settings_update_failed");
+    }
+    refreshTrayMenu();
+  });
+}
+
+function reportSystemError(error, reason) {
+  sendStatus({
+    phase: "error",
+    message: getErrorMessage(error),
+    reason
+  });
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function wireIpc() {
   ipcMain.on("recording:status", (_event, payload) => {
     if (_event.sender !== mainWindow?.webContents) {
@@ -256,9 +368,7 @@ function wireIpc() {
   });
   ipcMain.handle("settings:get", () => settingsStore.getSettings());
   ipcMain.handle("settings:save", async (_event, settings) => {
-    const next = await settingsStore.saveSettings(settings);
-    await registerHotkey();
-    return next;
+    return saveSettingsWithSystemEffects(settings);
   });
   ipcMain.handle("history:list", () => settingsStore.getHistory());
   ipcMain.handle("diagnostics:whisper", async () => {
@@ -273,7 +383,7 @@ function wireIpc() {
     const settings = await settingsStore.getSettings({ includeSecrets: true });
     return getProcessingProviderStatus(settings);
   });
-  ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(process.cwd()));
+  ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(runtimeRoot));
   wireModelSetupIpc({
     ipcMain,
     modelSetupService,
@@ -287,20 +397,36 @@ function wireIpc() {
 
 app.whenReady().then(async () => {
   configureMediaPermissions(session.defaultSession);
-  const whisperAssetDefaults = await detectWhisperAssets(process.cwd());
-  const embeddedLlmDefaults = await detectEmbeddedLlmAssets(process.cwd());
+  runtimeRoot = getRuntimeRoot({ app });
+  vendorRoot = getVendorRoot(runtimeRoot);
+  appRoot = getAppRoot({ app });
+  const whisperAssetDefaults = await detectWhisperAssets(runtimeRoot);
+  const embeddedLlmDefaults = await detectEmbeddedLlmAssets(runtimeRoot);
   settingsStore = createSettingsStore(app.getPath("userData"), {
     ...whisperAssetDefaults,
     embeddedLlmCliPath: embeddedLlmDefaults.cliPath,
     embeddedLlmModelPath: embeddedLlmDefaults.modelPath
   }, createSafeStorageSecretCodec(safeStorage));
+  lastSettings = await settingsStore.getSettings();
+  let startupSettingsError = null;
+  try {
+    applyStartupSettings(app, lastSettings);
+  } catch (error) {
+    startupSettingsError = error;
+  }
   dictationService = new DictationService({
     settingsStore,
     clipboard,
     notifyStatus: sendStatus
   });
   modelSetupService = createModelSetupService({
-    rootPath: process.cwd()
+    rootPath: runtimeRoot,
+    scriptRootPath: appRoot,
+    assetRootPath: runtimeRoot,
+    nodeExecutable: process.execPath,
+    setupEnv: {
+      ELECTRON_RUN_AS_NODE: "1"
+    }
   });
   systemInputController = createSystemInputController({
     sendToMain: sendSystemInputStatus,
@@ -313,22 +439,30 @@ app.whenReady().then(async () => {
     },
     isReadyToRecord: () => true
   });
+  hotkeyManager = createHotkeyManager({
+    globalShortcut,
+    onToggle: () => systemInputController?.toggle()
+  });
 
   wireIpc();
-  createWindow();
+  const startHidden = shouldStartMinimized(process.argv, lastSettings);
+  createWindow({ showOnReady: !startHidden });
   createHudWindow();
   createTray();
-  await registerHotkey();
+  if (startupSettingsError) {
+    reportSystemError(startupSettingsError, "startup_settings_failed");
+  }
+  await registerHotkey(lastSettings);
 });
 
 app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
+  hotkeyManager?.unregister();
 });
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   } else {
-    mainWindow.show();
+    showMainWindow();
   }
 });
