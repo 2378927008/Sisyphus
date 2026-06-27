@@ -41,7 +41,8 @@
         "from": "vendor",
         "to": "vendor",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/downloads/**"
         ]
       }
     ],

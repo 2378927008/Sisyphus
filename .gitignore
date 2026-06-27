@@ -1,6 +1,7 @@
 node_modules/
 .electron-runtime*/
-vendor/
+vendor/*
+!vendor/.gitkeep
 dist/
 out/
 .env
