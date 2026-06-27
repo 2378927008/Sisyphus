@@ -619,6 +619,18 @@ test("renderer opens the settings drawer when main process requests settings", a
   assert.match(appSource, /window\.localFlow\.onOpenSettings\?\.\(\(\) => \{\s*setSettingsDrawer\(true\);\s*\}\)/);
 });
 
+test("renderer sends Windows productization fields when settings form saves", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const saveSettingsMatch = appSource.match(
+    /async function saveSettingsFromCurrentForm\(\{ updateStatus = true \} = \{\}\) \{(?<body>[\s\S]*?)\n\}/
+  );
+
+  assert.ok(saveSettingsMatch, "saveSettingsFromCurrentForm should be defined");
+  assert.match(saveSettingsMatch.groups.body, /globalShortcutPaused:\s*form\.globalShortcutPaused\.checked/);
+  assert.match(saveSettingsMatch.groups.body, /launchAtLogin:\s*form\.launchAtLogin\.checked/);
+  assert.match(saveSettingsMatch.groups.body, /startMinimizedToTray:\s*form\.startMinimizedToTray\.checked/);
+});
+
 test("renderer resets stale recording operations and ignores late completions", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);

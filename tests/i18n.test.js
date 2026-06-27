@@ -39,3 +39,12 @@ test("local model setup copy frames dictation as target-language output", () => 
   assert.match(getUiText("zh-Hans", "setup.llm.missing"), /目标语言输出/);
   assert.doesNotMatch(getUiText("zh-Hans", "setup.llm.missing"), /翻译/);
 });
+
+test("getUiText returns Windows productization labels", () => {
+  assert.equal(getUiText("en", "label.launchAtLogin"), "Launch Local Flow at login");
+  assert.equal(getUiText("en", "label.startMinimizedToTray"), "Start minimized to tray");
+  assert.equal(getUiText("en", "label.globalShortcutPaused"), "Pause global shortcut");
+  assert.equal(getUiText("zh-Hans", "label.launchAtLogin"), "开机自动启动 Local Flow");
+  assert.equal(getUiText("zh-Hans", "label.startMinimizedToTray"), "启动后最小化到托盘");
+  assert.equal(getUiText("zh-Hans", "label.globalShortcutPaused"), "暂停全局快捷键");
+});

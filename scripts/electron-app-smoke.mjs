@@ -233,10 +233,58 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    if (
+      initialState.launchAtLogin !== false ||
+      initialState.startMinimizedToTray !== false ||
+      initialState.globalShortcutPaused !== false
+    ) {
+      throw new Error("Windows productization controls should default to unchecked.");
+    }
     window.webContents.send("settings:open");
     await waitForState(window, (state) => state.settingsDrawerOpen === true, 5000);
     await window.webContents.executeJavaScript("document.querySelector('#closeSettings').click()");
     await waitForState(window, (state) => state.settingsDrawerOpen === false, 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        for (const id of ['launchAtLogin', 'startMinimizedToTray', 'globalShortcutPaused']) {
+          const input = document.querySelector(\`#\${id}\`);
+          if (!input) throw new Error(\`\${id} missing\`);
+          input.checked = true;
+        }
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      () => settingsSaveCalls.some((call) => (
+        call.launchAtLogin === true &&
+        call.startMinimizedToTray === true &&
+        call.globalShortcutPaused === true
+      )),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        for (const id of ['launchAtLogin', 'startMinimizedToTray', 'globalShortcutPaused']) {
+          document.querySelector(\`#\${id}\`).checked = false;
+        }
+        document.querySelector('#settingsForm').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.launchAtLogin === false &&
+        state.startMinimizedToTray === false &&
+        state.globalShortcutPaused === false &&
+        settingsSaveCalls.some((call) => (
+          call.launchAtLogin === false &&
+          call.startMinimizedToTray === false &&
+          call.globalShortcutPaused === false
+        ))
+      ),
+      5000
+    );
     await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
     await waitForState(
       window,
