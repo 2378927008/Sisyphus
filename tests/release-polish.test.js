@@ -23,3 +23,18 @@ test("package metadata is suitable for local Windows release builds", async () =
   assert.equal(pkg.build.nsis.uninstallerIcon, "assets/local-flow-icon.ico");
   assert.equal(pkg.scripts["verify:release"], "node scripts/verify-release-build.mjs");
 });
+
+test("Windows icon asset is a multi-image ICO file", async () => {
+  const ico = await readFile(new URL("../assets/local-flow-icon.ico", import.meta.url));
+
+  assert.equal(ico.toString("ascii", 0, 4), "\u0000\u0000\u0001\u0000");
+  assert.ok(ico.readUInt16LE(4) >= 4);
+  assert.ok(ico.length > 10_000);
+});
+
+test("Windows icon generator is checked in", async () => {
+  const script = await readFile(new URL("../scripts/create-windows-icon.mjs", import.meta.url), "utf8");
+
+  assert.match(script, /local-flow-icon\.ico/);
+  assert.match(script, /writeIco/);
+});
