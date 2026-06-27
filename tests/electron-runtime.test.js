@@ -467,7 +467,7 @@ test("main process stores and serves latest dictation status", async () => {
 
 test("main process uses a real tray icon helper with empty image fallback", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const createTrayMatch = mainSource.match(/function createTray\(\) \{(?<body>[\s\S]*?)\n\}\n\nfunction refreshTrayMenu/);
+  const createTrayMatch = mainSource.match(/function createTray\(\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction refreshTrayMenu/);
 
   assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
   assert.ok(createTrayMatch, "createTray should be defined");
