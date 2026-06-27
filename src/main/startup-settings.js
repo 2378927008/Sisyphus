@@ -10,7 +10,13 @@ export function applyStartupSettings(app, settings = {}, deps = {}) {
     args: getStartupLaunchArgs(settings)
   };
 
-  app.setLoginItemSettings(options);
+  try {
+    app.setLoginItemSettings(options);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not update Windows startup settings: ${reason}`, { cause: error });
+  }
+
   return options;
 }
 

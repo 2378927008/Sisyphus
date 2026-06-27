@@ -23,6 +23,29 @@ test("applyStartupSettings calls Electron login item API", () => {
   }]);
 });
 
+test("applyStartupSettings wraps Electron login item API failures with startup context", () => {
+  const originalError = new Error("registry denied");
+  const app = {
+    setLoginItemSettings: () => {
+      throw originalError;
+    }
+  };
+
+  assert.throws(
+    () => applyStartupSettings(app, {
+      launchAtLogin: true,
+      startMinimizedToTray: true
+    }, {
+      execPath: "C:/Program Files/Local Flow/Local Flow.exe"
+    }),
+    (error) => {
+      assert.match(error.message, /Could not update Windows startup settings: registry denied/);
+      assert.equal(error.cause?.message, "registry denied");
+      return true;
+    }
+  );
+});
+
 test("shouldStartMinimized respects hidden argv and user setting", () => {
   assert.equal(shouldStartMinimized(["node", "app"], { startMinimizedToTray: false }), false);
   assert.equal(shouldStartMinimized(["node", "app", "--hidden"], { startMinimizedToTray: false }), true);

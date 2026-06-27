@@ -291,6 +291,32 @@ test("saveSettings applies explicit valid provider changes", async () => {
   }
 });
 
+test("saveSettings persists Windows productization settings", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    const store = createSettingsStore(userDataPath);
+    await store.saveSettings({
+      launchAtLogin: true,
+      startMinimizedToTray: true,
+      globalShortcutPaused: true
+    });
+
+    const settings = await store.getSettings();
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(settings.launchAtLogin, true);
+    assert.equal(settings.startMinimizedToTray, true);
+    assert.equal(settings.globalShortcutPaused, true);
+    assert.equal(persisted.launchAtLogin, true);
+    assert.equal(persisted.startMinimizedToTray, true);
+    assert.equal(persisted.globalShortcutPaused, true);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("getSettings redacts cloud credentials unless secrets are explicitly requested", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
 
