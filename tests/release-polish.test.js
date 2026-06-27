@@ -38,3 +38,12 @@ test("Windows icon generator is checked in", async () => {
   assert.match(script, /local-flow-icon\.ico/);
   assert.match(script, /writeIco/);
 });
+
+test("release verifier checks installer executable and icon config", async () => {
+  const script = await readFile(new URL("../scripts/verify-release-build.mjs", import.meta.url), "utf8");
+
+  assert.match(script, /Local Flow Setup 0\.1\.0\.exe/);
+  assert.match(script, /dist\/win-unpacked\/Local Flow\.exe/);
+  assert.match(script, /assets\/local-flow-icon\.ico/);
+  assert.match(script, /git check-ignore/);
+});
