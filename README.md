@@ -65,6 +65,25 @@ For a faster local packaging smoke test, run:
 npm.cmd run package:win
 ```
 
+## Windows 安装包试用
+
+如果只是试用产品，不需要从源码启动。直接运行安装包：
+
+```powershell
+.\dist\Local Flow Setup 0.1.0.exe
+```
+
+安装后首次启动会显示主窗口，方便检查模型和麦克风状态。建议保持默认设置：
+
+- `界面语言`: 简体中文。
+- `语音识别语言`: 自动。
+- `输出语言`: 自动（同语音）。
+- `文本模型提供方`: MyMemory Free。
+
+Local Flow 是语音输入软件，不是默认翻译软件。输出语言为 `自动（同语音）` 时，你说中文就输出中文，你说英文就输出英文。只有主动选择某个目标输出语言时，才会尝试把结果转换成目标语言。
+
+录音前必须配置 Whisper 语音模型。如果首页的 `开始录音` 按钮不可用，先点击 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。Qwen3 是可选的本地文本模型，不是录音必需项；默认试用可以先不安装 Qwen。
+
 ## Startup And Tray Behavior
 
 The installed app keeps running from the tray when the main window is closed. Use the tray menu to show Local Flow, start or stop dictation, pause or resume the global shortcut, toggle launch at login, toggle start minimized to tray, open settings, or quit.
