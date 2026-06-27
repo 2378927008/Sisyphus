@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local-first Windows voice dictation MVP inspired by Typeless and Wispr Flow.",
+  "author": "Local Flow",
   "main": "src/main/index.js",
   "type": "module",
   "scripts": {
@@ -11,7 +12,8 @@
     "check:app": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-app-smoke.mjs",
     "test": "node --test tests/*.test.js",
     "package:win": "electron-builder --win --dir",
-    "dist:win": "electron-builder --win nsis"
+    "dist:win": "electron-builder --win nsis",
+    "verify:release": "node scripts/verify-release-build.mjs"
   },
   "devDependencies": {
     "electron": "38.8.6",
@@ -50,7 +52,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/local-flow-icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -58,7 +61,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Local Flow"
+      "shortcutName": "Local Flow",
+      "installerIcon": "assets/local-flow-icon.ico",
+      "uninstallerIcon": "assets/local-flow-icon.ico"
     }
   }
 }
