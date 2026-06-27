@@ -58,15 +58,6 @@ export function buildPolishPrompt({ mode = "polish", transcript = "", dictionary
     ].join("\n");
   }
 
-  if (mode === "translate") {
-    return [
-      "Translate the transcript into natural English unless it is already English.",
-      "Return only the translated text.",
-      `Personal dictionary: ${terms}`,
-      `Transcript: ${transcript}`
-    ].join("\n");
-  }
-
   return [
     "Rewrite the transcript as polished text.",
     "Remove filler words, repeated phrases, and false starts.",

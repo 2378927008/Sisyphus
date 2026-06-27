@@ -397,6 +397,17 @@ test("main process creates HUD with dedicated least-privilege preload", async ()
   assert.doesNotMatch(createHudMatch.groups.body, /\.\.\/preload\.cjs/);
 });
 
+test("main process explicitly shows and focuses the primary window on startup", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const createWindowMatch = mainSource.match(/function createWindow\(\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(createWindowMatch, "createWindow should be defined");
+  assert.match(createWindowMatch.groups.body, /show: false/);
+  assert.match(createWindowMatch.groups.body, /mainWindow\.once\("ready-to-show"/);
+  assert.match(createWindowMatch.groups.body, /mainWindow\.show\(\)/);
+  assert.match(createWindowMatch.groups.body, /mainWindow\.focus\(\)/);
+});
+
 test("main process only accepts recording status from the main renderer", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const recordingStatusMatch = mainSource.match(/ipcMain\.on\("recording:status", \(_event, payload\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);

@@ -52,11 +52,17 @@ function createWindow() {
     minHeight: 560,
     title: "Local Flow Dictation",
     backgroundColor: "#f6f4ef",
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    mainWindow.focus();
   });
 
   mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));

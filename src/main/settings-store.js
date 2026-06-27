@@ -87,6 +87,7 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   merged.interfaceLanguage = normalizeInterfaceLanguage(merged.interfaceLanguage);
   merged.whisperLanguage = normalizeWhisperLanguage(merged.whisperLanguage);
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
+  merged.polishMode = normalizePolishMode(merged.polishMode);
   merged.asrProvider = normalizeAsrProvider(merged.asrProvider);
   merged.llmProvider = normalizeTextProvider(merged.llmProvider);
   merged.cloudApiBaseUrl = String(merged.cloudApiBaseUrl || "").trim();
@@ -134,6 +135,14 @@ function normalizeDictionary(value) {
   }
 
   return [];
+}
+
+function normalizePolishMode(value) {
+  const mode = String(value || "").trim();
+  if (mode === "raw" || mode === "command") {
+    return mode;
+  }
+  return "polish";
 }
 
 async function loadSettings(settingsPath, baseSettings, secretCodec) {

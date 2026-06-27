@@ -25,3 +25,17 @@ test("getUiText returns MyMemory provider labels", () => {
   assert.equal(getUiText("en", "model.provider.mymemory"), "MyMemory Free (cloud)");
   assert.equal(getUiText("fr", "model.provider.mymemory"), "MyMemory Free (cloud)");
 });
+
+test("legacy translate mode is not framed as English-only translation", () => {
+  assert.equal(getUiText("en", "mode.translate"), "Target language output");
+  assert.equal(getUiText("zh-Hans", "mode.translate"), "目标语言输出");
+  assert.equal(getUiText("ja", "mode.translate"), "出力言語に変換");
+  assert.equal(getUiText("ko", "mode.translate"), "출력 언어로 변환");
+});
+
+test("local model setup copy frames dictation as target-language output", () => {
+  assert.match(getUiText("en", "setup.llm.missing"), /target-language output/);
+  assert.doesNotMatch(getUiText("en", "setup.llm.missing"), /translation/i);
+  assert.match(getUiText("zh-Hans", "setup.llm.missing"), /目标语言输出/);
+  assert.doesNotMatch(getUiText("zh-Hans", "setup.llm.missing"), /翻译/);
+});

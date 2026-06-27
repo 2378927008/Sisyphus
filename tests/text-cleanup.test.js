@@ -27,6 +27,18 @@ test("buildPolishPrompt keeps dictation mode explicit", () => {
   assert.match(prompt, /um write a better email/);
 });
 
+test("buildPolishPrompt treats legacy translate mode as same-language dictation cleanup", () => {
+  const prompt = buildPolishPrompt({
+    mode: "translate",
+    transcript: "这是一个测试",
+    dictionary: []
+  });
+
+  assert.match(prompt, /same language as the transcript/);
+  assert.doesNotMatch(prompt, /natural English/);
+  assert.doesNotMatch(prompt, /Translate/);
+});
+
 test("buildOutputPrompt keeps source language when output language is automatic", () => {
   const prompt = buildOutputPrompt({
     mode: "polish",

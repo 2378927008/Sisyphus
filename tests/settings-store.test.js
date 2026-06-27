@@ -80,6 +80,12 @@ test("mergeSettings maps legacy original output language to automatic same-langu
   assert.equal(settings.outputLanguage, "auto");
 });
 
+test("mergeSettings maps legacy translate polish mode to same-language polish", () => {
+  const settings = mergeSettings({ polishMode: "translate" });
+
+  assert.equal(settings.polishMode, "polish");
+});
+
 test("mergeSettings normalizes invalid provider preferences", () => {
   const settings = mergeSettings({
     asrProvider: "bad-asr",
