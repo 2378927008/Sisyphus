@@ -27,6 +27,26 @@ test("mergeSettings ignores unknown keys", () => {
   assert.equal("unknown" in settings, false);
 });
 
+test("mergeSettings includes Windows productization defaults", () => {
+  const settings = mergeSettings();
+
+  assert.equal(settings.launchAtLogin, false);
+  assert.equal(settings.startMinimizedToTray, false);
+  assert.equal(settings.globalShortcutPaused, false);
+});
+
+test("mergeSettings normalizes Windows productization booleans", () => {
+  const settings = mergeSettings({
+    launchAtLogin: 1,
+    startMinimizedToTray: "yes",
+    globalShortcutPaused: ""
+  });
+
+  assert.equal(settings.launchAtLogin, true);
+  assert.equal(settings.startMinimizedToTray, true);
+  assert.equal(settings.globalShortcutPaused, false);
+});
+
 test("mergeSettings accepts default overrides", () => {
   const settings = mergeSettings({}, {
     ...defaultSettings,

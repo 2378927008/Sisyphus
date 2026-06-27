@@ -16,6 +16,9 @@ import {
 
 export const defaultSettings = {
   hotkey: "CommandOrControl+Alt+Space",
+  launchAtLogin: false,
+  startMinimizedToTray: false,
+  globalShortcutPaused: false,
   asrProvider: "localWhisper",
   whisperCliPath: "",
   whisperModelPath: "",
@@ -84,6 +87,9 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
     : defaults.historyLimit;
   merged.pasteAfterTranscribe = Boolean(merged.pasteAfterTranscribe);
   merged.ollamaEnabled = Boolean(merged.ollamaEnabled);
+  merged.launchAtLogin = Boolean(merged.launchAtLogin);
+  merged.startMinimizedToTray = Boolean(merged.startMinimizedToTray);
+  merged.globalShortcutPaused = Boolean(merged.globalShortcutPaused);
   merged.interfaceLanguage = normalizeInterfaceLanguage(merged.interfaceLanguage);
   merged.whisperLanguage = normalizeWhisperLanguage(merged.whisperLanguage);
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
