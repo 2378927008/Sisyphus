@@ -370,8 +370,8 @@ test("main process delegates model setup IPC wiring to the setup IPC module", as
 
 test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*stopRecording:/);
-  const stopRecordingMatch = mainSource.match(/stopRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\s*\},\n\s*isReadyToRecord:/);
+  const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);
+  const stopRecordingMatch = mainSource.match(/stopRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*isReadyToRecord:/);
 
   assert.ok(startRecordingMatch, "system input controller should use a block startRecording handler");
   assert.ok(stopRecordingMatch, "system input controller should use a block stopRecording handler");
