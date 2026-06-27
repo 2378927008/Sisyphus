@@ -9,9 +9,54 @@
     "start": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer .",
     "check:microphone": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-microphone-smoke.mjs",
     "check:app": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-app-smoke.mjs",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "package:win": "electron-builder --win --dir",
+    "dist:win": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "38.8.6"
+    "electron": "38.8.6",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.localflow.dictation",
+    "productName": "Local Flow",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "scripts/**/*",
+      "Start-LocalFlow.cmd",
+      "!docs/**/*",
+      "!tests/**/*",
+      "!dist/**/*",
+      "!out/**/*",
+      "!.git/**/*",
+      "!.worktrees/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Local Flow"
+    }
   }
 }
