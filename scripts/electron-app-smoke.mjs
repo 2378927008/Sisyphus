@@ -113,6 +113,7 @@ function wireIpc() {
       }));
     });
   });
+  ipcMain.handle("dictation:status-latest", () => null);
   ipcMain.handle("dictation:wav", () => {
     settingsAtDictation = { ...settings };
     return dictationResult;

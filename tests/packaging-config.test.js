@@ -25,8 +25,15 @@ test("electron-builder configuration targets Local Flow Windows NSIS builds", as
   assert.equal(pkg.build.nsis.createStartMenuShortcut, true);
   assert.ok(pkg.build.files.includes("src/**/*"));
   assert.ok(pkg.build.files.includes("scripts/**/*"));
+  assert.ok(pkg.build.files.includes("assets/**/*"));
   assert.ok(vendorResource);
   assert.ok(vendorResource.filter.includes("!**/downloads/**"));
+});
+
+test("tray icon asset is packaged and valid SVG", async () => {
+  const iconSource = await readFile(new URL("../assets/local-flow-icon.svg", import.meta.url), "utf8");
+
+  assert.match(iconSource, /<svg[\s>]/);
 });
 
 test("build output directories stay ignored by git", async () => {

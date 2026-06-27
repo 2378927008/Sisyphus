@@ -87,6 +87,14 @@ async function init() {
     setSettingsDrawer(true);
   });
   window.localFlow.onStatus(handleMainStatus);
+  try {
+    const latestStatus = await window.localFlow.getLatestStatus?.();
+    if (latestStatus) {
+      handleMainStatus(latestStatus);
+    }
+  } catch {
+    // Live status remains subscribed if startup replay is unavailable.
+  }
 
   await renderHistory();
   await renderLocalModelStatus();

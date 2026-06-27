@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("localFlow", {
   startModelSetup: (type) => ipcRenderer.invoke("models:setup-start", type),
   cancelModelSetup: (type) => ipcRenderer.invoke("models:setup-cancel", type),
   refreshModelSetupStatus: () => ipcRenderer.invoke("models:setup-refresh"),
+  getLatestStatus: () => ipcRenderer.invoke("dictation:status-latest"),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
   onShortcutToggle: (callback) => {
     ipcRenderer.on("recording:toggle", () => callback());

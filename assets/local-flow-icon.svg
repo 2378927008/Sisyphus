@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title">
+  <title>Local Flow</title>
+  <rect width="64" height="64" rx="14" fill="#101820"/>
+  <path d="M32 13c-5 0-9 4-9 9v13c0 5 4 9 9 9s9-4 9-9V22c0-5-4-9-9-9Z" fill="#f6f4ef"/>
+  <path d="M27 22c0-3 2-5 5-5s5 2 5 5v13c0 3-2 5-5 5s-5-2-5-5V22Z" fill="#2db7a3"/>
+  <path d="M18 32v3c0 8 6 14 14 14s14-6 14-14v-3" fill="none" stroke="#f6f4ef" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 49v7" stroke="#f6f4ef" stroke-width="4" stroke-linecap="round"/>
+  <path d="M24 56h16" stroke="#f6f4ef" stroke-width="4" stroke-linecap="round"/>
+  <path d="M13 27c-2 3-3 6-3 9s1 6 3 9" fill="none" stroke="#f2b84b" stroke-width="4" stroke-linecap="round"/>
+  <path d="M51 27c2 3 3 6 3 9s-1 6-3 9" fill="none" stroke="#f2b84b" stroke-width="4" stroke-linecap="round"/>
+</svg>

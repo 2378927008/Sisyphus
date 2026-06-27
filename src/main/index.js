@@ -18,6 +18,7 @@ import { getRuntimeRoot, getVendorRoot, getAppRoot } from "./runtime-root.js";
 import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.js";
 import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
+import { getTrayIconPath } from "./tray-icon.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererRecordingPhases = new Set([
@@ -53,6 +54,7 @@ let appRoot;
 let hotkeyManager;
 let lastSettings;
 let lastSystemInputState = { phase: "idle" };
+let lastDictationStatus;
 
 function createWindow({ showOnReady = true } = {}) {
   mainWindow = new BrowserWindow({
@@ -99,7 +101,8 @@ function createHudWindow() {
 }
 
 function createTray() {
-  tray = new Tray(nativeImage.createEmpty());
+  const trayIcon = nativeImage.createFromPath(getTrayIconPath(appRoot));
+  tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
   refreshTrayMenu();
   tray.on("click", () => showMainWindow());
 }
@@ -188,6 +191,7 @@ function sendRecordingStopCommand() {
 }
 
 function sendStatus(payload) {
+  lastDictationStatus = payload;
   if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", payload);
   }
@@ -366,6 +370,7 @@ function wireIpc() {
     }
     systemInputController?.handleRendererStatus(status);
   });
+  ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
   ipcMain.handle("settings:get", () => settingsStore.getSettings());
   ipcMain.handle("settings:save", async (_event, settings) => {
     return saveSettingsWithSystemEffects(settings);

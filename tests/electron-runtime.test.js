@@ -89,6 +89,12 @@ test("app smoke test uses the current Electron console-message event shape", asy
   assert.doesNotMatch(smokeSource, /console-message", \(_event, level, message, line, sourceId\)/);
 });
 
+test("app smoke stubs latest dictation status IPC for renderer startup replay", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /ipcMain\.handle\("dictation:status-latest", \(\) => null\)/);
+});
+
 test("preload shortcut toggle callback does not receive the raw IPC event", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   const listeners = new Map();
@@ -281,6 +287,39 @@ test("preload exposes system input status listener without raw ipcRenderer acces
   assert.deepEqual(states, [{ phase: "recording" }]);
 });
 
+test("preload exposes latest dictation status safely", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  let exposedApi = null;
+  const invoked = [];
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return { phase: "error", message: "Shortcut conflict" };
+          },
+          on: () => undefined,
+          send: () => undefined
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(await exposedApi.getLatestStatus(), { phase: "error", message: "Shortcut conflict" });
+  assert.deepEqual(invoked, [{ channel: "dictation:status-latest", payload: undefined }]);
+});
+
 test("preload exposes settings open listener without raw IPC event access", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   let exposedApi = null;
@@ -413,6 +452,33 @@ test("main process imports Windows productization modules", async () => {
   assert.match(mainSource, /import \{ applyStartupSettings, shouldStartMinimized \} from "\.\/startup-settings\.js";/);
   assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
   assert.match(mainSource, /import \{ buildTrayMenuTemplate, getTrayTooltip \} from "\.\/tray-menu\.js";/);
+  assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
+});
+
+test("main process stores and serves latest dictation status", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(/function sendStatus\(payload\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.match(mainSource, /let lastDictationStatus/);
+  assert.ok(sendStatusMatch, "sendStatus should be defined");
+  assert.match(sendStatusMatch.groups.body, /lastDictationStatus\s*=\s*payload/);
+  assert.match(mainSource, /ipcMain\.handle\("dictation:status-latest", \(\) => lastDictationStatus \|\| null\)/);
+});
+
+test("main process uses a real tray icon helper with empty image fallback", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const createTrayMatch = mainSource.match(/function createTray\(\) \{(?<body>[\s\S]*?)\n\}\n\nfunction refreshTrayMenu/);
+
+  assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
+  assert.ok(createTrayMatch, "createTray should be defined");
+  assert.match(createTrayMatch.groups.body, /nativeImage\.createFromPath\(getTrayIconPath\(appRoot\)\)/);
+  assert.match(createTrayMatch.groups.body, /\.isEmpty\(\)/);
+  assert.match(createTrayMatch.groups.body, /nativeImage\.createEmpty\(\)/);
+  assert.ok(
+    createTrayMatch.groups.body.indexOf("nativeImage.createEmpty()") >
+      createTrayMatch.groups.body.indexOf("nativeImage.createFromPath(getTrayIconPath(appRoot))"),
+    "empty tray image should only be used after trying the real icon"
+  );
 });
 
 test("main process wires packaged runtime roots into asset detection and setup", async () => {
@@ -617,6 +683,17 @@ test("renderer opens the settings drawer when main process requests settings", a
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
 
   assert.match(appSource, /window\.localFlow\.onOpenSettings\?\.\(\(\) => \{\s*setSettingsDrawer\(true\);\s*\}\)/);
+});
+
+test("renderer requests latest status after subscribing to main status", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const subscribeIndex = appSource.indexOf("window.localFlow.onStatus(handleMainStatus)");
+  const latestIndex = appSource.indexOf("window.localFlow.getLatestStatus");
+  const replayIndex = appSource.indexOf("handleMainStatus(latestStatus)");
+
+  assert.notEqual(subscribeIndex, -1, "renderer should subscribe to live main status");
+  assert.ok(latestIndex > subscribeIndex, "renderer should request latest status after subscribing");
+  assert.ok(replayIndex > latestIndex, "renderer should replay the fetched latest status");
 });
 
 test("renderer sends Windows productization fields when settings form saves", async () => {
