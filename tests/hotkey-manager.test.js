@@ -42,6 +42,27 @@ test("reports registration conflicts", () => {
   assert.equal(statuses.at(-1).phase, "error");
 });
 
+test("register clears paused state when unpaused registration fails", () => {
+  const globalShortcut = createFakeGlobalShortcut({ registerResult: false });
+  const manager = createHotkeyManager({
+    globalShortcut,
+    onToggle: () => {}
+  });
+
+  manager.register({
+    hotkey: "CommandOrControl+Alt+Space",
+    globalShortcutPaused: true
+  });
+  const status = manager.register({
+    hotkey: "CommandOrControl+Alt+Space",
+    globalShortcutPaused: false
+  });
+
+  assert.equal(status.ok, false);
+  assert.equal(status.reason, "registration_failed");
+  assert.equal(manager.isPaused(), false);
+});
+
 test("pause unregisters and resume registers again", () => {
   const globalShortcut = createFakeGlobalShortcut();
   const manager = createHotkeyManager({
@@ -55,6 +76,30 @@ test("pause unregisters and resume registers again", () => {
 
   assert.deepEqual(globalShortcut.calls.map((call) => call.type), ["register", "unregister", "register"]);
   assert.equal(manager.isPaused(), false);
+});
+
+test("registering a new hotkey unregisters only the previous hotkey", () => {
+  const globalShortcut = createFakeGlobalShortcut();
+  const toggles = [];
+  const manager = createHotkeyManager({
+    globalShortcut,
+    onToggle: () => toggles.push("toggle")
+  });
+
+  manager.register({ hotkey: "Ctrl+Alt+Space" });
+  manager.register({ hotkey: "CommandOrControl+Alt+Space" });
+
+  assert.deepEqual(globalShortcut.calls, [
+    { type: "register", hotkey: "Ctrl+Alt+Space" },
+    { type: "unregister", hotkey: "Ctrl+Alt+Space" },
+    { type: "register", hotkey: "CommandOrControl+Alt+Space" }
+  ]);
+
+  globalShortcut.trigger("Ctrl+Alt+Space");
+  globalShortcut.trigger("CommandOrControl+Alt+Space");
+
+  assert.deepEqual(toggles, ["toggle"]);
+  assert.equal(manager.getRegisteredHotkey(), "CommandOrControl+Alt+Space");
 });
 
 test("does not register while settings pause shortcuts", () => {
@@ -73,6 +118,36 @@ test("does not register while settings pause shortcuts", () => {
   assert.equal(status.paused, true);
   assert.equal(manager.isPaused(), true);
   assert.deepEqual(globalShortcut.calls, []);
+});
+
+test("missing hotkey reports an error and clears any previous registration", () => {
+  const globalShortcut = createFakeGlobalShortcut();
+  const toggles = [];
+  const manager = createHotkeyManager({
+    globalShortcut,
+    onToggle: () => toggles.push("toggle")
+  });
+
+  manager.register({ hotkey: "Ctrl+Alt+Space" });
+  const status = manager.register({
+    hotkey: "   ",
+    globalShortcutPaused: false
+  });
+
+  assert.equal(status.ok, false);
+  assert.equal(status.reason, "missing_hotkey");
+  assert.equal(status.phase, "error");
+  assert.equal(status.message, "Set a global shortcut before recording.");
+  assert.equal(manager.getRegisteredHotkey(), "");
+  assert.equal(manager.isPaused(), false);
+  assert.deepEqual(globalShortcut.calls, [
+    { type: "register", hotkey: "Ctrl+Alt+Space" },
+    { type: "unregister", hotkey: "Ctrl+Alt+Space" }
+  ]);
+
+  globalShortcut.trigger("Ctrl+Alt+Space");
+
+  assert.deepEqual(toggles, []);
 });
 
 function createFakeGlobalShortcut({ registerResult = true } = {}) {

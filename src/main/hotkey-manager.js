@@ -22,11 +22,11 @@ export function createHotkeyManager({
 
   function register(settings = {}) {
     unregister();
+    paused = Boolean(settings.globalShortcutPaused);
 
     const hotkey = String(settings.hotkey ?? "").trim();
 
     if (settings.globalShortcutPaused) {
-      paused = true;
       return emitStatus({
         ok: true,
         paused: true,
