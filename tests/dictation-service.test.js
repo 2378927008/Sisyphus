@@ -155,8 +155,9 @@ test("processWav blocks transcription when the selected ASR provider is not read
   assert.equal(events.at(-1).phase, "error");
 });
 
-test("processWav saves raw transcript without paste when the selected text provider is not implemented", async () => {
+test("processWav completes automatic same-language output when the selected text provider is not implemented", async () => {
   const history = [];
+  const pasted = [];
   const service = new DictationService({
     settingsStore: fakeSettingsStore(history, {
       whisperCliPath: "C:/tools/whisper-cli.exe",
@@ -167,22 +168,21 @@ test("processWav saves raw transcript without paste when the selected text provi
     }),
     clipboard: {},
     transcribe: async () => "hello world",
-    polish: async () => "cloud text result should not run",
-    paste: async () => {
-      throw new Error("paste should not run after partial processing");
-    },
+    polish: async () => "hello world cleaned",
+    paste: async (text) => pasted.push(text),
     notifyStatus: () => {}
   });
 
   const entry = await service.processWav(Buffer.from("wav"));
 
-  assert.equal(entry.status, "partial");
-  assert.equal(entry.text, "hello world");
-  assert.equal(entry.processingError, "cloud_text_not_implemented");
+  assert.equal(entry.status, "complete");
+  assert.equal(entry.text, "hello world cleaned");
+  assert.equal(entry.processingError, "");
+  assert.deepEqual(pasted, ["hello world cleaned"]);
   assert.equal(history[0], entry);
 });
 
-test("processWav saves raw transcript without paste when the embedded text provider is not configured", async () => {
+test("processWav completes automatic same-language output when the embedded text provider is not configured", async () => {
   const history = [];
   const pasted = [];
   const service = new DictationService({
@@ -201,11 +201,45 @@ test("processWav saves raw transcript without paste when the embedded text provi
 
   const entry = await service.processWav(Buffer.from("wav"));
 
-  assert.equal(entry.status, "partial");
-  assert.equal(entry.text, "hello world");
-  assert.equal(entry.processingError, "embedded_llm_not_configured");
-  assert.equal(pasted.length, 0);
+  assert.equal(entry.status, "complete");
+  assert.equal(entry.text, "hello world cleaned");
+  assert.equal(entry.processingError, "");
+  assert.deepEqual(pasted, ["hello world cleaned"]);
   assert.equal(history[0], entry);
+});
+
+test("processWav blocks transcription when target output text provider is not ready", async () => {
+  const history = [];
+  const events = [];
+  let transcribeCalls = 0;
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      outputLanguage: "zh-Hans",
+      embeddedLlmCliPath: "",
+      embeddedLlmModelPath: "",
+      llmProvider: "embedded",
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => {
+      transcribeCalls += 1;
+      return "this should not run";
+    },
+    polish: async () => "this should not run",
+    paste: async () => {
+      throw new Error("paste should not run when target text provider is blocked");
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  await assert.rejects(
+    service.processWav(Buffer.from("wav")),
+    /embedded_llm_not_configured/
+  );
+
+  assert.equal(transcribeCalls, 0);
+  assert.equal(history.length, 0);
+  assert.equal(events.at(-1).phase, "error");
 });
 
 function fakeSettingsStore(history, overrides = {}) {

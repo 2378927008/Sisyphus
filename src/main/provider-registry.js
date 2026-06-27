@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { isTargetOutputLanguage } from "../shared/languages.js";
 
 const cloudProviders = new Set(["cloudflareWorkersAi", "groq", "customOpenAiCompatible"]);
@@ -22,15 +23,24 @@ export function getProcessingProviderStatus(settings = {}) {
   const mode = getMode(asrProvider, textProvider, settings);
   const asr = getAsrStatus(asrProvider, settings);
   const text = getTextStatus(textProvider, settings);
-  const readyToRecord = Boolean(asr.implemented && asr.ready);
+  const textRequired = isTargetOutputLanguage(settings.outputLanguage);
+  const textReady = !textRequired || Boolean(text.implemented && text.ready);
+  const readyToRecord = Boolean(asr.implemented && asr.ready && textReady);
 
   return {
     mode,
     readyToRecord,
-    recordingBlockedReason: readyToRecord ? "" : asr.blockedReason,
+    recordingBlockedReason: getRecordingBlockedReason({ asr, text, textRequired, readyToRecord }),
     asr,
     text
   };
+}
+
+function getRecordingBlockedReason({ asr, text, textRequired, readyToRecord }) {
+  if (readyToRecord) return "";
+  if (!asr.implemented || !asr.ready) return asr.blockedReason || "provider_not_ready";
+  if (textRequired && (!text.implemented || !text.ready)) return text.blockedReason || "provider_not_ready";
+  return "provider_not_ready";
 }
 
 function getMode(asrProvider, textProvider, settings = {}) {
@@ -69,14 +79,19 @@ function getAsrStatus(provider, settings) {
 
 function getTextStatus(provider, settings) {
   if (provider === "embedded") {
-    const configured = Boolean(String(settings.embeddedLlmCliPath || "").trim() && String(settings.embeddedLlmModelPath || "").trim());
+    const cliPath = String(settings.embeddedLlmCliPath || "").trim();
+    const modelPath = String(settings.embeddedLlmModelPath || "").trim();
+    const configured = Boolean(cliPath && modelPath);
+    const pathsReady = !isTargetOutputLanguage(settings.outputLanguage) || (fileExists(cliPath) && fileExists(modelPath));
+    const ready = Boolean(configured && pathsReady);
+    const blockedReason = getEmbeddedLlmBlockedReason({ configured, pathsReady });
     return {
       provider,
       label: "Built-in local language model",
       configured,
       implemented: true,
-      ready: configured,
-      blockedReason: configured ? "" : "embedded_llm_not_configured"
+      ready,
+      blockedReason
     };
   }
 
@@ -138,4 +153,18 @@ function isCloudProvider(provider) {
 
 function hasValue(value) {
   return Boolean(String(value || "").trim());
+}
+
+function fileExists(filePath) {
+  try {
+    return Boolean(filePath && existsSync(filePath));
+  } catch {
+    return false;
+  }
+}
+
+function getEmbeddedLlmBlockedReason({ configured, pathsReady }) {
+  if (!configured) return "embedded_llm_not_configured";
+  if (!pathsReady) return "embedded_llm_paths_missing";
+  return "";
 }

@@ -44,7 +44,9 @@ export class DictationService {
 
     try {
       this.notifyStatus({ phase: "polishing", message: "Cleaning up dictation..." });
-      assertTextProviderCanProcess(providers);
+      if (isTargetOutputLanguage(settings.outputLanguage)) {
+        assertTextProviderCanProcess(providers);
+      }
       text = await this.polish(transcript, settings);
     } catch (error) {
       status = isTargetOutputLanguage(settings.outputLanguage) ? "failed" : "partial";

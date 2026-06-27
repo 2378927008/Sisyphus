@@ -464,11 +464,24 @@ app.whenReady().then(async () => {
     );
     await window.webContents.executeJavaScript(`
       (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'mymemory';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
         const outputLanguage = document.querySelector('#outputLanguage');
         outputLanguage.value = 'zh-Hans';
         outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#settingsForm').requestSubmit();
       })()
     `);
+    await waitForState(
+      window,
+      (state) => (
+        state.outputLanguage === "zh-Hans" &&
+        state.llmProvider === "mymemory" &&
+        state.providerStatusText.includes("MyMemory Free")
+      ),
+      5000
+    );
     window.webContents.send("recording:start");
     window.webContents.send("recording:start");
     const recordingState = await waitForState(
@@ -550,6 +563,9 @@ app.whenReady().then(async () => {
 
     if (settingsAtDictation?.outputLanguage !== "zh-Hans") {
       throw new Error(`Output language was not applied before dictation. Saw ${settingsAtDictation?.outputLanguage || "unset"}.`);
+    }
+    if (settingsAtDictation?.llmProvider !== "mymemory") {
+      throw new Error(`Text provider was not applied before dictation. Saw ${settingsAtDictation?.llmProvider || "unset"}.`);
     }
 
     const blockedWarnings = rendererMessages.filter((item) => isBlockedRendererWarning(item.message));

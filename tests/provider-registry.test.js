@@ -155,6 +155,57 @@ test("getProcessingProviderStatus explains missing embedded LLM setup", () => {
   assert.equal(status.text.blockedReason, "embedded_llm_not_configured");
 });
 
+test("getProcessingProviderStatus blocks target output when embedded LLM is not configured", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "embedded",
+    embeddedLlmCliPath: "",
+    embeddedLlmModelPath: "",
+    outputLanguage: "zh-Hans"
+  });
+
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "embedded_llm_not_configured");
+  assert.equal(status.readyToRecord, false);
+  assert.equal(status.recordingBlockedReason, "embedded_llm_not_configured");
+});
+
+test("getProcessingProviderStatus blocks target output when embedded LLM paths are missing", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "embedded",
+    embeddedLlmCliPath: "C:/missing/llama-cli.exe",
+    embeddedLlmModelPath: "C:/missing/qwen.gguf",
+    outputLanguage: "zh-Hans"
+  });
+
+  assert.equal(status.text.configured, true);
+  assert.equal(status.text.ready, false);
+  assert.equal(status.text.blockedReason, "embedded_llm_paths_missing");
+  assert.equal(status.readyToRecord, false);
+  assert.equal(status.recordingBlockedReason, "embedded_llm_paths_missing");
+});
+
+test("getProcessingProviderStatus allows automatic same-language output with stale embedded LLM paths", () => {
+  const status = getProcessingProviderStatus({
+    asrProvider: "localWhisper",
+    whisperCliPath: "C:/tools/whisper-cli.exe",
+    whisperModelPath: "C:/models/ggml-base.bin",
+    llmProvider: "embedded",
+    embeddedLlmCliPath: "C:/missing/llama-cli.exe",
+    embeddedLlmModelPath: "C:/missing/qwen.gguf",
+    outputLanguage: "auto"
+  });
+
+  assert.equal(status.text.configured, true);
+  assert.equal(status.text.ready, true);
+  assert.equal(status.readyToRecord, true);
+});
+
 test("getProcessingProviderStatus explains disabled Ollama setup", () => {
   const status = getProcessingProviderStatus({
     asrProvider: "localWhisper",

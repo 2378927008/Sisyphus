@@ -70,6 +70,37 @@ test("polishTranscript uses embedded llama.cpp when configured", async () => {
   assert.ok(calls[0].args.includes("C:/models/Qwen3-4B-Q4_K_M.gguf"));
 });
 
+test("polishTranscript explains missing embedded executable without leaking raw spawn errors", async () => {
+  await assert.rejects(
+    polishTranscript(
+      "hello world",
+      {
+        polishMode: "polish",
+        outputLanguage: "zh-Hans",
+        embeddedLlmCliPath: "C:/missing/llama-cli.exe",
+        embeddedLlmModelPath: "C:/models/Qwen3-4B-Q4_K_M.gguf",
+        ollamaEnabled: false
+      },
+      {
+        spawn: () => {
+          const child = new EventEmitter();
+          queueMicrotask(() => {
+            const error = new Error("spawn C:/missing/llama-cli.exe ENOENT");
+            error.code = "ENOENT";
+            child.emit("error", error);
+          });
+          return child;
+        }
+      }
+    ),
+    (error) => {
+      assert.match(error.message, /Local language model executable was not found/);
+      assert.doesNotMatch(error.message, /spawn C:\/missing/);
+      return true;
+    }
+  );
+});
+
 test("polishTranscript uses MyMemory for selected target output languages", async () => {
   const requests = [];
   const result = await polishTranscript(
@@ -147,6 +178,37 @@ test("checkTextProvider probes MyMemory with a small target-language request", a
   assert.equal(requests[0].origin, "https://api.mymemory.translated.net");
   assert.equal(requests[0].searchParams.get("q"), "hello world");
   assert.equal(requests[0].searchParams.get("langpair"), "en|zh-CN");
+});
+
+test("checkTextProvider reports missing embedded model files", async () => {
+  const result = await checkTextProvider({
+    llmProvider: "embedded",
+    embeddedLlmCliPath: "C:/missing/llama-cli.exe",
+    embeddedLlmModelPath: "C:/missing/Qwen3-4B-Q4_K_M.gguf"
+  });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.checks[0].status, "fail");
+  assert.match(result.checks[0].message, /not found/);
+});
+
+test("checkTextProvider does not bypass embedded file checks when spawn is injected", async () => {
+  const result = await checkTextProvider(
+    {
+      llmProvider: "embedded",
+      embeddedLlmCliPath: "C:/missing/llama-cli.exe",
+      embeddedLlmModelPath: "C:/missing/Qwen3-4B-Q4_K_M.gguf"
+    },
+    {
+      spawn: () => {
+        throw new Error("spawn should not be used by diagnostics readiness");
+      }
+    }
+  );
+
+  assert.equal(result.ready, false);
+  assert.equal(result.checks[0].status, "fail");
+  assert.match(result.checks[0].message, /not found/);
 });
 
 test("checkTextProvider reports MyMemory failures without throwing", async () => {

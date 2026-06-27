@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { detectLikelyLanguage } from "../shared/language-detection.js";
 import { isTargetOutputLanguage } from "../shared/languages.js";
 import { buildOutputPrompt, polishLocally } from "../shared/text-cleanup.js";
@@ -31,7 +32,7 @@ export async function polishTranscript(transcript, settings = {}, deps = {}) {
     return polishWithMyMemory(transcript, settings, deps);
   }
 
-  if (hasEmbeddedLlm(settings)) {
+  if (hasEmbeddedLlm(settings, deps)) {
     try {
       const result = await polishWithEmbeddedLlm(prompt, settings, deps);
       if (result) {
@@ -73,7 +74,8 @@ export async function checkTextProvider(settings = {}, deps = {}) {
   }
 
   if (provider === "embedded") {
-    const ready = hasEmbeddedLlm(settings);
+    const modelStatus = getEmbeddedLlmStatus(settings);
+    const ready = modelStatus.ready;
     return {
       ready,
       checks: [
@@ -82,7 +84,7 @@ export async function checkTextProvider(settings = {}, deps = {}) {
           status: ready ? "pass" : "fail",
           message: ready
             ? "llama.cpp executable and model paths are configured."
-            : "Set the llama.cpp executable and Qwen GGUF model paths before using the built-in model."
+            : modelStatus.message
         }
       ]
     };
@@ -162,7 +164,7 @@ function getMyMemoryDiagnosticTarget(outputLanguage) {
 }
 
 async function polishWithRequiredLlm(prompt, settings, deps = {}) {
-  if (hasEmbeddedLlm(settings)) {
+  if (hasEmbeddedLlm(settings, deps)) {
     try {
       return await polishWithEmbeddedLlm(prompt, settings, deps);
     } catch (error) {
@@ -181,8 +183,47 @@ async function polishWithRequiredLlm(prompt, settings, deps = {}) {
   throw new Error("Install the built-in local language model, enable Ollama, or select MyMemory Free to produce the selected output language.");
 }
 
-function hasEmbeddedLlm(settings = {}) {
-  return Boolean(settings.embeddedLlmCliPath?.trim() && settings.embeddedLlmModelPath?.trim());
+function hasEmbeddedLlm(settings = {}, deps = {}) {
+  return getEmbeddedLlmStatus(settings, deps).ready;
+}
+
+function getEmbeddedLlmStatus(settings = {}, deps = {}) {
+  const cliPath = String(settings.embeddedLlmCliPath || "").trim();
+  const modelPath = String(settings.embeddedLlmModelPath || "").trim();
+
+  if (!cliPath || !modelPath) {
+    return {
+      ready: false,
+      message: "Set the llama.cpp executable and Qwen GGUF model paths before using the built-in model."
+    };
+  }
+
+  if (deps.spawn) {
+    return {
+      ready: true,
+      message: "llama.cpp executable and model paths are configured."
+    };
+  }
+
+  if (!fileExists(cliPath) || !fileExists(modelPath)) {
+    return {
+      ready: false,
+      message: "The configured llama.cpp executable or Qwen GGUF model file was not found."
+    };
+  }
+
+  return {
+    ready: true,
+    message: "llama.cpp executable and model paths are configured."
+  };
+}
+
+function fileExists(filePath) {
+  try {
+    return Boolean(filePath && existsSync(filePath));
+  } catch {
+    return false;
+  }
 }
 
 async function polishWithEmbeddedLlm(prompt, settings, deps = {}) {
@@ -216,7 +257,14 @@ function runLlamaCli(file, args, deps = {}) {
   const timeoutMs = deps.timeoutMs || 120000;
 
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(file, args, { windowsHide: true });
+    let child;
+    try {
+      child = spawnImpl(file, args, { windowsHide: true });
+    } catch (error) {
+      reject(toLlamaProcessError(error));
+      return;
+    }
+
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -232,7 +280,7 @@ function runLlamaCli(file, args, deps = {}) {
     });
     child.on("error", (error) => {
       clearTimeout(timer);
-      reject(error);
+      reject(toLlamaProcessError(error));
     });
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -243,6 +291,16 @@ function runLlamaCli(file, args, deps = {}) {
       }
     });
   });
+}
+
+function toLlamaProcessError(error) {
+  if (error?.code === "ENOENT") {
+    return new Error("Local language model executable was not found.");
+  }
+  if (error?.code === "EACCES") {
+    return new Error("Local language model executable could not be started. Check file permissions.");
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function stripModelOutput(output = "") {

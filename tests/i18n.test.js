@@ -44,6 +44,13 @@ test("getUiText returns Windows productization labels", () => {
   assert.equal(getUiText("en", "label.launchAtLogin"), "Launch Local Flow at login");
   assert.equal(getUiText("en", "label.startMinimizedToTray"), "Start minimized to tray");
   assert.equal(getUiText("en", "label.globalShortcutPaused"), "Pause global shortcut");
+  const englishMissingPaths = getUiText("en", "record.disabled.embedded_llm_paths_missing");
+  const chineseMissingPaths = getUiText("zh-Hans", "record.disabled.embedded_llm_paths_missing");
+  assert.match(englishMissingPaths, /Auto \(same as speech\)/);
+  assert.match(englishMissingPaths, /MyMemory Free/);
+  assert.match(chineseMissingPaths, /自动/);
+  assert.match(chineseMissingPaths, /MyMemory Free/);
+  assert.notEqual(chineseMissingPaths, englishMissingPaths);
   assert.equal(getUiText("zh-Hans", "label.launchAtLogin"), "开机自动启动 Local Flow");
   assert.equal(getUiText("zh-Hans", "label.startMinimizedToTray"), "启动后最小化到托盘");
   assert.equal(getUiText("zh-Hans", "label.globalShortcutPaused"), "暂停全局快捷键");
