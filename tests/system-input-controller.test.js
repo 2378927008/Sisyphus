@@ -170,6 +170,53 @@ test("system input controller times out renderer start and stop commands", () =>
   assert.equal(stoppingController.getState().message, "Recording did not stop.");
 });
 
+test("system input controller ignores stale command timeout after starting refreshes", () => {
+  const timers = createManualTimers();
+  const now = createManualClock();
+  const resets = [];
+  const controller = createSystemInputController({
+    requestRendererReset: () => resets.push("reset"),
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+    commandTimeoutMs: 125,
+    now
+  });
+
+  controller.setPhase("starting", { message: "Starting" });
+  const staleTimerId = timers.lastPendingId();
+  const staleUpdatedAt = controller.getState().updatedAt;
+
+  controller.setPhase("starting", { message: "Starting again" });
+  assert.notEqual(controller.getState().updatedAt, staleUpdatedAt);
+
+  timers.runTimer(staleTimerId);
+
+  assert.deepEqual(resets, []);
+  assert.equal(controller.getState().phase, "starting");
+  assert.equal(controller.getState().message, "Starting again");
+});
+
+test("system input controller ignores stale command timeout after phase changes", () => {
+  const timers = createManualTimers();
+  const resets = [];
+  const controller = createSystemInputController({
+    requestRendererReset: () => resets.push("reset"),
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+    commandTimeoutMs: 125
+  });
+
+  controller.setPhase("starting", { message: "Starting" });
+  const staleTimerId = timers.lastPendingId();
+
+  controller.setPhase("recording", { message: "Recording" });
+  timers.runTimer(staleTimerId);
+
+  assert.deepEqual(resets, []);
+  assert.equal(controller.getState().phase, "recording");
+  assert.equal(controller.getState().message, "Recording");
+});
+
 test("system input controller returns terminal phases to idle after the terminal delay", () => {
   for (const phase of ["done", "warning", "error"]) {
     const timers = createManualTimers();

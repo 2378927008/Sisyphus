@@ -33,7 +33,6 @@ const rendererRecordingPhases = new Set([
   "warning"
 ]);
 const terminalSystemInputPhases = new Set(["done", "warning", "error"]);
-const terminalAutoIdleMs = 2500;
 const maxRendererStatusTextLength = 240;
 
 applyElectronRuntimeSwitches(app);
@@ -45,7 +44,6 @@ let dictationService;
 let modelSetupService;
 let hudWindow;
 let systemInputController;
-let terminalAutoIdleTimeout;
 let runtimeRoot;
 let vendorRoot;
 let appRoot;
@@ -201,18 +199,15 @@ function sendSystemInputStatus(state) {
   sendWindowMessage(hudWindow, "system-input:status", state);
 
   if (state?.phase === "idle") {
-    clearTerminalAutoIdle();
     hideHud();
     return;
   }
 
   if (terminalSystemInputPhases.has(state?.phase)) {
     showHud();
-    scheduleTerminalAutoIdle(state);
     return;
   }
 
-  clearTerminalAutoIdle();
   if (isActiveSystemInputPhase(state?.phase)) {
     showHud();
   }
@@ -248,25 +243,6 @@ function isUsableWindow(window) {
 
 function isActiveSystemInputPhase(phase) {
   return Boolean(phase && phase !== "idle");
-}
-
-function scheduleTerminalAutoIdle(state) {
-  clearTerminalAutoIdle();
-  const terminalPhase = state?.phase;
-  const terminalUpdatedAt = state?.updatedAt;
-  terminalAutoIdleTimeout = setTimeout(() => {
-    const currentState = systemInputController?.getState();
-    if (currentState?.phase === terminalPhase && currentState?.updatedAt === terminalUpdatedAt) {
-      systemInputController?.setPhase("idle");
-    }
-  }, terminalAutoIdleMs);
-}
-
-function clearTerminalAutoIdle() {
-  if (terminalAutoIdleTimeout) {
-    clearTimeout(terminalAutoIdleTimeout);
-    terminalAutoIdleTimeout = null;
-  }
 }
 
 function sanitizeRecordingStatusPayload(payload = {}) {

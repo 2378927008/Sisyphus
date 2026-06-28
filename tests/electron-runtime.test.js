@@ -633,17 +633,23 @@ test("main process hides HUD when system input returns idle", async () => {
   const sendStatusMatch = mainSource.match(/function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
-  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*clearTerminalAutoIdle\(\);\s*hideHud\(\);\s*return;\s*\}/);
+  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
   assert.match(mainSource, /function hideHud\(\) \{/);
 });
 
-test("main process auto-idles terminal HUD states and caps renderer status payloads", async () => {
+test("main process shows terminal HUD states without owning terminal auto-idle", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(
+    /function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction showHud/
+  );
 
+  assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
   assert.match(mainSource, /const terminalSystemInputPhases = new Set\(\["done", "warning", "error"\]\)/);
-  assert.match(mainSource, /scheduleTerminalAutoIdle\(state\)/);
-  assert.match(mainSource, /systemInputController\?\.setPhase\("idle"/);
-  assert.match(mainSource, /clearTerminalAutoIdle\(\)/);
+  assert.match(sendStatusMatch.groups.body, /if \(terminalSystemInputPhases\.has\(state\?\.phase\)\) \{\s*showHud\(\);\s*return;\s*\}/);
+  assert.doesNotMatch(mainSource, /scheduleTerminalAutoIdle/);
+  assert.doesNotMatch(mainSource, /clearTerminalAutoIdle/);
+  assert.doesNotMatch(mainSource, /terminalAutoIdleTimeout/);
+  assert.doesNotMatch(mainSource, /terminalAutoIdleMs/);
   assert.match(mainSource, /slice\(0, maxRendererStatusTextLength\)/);
   assert.match(mainSource, /const maxRendererStatusTextLength = 240/);
   assert.match(mainSource, /"starting"/);
