@@ -89,14 +89,26 @@ function getVisibleMenuText(item) {
 test("getTrayTooltip returns localized phase status and fallback", () => {
   assert.equal(getTrayTooltip({ state: { phase: "recording" } }), "Local Flow - Recording");
   assert.equal(getTrayTooltip({ state: { phase: "pasting" } }), "Local Flow - Pasting");
-  assert.equal(getTrayTooltip({
-    language: "zh-Hans",
-    state: { phase: "error" }
-  }), "Local Flow - 错误");
-  assert.equal(getTrayTooltip({
-    language: "zh-Hans",
-    state: { phase: "pasting" }
-  }), "Local Flow - 正在粘贴");
+
+  const chinesePhaseTooltips = [
+    ["idle", "Local Flow - 空闲"],
+    ["starting", "Local Flow - 正在启动"],
+    ["recording", "Local Flow - 正在录音"],
+    ["stopping", "Local Flow - 正在停止"],
+    ["transcribing", "Local Flow - 正在转写"],
+    ["pasting", "Local Flow - 正在粘贴"],
+    ["done", "Local Flow - 已完成"],
+    ["warning", "Local Flow - 需要确认"],
+    ["error", "Local Flow - 错误"]
+  ];
+
+  for (const [phase, tooltip] of chinesePhaseTooltips) {
+    assert.equal(getTrayTooltip({
+      language: "zh-Hans",
+      state: { phase }
+    }), tooltip);
+  }
+
   assert.equal(getTrayTooltip({
     language: "unknown",
     state: { phase: "unknown" }
