@@ -44,9 +44,9 @@ test("getHudViewState hides raw diagnostics in HUD messages", () => {
   assert.equal(view.message, "录音响应超时，请重试");
 });
 
-test("getHudViewState uses safe short status messages without known reasons", () => {
+test("getHudViewState uses safe short status messages for non-terminal phases without known reasons", () => {
   const view = getHudViewState({
-    phase: "warning",
+    phase: "starting",
     message: "Text saved for review.",
     language: "en"
   });
@@ -62,6 +62,37 @@ test("getHudViewState rejects unsafe raw diagnostic status messages without know
   });
 
   assert.equal(view.message, "Open Local Flow to fix the issue.");
+});
+
+test("getHudViewState hides provider diagnostics from terminal phases without known reasons", () => {
+  const view = getHudViewState({
+    phase: "error",
+    message: "Target language output failed. Local language model exited with code 3221225477.",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Open Local Flow to fix the issue.");
+});
+
+test("getHudViewState uses mapped target output reason instead of provider diagnostics", () => {
+  const view = getHudViewState({
+    phase: "error",
+    reason: "target_output_failed",
+    message: "Target language output failed. Local language model exited with code 3221225477.",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Target language output failed.");
+});
+
+test("getHudViewState ignores safe short warning messages without known reasons", () => {
+  const view = getHudViewState({
+    phase: "warning",
+    message: "Text saved for review.",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Open Local Flow to review.");
 });
 
 test("getHudViewState rejects unsafe path-like status messages without known reasons", () => {

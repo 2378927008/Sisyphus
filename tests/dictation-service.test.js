@@ -99,6 +99,7 @@ test("processWav keeps partial failure reason in final warning status", async ()
 
   assert.equal(warningEvents.length, 1);
   assert.equal(finalEvent.phase, "warning");
+  assert.equal(finalEvent.reason, "target_output_failed");
   assert.match(finalEvent.message, /Install a language model/);
   assert.equal(history[0], entry);
   assert.equal(history[0].outputLanguage, "auto");
@@ -137,6 +138,7 @@ test("processWav does not expose raw transcript as output when target language p
   assert.equal(entry.processingError, "Local language model exited with code 3221225477.");
   assert.equal(history[0], entry);
   assert.equal(events.at(-1).phase, "error");
+  assert.equal(events.at(-1).reason, "target_output_failed");
 });
 
 test("processWav stores detected language metadata for automatic output", async () => {

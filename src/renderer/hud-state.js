@@ -83,8 +83,10 @@ export function getHudViewState(state = {}, options = {}) {
   const phase = supportedPhases.has(state.phase) ? state.phase : "idle";
   const language = state.language === "en" ? "en" : "zh-Hans";
   const labels = hudLabels[language];
-  const reasonMessage = phase === "warning" || phase === "error" ? labels.reasons[state.reason] || "" : "";
-  const message = reasonMessage || getSafeStateMessage(state.message) || labels.messages[phase] || labels.messages.idle;
+  const isTerminalProblemPhase = phase === "warning" || phase === "error";
+  const reasonMessage = isTerminalProblemPhase ? labels.reasons[state.reason] || "" : "";
+  const stateMessage = isTerminalProblemPhase ? "" : getSafeStateMessage(state.message);
+  const message = reasonMessage || stateMessage || labels.messages[phase] || labels.messages.idle;
   const elapsed = phase === "recording" ? getRecordingElapsed(state, options) : "";
 
   return {

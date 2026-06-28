@@ -93,8 +93,10 @@ export class DictationService {
 
     await this.settingsStore.addHistory(entry, settings.historyLimit);
 
+    const finalReason = getFinalReason(status);
     this.notifyStatus({
       phase: getFinalPhase(status),
+      ...(finalReason ? { reason: finalReason } : {}),
       message: getFinalMessage(status, processingError)
     });
     return entry;
@@ -111,6 +113,11 @@ function getFinalMessage(status, processingError) {
   if (status === "complete") return "Dictation complete.";
   if (status === "failed") return `Target language output failed. ${processingError}`;
   return `Raw transcript saved. ${processingError}`;
+}
+
+function getFinalReason(status) {
+  if (status === "failed" || status === "partial") return "target_output_failed";
+  return "";
 }
 
 function getErrorMessage(error) {
