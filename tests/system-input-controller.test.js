@@ -131,3 +131,164 @@ test("system input controller preserves warning renderer status", () => {
   assert.equal(controller.getState().phase, "warning");
   assert.equal(controller.getState().message, "Raw transcript saved");
 });
+
+test("system input controller times out renderer start and stop commands", () => {
+  const startingTimers = createManualTimers();
+  const startingResets = [];
+  const startingController = createSystemInputController({
+    requestRendererReset: () => startingResets.push("reset"),
+    setTimeoutImpl: startingTimers.setTimeoutImpl,
+    clearTimeoutImpl: startingTimers.clearTimeoutImpl,
+    commandTimeoutMs: 125
+  });
+
+  startingController.setPhase("starting");
+  const startTimeout = startingTimers.runNextPending();
+
+  assert.equal(startTimeout.delay, 125);
+  assert.deepEqual(startingResets, ["reset"]);
+  assert.equal(startingController.getState().phase, "error");
+  assert.equal(startingController.getState().reason, "renderer_timeout");
+  assert.equal(startingController.getState().message, "Recording did not start.");
+
+  const stoppingTimers = createManualTimers();
+  const stoppingResets = [];
+  const stoppingController = createSystemInputController({
+    requestRendererReset: () => stoppingResets.push("reset"),
+    setTimeoutImpl: stoppingTimers.setTimeoutImpl,
+    clearTimeoutImpl: stoppingTimers.clearTimeoutImpl,
+    commandTimeoutMs: 250
+  });
+
+  stoppingController.setPhase("stopping");
+  const stopTimeout = stoppingTimers.runNextPending();
+
+  assert.equal(stopTimeout.delay, 250);
+  assert.deepEqual(stoppingResets, ["reset"]);
+  assert.equal(stoppingController.getState().phase, "error");
+  assert.equal(stoppingController.getState().reason, "renderer_timeout");
+  assert.equal(stoppingController.getState().message, "Recording did not stop.");
+});
+
+test("system input controller returns terminal phases to idle after the terminal delay", () => {
+  for (const phase of ["done", "warning", "error"]) {
+    const timers = createManualTimers();
+    const controller = createSystemInputController({
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+      terminalAutoIdleMs: 75
+    });
+
+    controller.setPhase(phase, { message: phase });
+    const timeout = timers.runNextPending();
+
+    assert.equal(timeout.delay, 75);
+    assert.equal(controller.getState().phase, "idle");
+  }
+});
+
+test("system input controller ignores stale terminal auto-idle timers", () => {
+  const timers = createManualTimers();
+  const now = createManualClock();
+  const controller = createSystemInputController({
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+    terminalAutoIdleMs: 75,
+    now
+  });
+
+  controller.setPhase("warning", { message: "first warning" });
+  const staleTimerId = timers.lastPendingId();
+  const staleUpdatedAt = controller.getState().updatedAt;
+
+  controller.setPhase("warning", { message: "second warning" });
+  assert.notEqual(controller.getState().updatedAt, staleUpdatedAt);
+
+  timers.runTimer(staleTimerId);
+
+  assert.equal(controller.getState().phase, "warning");
+  assert.equal(controller.getState().message, "second warning");
+});
+
+test("system input controller stamps and clears recording start time", () => {
+  const now = createManualClock();
+  const controller = createSystemInputController({ now });
+
+  controller.setPhase("recording", { message: "Recording" });
+  const recordingStartedAt = controller.getState().recordingStartedAt;
+
+  assert.equal(recordingStartedAt, "2026-06-29T00:00:01.000Z");
+
+  controller.setPhase("done");
+
+  assert.equal(controller.getState().recordingStartedAt, undefined);
+});
+
+function createManualTimers() {
+  let nextId = 1;
+  const timers = new Map();
+
+  function setTimeoutImpl(callback, delay) {
+    const id = nextId;
+    nextId += 1;
+    timers.set(id, { callback, delay, cleared: false });
+    return id;
+  }
+
+  function clearTimeoutImpl(id) {
+    const timer = timers.get(id);
+    if (timer) {
+      timer.cleared = true;
+    }
+  }
+
+  function runNextPending() {
+    for (const [id, timer] of timers.entries()) {
+      if (!timer.cleared) {
+        timer.cleared = true;
+        timer.callback();
+        return { id, delay: timer.delay };
+      }
+    }
+    throw new Error("No pending timer to run.");
+  }
+
+  function runTimer(id) {
+    const timer = timers.get(id);
+    if (!timer) {
+      throw new Error(`Unknown timer: ${id}`);
+    }
+    timer.callback();
+    return { id, delay: timer.delay };
+  }
+
+  function lastPendingId() {
+    let lastId;
+    for (const [id, timer] of timers.entries()) {
+      if (!timer.cleared) {
+        lastId = id;
+      }
+    }
+    if (!lastId) {
+      throw new Error("No pending timer.");
+    }
+    return lastId;
+  }
+
+  return {
+    setTimeoutImpl,
+    clearTimeoutImpl,
+    runNextPending,
+    runTimer,
+    lastPendingId
+  };
+}
+
+function createManualClock() {
+  let tick = 0;
+  return () => {
+    const stamp = `2026-06-29T00:00:${String(tick).padStart(2, "0")}.000Z`;
+    tick += 1;
+    return stamp;
+  };
+}
