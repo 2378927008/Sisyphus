@@ -637,6 +637,31 @@ test("main process hides HUD when system input returns idle", async () => {
   assert.match(mainSource, /function hideHud\(\) \{/);
 });
 
+test("main process sends HUD system input status with interface language", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(
+    /function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction showHud/
+  );
+
+  assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
+  const body = sendStatusMatch.groups.body;
+  const normalizedStateIndex = body.indexOf("lastSystemInputState = state && typeof state === \"object\" ? state : { phase: \"idle\" }");
+  const hudStateIndex = body.indexOf("const hudState = {");
+  const hudSendIndex = body.indexOf("sendWindowMessage(hudWindow, \"system-input:status\", hudState)");
+
+  assert.notEqual(normalizedStateIndex, -1, "system input state should be normalized first");
+  assert.notEqual(hudStateIndex, -1, "HUD status should be built from a dedicated payload");
+  assert.ok(hudStateIndex > normalizedStateIndex, "HUD status should use the normalized latest system input state");
+  assert.match(body, /sendWindowMessage\(mainWindow, "system-input:status", state\)/);
+  assert.match(
+    body,
+    /const hudState = \{\s*\.\.\.lastSystemInputState,\s*language: lastSettings\?\.interfaceLanguage \|\| "zh-Hans"\s*\}/
+  );
+  assert.notEqual(hudSendIndex, -1, "HUD should receive the language-aware status payload");
+  assert.ok(hudSendIndex > hudStateIndex, "HUD status should be sent after the payload is created");
+  assert.doesNotMatch(body, /sendWindowMessage\(hudWindow, "system-input:status", state\)/);
+});
+
 test("main process shows terminal HUD states without owning terminal auto-idle", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const sendStatusMatch = mainSource.match(

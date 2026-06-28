@@ -16,7 +16,7 @@ const MENU_LABELS = {
     stopDictation: "停止语音输入",
     pauseShortcut: "暂停全局快捷键",
     resumeShortcut: "恢复全局快捷键",
-    launchAtLogin: "开机自动启动",
+    launchAtLogin: "开机自启",
     startMinimizedToTray: "启动后最小化到托盘",
     settings: "设置",
     quit: "退出"
@@ -42,8 +42,8 @@ const PHASE_LABELS = {
     stopping: "正在停止",
     transcribing: "正在转写",
     pasting: "正在粘贴",
-    done: "完成",
-    warning: "警告",
+    done: "已完成",
+    warning: "需要确认",
     error: "错误"
   }
 };

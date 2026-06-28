@@ -194,9 +194,13 @@ function sendStatus(payload) {
 
 function sendSystemInputStatus(state) {
   lastSystemInputState = state && typeof state === "object" ? state : { phase: "idle" };
+  const hudState = {
+    ...lastSystemInputState,
+    language: lastSettings?.interfaceLanguage || "zh-Hans"
+  };
   refreshTrayMenu();
   sendWindowMessage(mainWindow, "system-input:status", state);
-  sendWindowMessage(hudWindow, "system-input:status", state);
+  sendWindowMessage(hudWindow, "system-input:status", hudState);
 
   if (state?.phase === "idle") {
     hideHud();

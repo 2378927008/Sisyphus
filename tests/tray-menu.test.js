@@ -40,9 +40,16 @@ test("buildTrayMenuTemplate reflects recording and paused state", () => {
     state: { phase: "recording" },
     settings: { globalShortcutPaused: true }
   });
+  const chineseTemplate = buildTrayMenuTemplate({
+    language: "zh-Hans",
+    state: { phase: "recording" },
+    settings: { globalShortcutPaused: true }
+  });
 
   assert.equal(template[1].label, "Stop dictation");
   assert.equal(template[2].label, "Resume shortcut");
+  assert.equal(chineseTemplate[1].label, "停止语音输入");
+  assert.equal(chineseTemplate[2].label, "恢复全局快捷键");
 });
 
 test("buildTrayMenuTemplate marks startup checkboxes from settings", () => {
@@ -67,7 +74,7 @@ test("buildTrayMenuTemplate returns Simplified Chinese labels", () => {
     "开始语音输入",
     "暂停全局快捷键",
     "separator",
-    "开机自动启动",
+    "开机自启",
     "启动后最小化到托盘",
     "separator",
     "设置",
