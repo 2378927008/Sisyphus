@@ -84,13 +84,13 @@ export function getHudViewState(state = {}, options = {}) {
   const language = state.language === "en" ? "en" : "zh-Hans";
   const labels = hudLabels[language];
   const reasonMessage = labels.reasons[state.reason] || "";
-  const message = reasonMessage || labels.messages[phase] || labels.messages.idle;
+  const message = reasonMessage || getSafeStateMessage(state.message) || labels.messages[phase] || labels.messages.idle;
   const elapsed = phase === "recording" ? getRecordingElapsed(state, options) : "";
 
   return {
     phase,
     title: labels.titles[phase] || labels.titles.idle,
-    message: limitHudText(message),
+    message,
     elapsed
   };
 }
@@ -114,6 +114,29 @@ function getRecordingElapsed(state, options) {
   const providedNowMs = Number(options.nowMs);
   const nowMs = Number.isFinite(providedNowMs) ? providedNowMs : Date.now();
   return formatElapsed(nowMs - startedAtMs);
+}
+
+function getSafeStateMessage(message) {
+  if (typeof message !== "string") {
+    return "";
+  }
+
+  const value = message.trim();
+  if (!value || containsUnsafeDiagnostic(value)) {
+    return "";
+  }
+
+  return limitHudText(value);
+}
+
+function containsUnsafeDiagnostic(value) {
+  return (
+    /[A-Za-z]:[\\/]/.test(value) ||
+    /\bspawn\b/i.test(value) ||
+    /\bENOENT\b/i.test(value) ||
+    /\bstack trace\b/i.test(value) ||
+    /^\s*at\s+\S+/im.test(value)
+  );
 }
 
 function limitHudText(text) {

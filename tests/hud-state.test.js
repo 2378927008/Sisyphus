@@ -44,6 +44,26 @@ test("getHudViewState hides raw diagnostics in HUD messages", () => {
   assert.equal(view.message, "录音响应超时，请重试");
 });
 
+test("getHudViewState uses safe short status messages without known reasons", () => {
+  const view = getHudViewState({
+    phase: "warning",
+    message: "Text saved for review.",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Text saved for review.");
+});
+
+test("getHudViewState rejects unsafe raw diagnostic status messages without known reasons", () => {
+  const view = getHudViewState({
+    phase: "error",
+    message: "C:/Users/Administrator/vendor/qwen.gguf spawn ENOENT stack trace",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Open Local Flow to fix the issue.");
+});
+
 test("formatElapsed clamps invalid and long values", () => {
   assert.equal(formatElapsed(-1000), "00:00");
   assert.equal(formatElapsed(65_000), "01:05");
