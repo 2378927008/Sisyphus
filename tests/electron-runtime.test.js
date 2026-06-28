@@ -612,18 +612,19 @@ test("main process only accepts recording status from the main renderer", async 
   );
 });
 
-test("main process sets command busy phases and times out missing renderer acknowledgements", async () => {
+test("main process delegates recording command timeouts to the system input controller", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
   assert.match(mainSource, /systemInputController\.setPhase\("starting"/);
   assert.match(mainSource, /systemInputController\.setPhase\("stopping"/);
-  assert.match(mainSource, /scheduleRecordingCommandTimeout\("starting"/);
-  assert.match(mainSource, /scheduleRecordingCommandTimeout\("stopping"/);
-  assert.match(mainSource, /setTimeout\(\(\) => \{/);
-  assert.match(mainSource, /reason: "renderer_timeout"/);
-  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:reset"\)/);
-  assert.match(mainSource, /clearRecordingCommandTimeout\(\)/);
-  assert.match(mainSource, /if \(!\["starting", "stopping"\]\.includes\(status\.phase\)\) \{\s*clearRecordingCommandTimeout\(\);\s*\}/);
+  assert.match(
+    mainSource,
+    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+  );
+  assert.doesNotMatch(mainSource, /scheduleRecordingCommandTimeout/);
+  assert.doesNotMatch(mainSource, /clearRecordingCommandTimeout/);
+  assert.doesNotMatch(mainSource, /recordingCommandTimeoutMs/);
+  assert.doesNotMatch(mainSource, /let recordingCommandTimeout\b/);
   assert.doesNotMatch(mainSource, /function toggleRecording\(\)/);
 });
 

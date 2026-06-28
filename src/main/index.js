@@ -33,7 +33,6 @@ const rendererRecordingPhases = new Set([
   "warning"
 ]);
 const terminalSystemInputPhases = new Set(["done", "warning", "error"]);
-const recordingCommandTimeoutMs = 8000;
 const terminalAutoIdleMs = 2500;
 const maxRendererStatusTextLength = 240;
 
@@ -46,7 +45,6 @@ let dictationService;
 let modelSetupService;
 let hudWindow;
 let systemInputController;
-let recordingCommandTimeout;
 let terminalAutoIdleTimeout;
 let runtimeRoot;
 let vendorRoot;
@@ -178,7 +176,6 @@ function sendRecordingStartCommand() {
   systemInputController.setPhase("starting", {
     message: "Starting recording..."
   });
-  scheduleRecordingCommandTimeout("starting", "Recording did not start.");
   sendWindowMessage(mainWindow, "recording:start");
 }
 
@@ -186,7 +183,6 @@ function sendRecordingStopCommand() {
   systemInputController.setPhase("stopping", {
     message: "Stopping recording..."
   });
-  scheduleRecordingCommandTimeout("stopping", "Recording did not stop.");
   sendWindowMessage(mainWindow, "recording:stop");
 }
 
@@ -252,26 +248,6 @@ function isUsableWindow(window) {
 
 function isActiveSystemInputPhase(phase) {
   return Boolean(phase && phase !== "idle");
-}
-
-function scheduleRecordingCommandTimeout(expectedPhase, message) {
-  clearRecordingCommandTimeout();
-  recordingCommandTimeout = setTimeout(() => {
-    if (systemInputController?.getState().phase === expectedPhase) {
-      sendWindowMessage(mainWindow, "recording:reset");
-      systemInputController.setPhase("error", {
-        reason: "renderer_timeout",
-        message
-      });
-    }
-  }, recordingCommandTimeoutMs);
-}
-
-function clearRecordingCommandTimeout() {
-  if (recordingCommandTimeout) {
-    clearTimeout(recordingCommandTimeout);
-    recordingCommandTimeout = null;
-  }
 }
 
 function scheduleTerminalAutoIdle(state) {
@@ -365,9 +341,6 @@ function wireIpc() {
     }
 
     const status = sanitizeRecordingStatusPayload(payload);
-    if (!["starting", "stopping"].includes(status.phase)) {
-      clearRecordingCommandTimeout();
-    }
     systemInputController?.handleRendererStatus(status);
   });
   ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
