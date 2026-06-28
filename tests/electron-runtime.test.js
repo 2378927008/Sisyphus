@@ -392,8 +392,8 @@ test("HUD preload exposes only system input status subscription", async () => {
   assert.deepEqual(states, [{ phase: "warning" }]);
 });
 
-test("HUD renderer names warning lifecycle states", async () => {
-  const hudSource = await readFile(new URL("../src/renderer/hud.js", import.meta.url), "utf8");
+test("HUD view model names warning lifecycle states", async () => {
+  const hudSource = await readFile(new URL("../src/renderer/hud-state.js", import.meta.url), "utf8");
 
   assert.match(hudSource, /warning:\s*"[^"]+"/);
 });

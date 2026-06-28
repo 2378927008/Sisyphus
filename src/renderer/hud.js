@@ -1,26 +1,41 @@
+import { getHudViewState } from "./hud-state.js";
+
 const hudRoot = document.querySelector("#hudRoot");
 const hudTitle = document.querySelector("#hudTitle");
 const hudMessage = document.querySelector("#hudMessage");
+const hudTimer = document.querySelector("#hudTimer");
 
-const titleByPhase = {
-  idle: "Local Flow",
-  starting: "正在启动",
-  recording: "正在录音",
-  stopping: "正在停止",
-  transcribing: "正在转写",
-  pasting: "正在粘贴",
-  done: "已输入",
-  warning: "需要确认",
-  error: "需要处理"
-};
+let latestState = { phase: "idle", language: "zh-Hans" };
+let timerId = null;
 
 window.localFlow?.onSystemInputStatus?.((state) => {
-  renderHudState(state);
+  latestState = state && typeof state === "object" ? state : { phase: "idle", language: "zh-Hans" };
+  renderHudState();
 });
 
-function renderHudState(state = {}) {
-  const phase = state.phase || "idle";
-  hudRoot.dataset.phase = phase;
-  hudTitle.textContent = titleByPhase[phase] || "Local Flow";
-  hudMessage.textContent = state.message || "按快捷键开始或停止录音";
+renderHudState();
+
+function renderHudState() {
+  const viewState = getHudViewState(latestState);
+
+  hudRoot.dataset.phase = viewState.phase;
+  hudTitle.textContent = viewState.title;
+  hudMessage.textContent = viewState.message;
+  hudTimer.textContent = viewState.elapsed;
+
+  syncTimer(viewState.phase);
+}
+
+function syncTimer(phase) {
+  if (phase === "recording") {
+    if (!timerId) {
+      timerId = window.setInterval(renderHudState, 250);
+    }
+    return;
+  }
+
+  if (timerId) {
+    window.clearInterval(timerId);
+    timerId = null;
+  }
 }

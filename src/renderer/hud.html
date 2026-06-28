@@ -13,10 +13,11 @@
   <body class="hud-body">
     <main id="hudRoot" class="hud-shell" data-phase="idle">
       <span id="hudDot" class="hud-dot"></span>
-      <div>
+      <div class="hud-copy">
         <strong id="hudTitle">Local Flow</strong>
         <p id="hudMessage">按快捷键开始或停止录音</p>
       </div>
+      <time id="hudTimer" class="hud-timer" aria-live="off"></time>
     </main>
     <script type="module" src="./hud.js"></script>
   </body>
