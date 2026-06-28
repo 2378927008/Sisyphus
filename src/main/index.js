@@ -442,7 +442,8 @@ app.whenReady().then(async () => {
     stopRecording: async () => {
       sendRecordingStopCommand();
     },
-    isReadyToRecord: () => true
+    isReadyToRecord: () => true,
+    requestRendererReset: () => sendWindowMessage(mainWindow, "recording:reset")
   });
   hotkeyManager = createHotkeyManager({
     globalShortcut,

@@ -562,6 +562,19 @@ test("main process uses explicit renderer commands for system input start and st
   assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
 });
 
+test("main process injects renderer reset into the system input controller", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const controllerOptionsMatch = mainSource.match(
+    /systemInputController = createSystemInputController\(\{(?<body>[\s\S]*?)\r?\n\s*\}\);\r?\n\s*hotkeyManager =/
+  );
+
+  assert.ok(controllerOptionsMatch, "system input controller options should be inline and inspectable");
+  assert.match(
+    controllerOptionsMatch.groups.body,
+    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+  );
+});
+
 test("main process creates HUD with dedicated least-privilege preload", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const createHudMatch = mainSource.match(/function createHudWindow\(\) \{(?<body>[\s\S]*?)\n\}/);

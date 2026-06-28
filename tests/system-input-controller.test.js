@@ -224,6 +224,20 @@ test("system input controller stamps and clears recording start time", () => {
   assert.equal(controller.getState().recordingStartedAt, undefined);
 });
 
+test("system input controller preserves recording start time during recording status refreshes", () => {
+  const now = createManualClock();
+  const controller = createSystemInputController({ now });
+
+  controller.setPhase("recording", { message: "Recording" });
+  const recordingStartedAt = controller.getState().recordingStartedAt;
+
+  controller.handleRendererStatus({ phase: "recording", message: "Still recording" });
+
+  assert.equal(controller.getState().phase, "recording");
+  assert.equal(controller.getState().message, "Still recording");
+  assert.equal(controller.getState().recordingStartedAt, recordingStartedAt);
+});
+
 function createManualTimers() {
   let nextId = 1;
   const timers = new Map();

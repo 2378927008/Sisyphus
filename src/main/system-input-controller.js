@@ -43,6 +43,8 @@ export function createSystemInputController({
     if (!validPhases.has(phase)) {
       throw new Error(`Unknown system input phase: ${phase}`);
     }
+    const previousPhase = state.phase;
+    const previousRecordingStartedAt = state.recordingStartedAt;
     const updatedAt = now();
     const hasRecordingStartedAt = Object.prototype.hasOwnProperty.call(patch, "recordingStartedAt");
     state = {
@@ -52,7 +54,8 @@ export function createSystemInputController({
       updatedAt
     };
     if (phase === "recording" && !hasRecordingStartedAt) {
-      state.recordingStartedAt = updatedAt;
+      state.recordingStartedAt =
+        previousPhase === "recording" && previousRecordingStartedAt ? previousRecordingStartedAt : updatedAt;
     }
     if (phase !== "recording" && !hasRecordingStartedAt) {
       delete state.recordingStartedAt;
