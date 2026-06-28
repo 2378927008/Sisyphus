@@ -132,6 +132,23 @@ test("system input controller preserves warning renderer status", () => {
   assert.equal(controller.getState().message, "Raw transcript saved");
 });
 
+test("system input controller clears stale messages and reasons between phases", () => {
+  const controller = createSystemInputController();
+
+  controller.setPhase("warning", { reason: "paste_failed", message: "Paste failed" });
+  controller.setPhase("starting", { message: "Starting" });
+
+  assert.equal(controller.getState().phase, "starting");
+  assert.equal(controller.getState().reason, "");
+  assert.equal(controller.getState().message, "Starting");
+
+  controller.setPhase("idle");
+
+  assert.equal(controller.getState().phase, "idle");
+  assert.equal(controller.getState().reason, "");
+  assert.equal(controller.getState().message, "");
+});
+
 test("system input controller times out renderer start and stop commands", () => {
   const startingTimers = createManualTimers();
   const startingResets = [];

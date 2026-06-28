@@ -46,10 +46,14 @@ export function createSystemInputController({
     const previousPhase = state.phase;
     const previousRecordingStartedAt = state.recordingStartedAt;
     const updatedAt = now();
+    const hasMessage = Object.prototype.hasOwnProperty.call(patch, "message");
+    const hasReason = Object.prototype.hasOwnProperty.call(patch, "reason");
     const hasRecordingStartedAt = Object.prototype.hasOwnProperty.call(patch, "recordingStartedAt");
     state = {
       ...state,
       ...patch,
+      message: hasMessage ? patch.message : "",
+      reason: hasReason ? patch.reason : "",
       phase,
       updatedAt
     };

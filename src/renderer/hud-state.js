@@ -83,7 +83,7 @@ export function getHudViewState(state = {}, options = {}) {
   const phase = supportedPhases.has(state.phase) ? state.phase : "idle";
   const language = state.language === "en" ? "en" : "zh-Hans";
   const labels = hudLabels[language];
-  const reasonMessage = labels.reasons[state.reason] || "";
+  const reasonMessage = phase === "warning" || phase === "error" ? labels.reasons[state.reason] || "" : "";
   const message = reasonMessage || getSafeStateMessage(state.message) || labels.messages[phase] || labels.messages.idle;
   const elapsed = phase === "recording" ? getRecordingElapsed(state, options) : "";
 
@@ -132,6 +132,11 @@ function getSafeStateMessage(message) {
 function containsUnsafeDiagnostic(value) {
   return (
     /[A-Za-z]:[\\/]/.test(value) ||
+    /\\\\[^\\/\s]+[\\/][^\\/\s]+/.test(value) ||
+    /(^|\s)\/[^\s/]+\/\S*/.test(value) ||
+    /(^|[\s"'`(])(?:\.{1,2}[\\/])?(?:vendor|vendors|model|models)[\\/]\S+/i.test(value) ||
+    /\.(?:gguf|bin|exe)\b/i.test(value) ||
+    /\b(?:llama-cli|whisper-cli)\b/i.test(value) ||
     /\bspawn\b/i.test(value) ||
     /\bENOENT\b/i.test(value) ||
     /\bstack trace\b/i.test(value) ||
