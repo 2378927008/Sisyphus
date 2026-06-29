@@ -85,6 +85,36 @@ test("getHudViewState uses mapped target output reason instead of provider diagn
   assert.equal(view.message, "Target language output failed.");
 });
 
+test("getHudViewState rejects provider and model diagnostics from non-terminal phases", () => {
+  const cases = [
+    {
+      phase: "starting",
+      message: "Local language model exited with code 3221225477.",
+      expected: "Preparing microphone."
+    },
+    {
+      phase: "transcribing",
+      message: "Qwen provider error: exit code 1",
+      expected: "Turning speech into text."
+    },
+    {
+      phase: "pasting",
+      message: "llama-cli exited with code 1",
+      expected: "Pasting into the active app."
+    }
+  ];
+
+  for (const { phase, message, expected } of cases) {
+    const view = getHudViewState({
+      phase,
+      message,
+      language: "en"
+    });
+
+    assert.equal(view.message, expected, message);
+  }
+});
+
 test("getHudViewState ignores safe short warning messages without known reasons", () => {
   const view = getHudViewState({
     phase: "warning",

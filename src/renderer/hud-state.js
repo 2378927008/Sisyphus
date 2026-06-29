@@ -132,6 +132,12 @@ function getSafeStateMessage(message) {
 }
 
 function containsUnsafeDiagnostic(value) {
+  const hasProviderDiagnostic =
+    /\bprovider\b/i.test(value) && /\b(?:failed|error|exited|code)\b/i.test(value);
+  const hasModelToolDiagnostic =
+    /\b(?:llama|whisper|qwen)\b/i.test(value) &&
+    /\b(?:path|spawn|exit|exited|code|model|file|provider|error|failed)\b/i.test(value);
+
   return (
     /[A-Za-z]:[\\/]/.test(value) ||
     /\\\\[^\\/\s]+[\\/][^\\/\s]+/.test(value) ||
@@ -139,6 +145,11 @@ function containsUnsafeDiagnostic(value) {
     /(^|[\s"'`(])(?:\.{1,2}[\\/])?(?:vendor|vendors|model|models)[\\/]\S+/i.test(value) ||
     /\.(?:gguf|bin|exe)\b/i.test(value) ||
     /\b(?:llama-cli|whisper-cli)\b/i.test(value) ||
+    /\bexited with code\b/i.test(value) ||
+    /\bexit code\b/i.test(value) ||
+    /\blanguage model\b/i.test(value) ||
+    hasProviderDiagnostic ||
+    hasModelToolDiagnostic ||
     /\bspawn\b/i.test(value) ||
     /\bENOENT\b/i.test(value) ||
     /\bstack trace\b/i.test(value) ||
