@@ -30,8 +30,16 @@
   - Primary iPhone recorder surface.
 - Create: `ios/LocalFlowiOS/App/SpeechDictationViewModel.swift`
   - Apple Speech permission, AVAudioSession setup, deep-link handoff, and recording orchestration.
+- Create: `ios/LocalFlowiOS/App/Info.plist`
+  - Host app microphone permission, speech permission, and `localflow` URL scheme declarations.
+- Create: `ios/LocalFlowiOS/App/LocalFlowiOS.entitlements`
+  - Host app App Group entitlement for sharing latest dictation with extensions.
 - Create: `ios/LocalFlowiOS/Keyboard/KeyboardViewController.swift`
   - Minimal keyboard extension source for latest-result insertion and app handoff.
+- Create: `ios/LocalFlowiOS/Keyboard/Info.plist`
+  - Keyboard extension declaration with open access for App Group handoff.
+- Create: `ios/LocalFlowiOS/Keyboard/LocalFlowKeyboard.entitlements`
+  - Keyboard App Group entitlement for reading latest dictation.
 - Create: `ios/LocalFlowiOS/Intents/DictateToClipboardIntent.swift`
   - App Intent scaffold for quick dictation to clipboard.
 - Create: `tests/iphone-mvp-scaffold.test.js`

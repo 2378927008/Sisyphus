@@ -20,11 +20,22 @@ This Windows workspace cannot compile or run an iPhone app locally. To build on 
 1. Create an iOS app project named `LocalFlowiOS` in Xcode.
 2. Add `LocalFlowCore` as a local Swift Package from `ios/LocalFlowiOS/LocalFlowCore`.
 3. Add the files under `App` to the host app target.
-4. Add a custom keyboard extension target and include `Keyboard/KeyboardViewController.swift`.
-5. Add an App Intents extension or the host app intent target and include `Intents/DictateToClipboardIntent.swift`.
-6. Configure the URL scheme `localflow`.
-7. Configure an app group such as `group.com.localflow.dictation` for sharing the latest result between the host app and keyboard extension.
-8. Add `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` to the host app `Info.plist`.
+4. Set the host app `Info.plist` to `App/Info.plist`.
+5. Set the host app entitlements file to `App/LocalFlowiOS.entitlements`.
+6. Add a custom keyboard extension target and include `Keyboard/KeyboardViewController.swift`.
+7. Set the keyboard extension `Info.plist` to `Keyboard/Info.plist`.
+8. Set the keyboard extension entitlements file to `Keyboard/LocalFlowKeyboard.entitlements`.
+9. Add `Intents/DictateToClipboardIntent.swift` to the host app target or to a dedicated App Intents target.
+10. Configure the URL scheme `localflow` if Xcode does not pick it up from `App/Info.plist`.
+11. Configure the App Group `group.com.localflow.dictation` for both the host app and keyboard extension.
+12. Confirm `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` are present in the built host app.
+13. Confirm the keyboard extension has `RequestsOpenAccess` enabled because the MVP uses the shared App Group result.
+
+On macOS, use Xcode's UI first for signing and entitlements. After the project is created, a command-line smoke build should look like:
+
+```bash
+xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build
+```
 
 ## Product Rules
 

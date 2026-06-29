@@ -24,9 +24,13 @@ test("iPhone MVP source tree includes app core keyboard and intent slices", () =
     "LocalFlowCore/Sources/LocalFlowCore/DictationModels.swift",
     "LocalFlowCore/Sources/LocalFlowCore/OutputBehavior.swift",
     "LocalFlowCore/Tests/LocalFlowCoreTests/OutputBehaviorTests.swift",
+    "App/Info.plist",
+    "App/LocalFlowiOS.entitlements",
     "App/LocalFlowiOSApp.swift",
     "App/ContentView.swift",
     "App/SpeechDictationViewModel.swift",
+    "Keyboard/Info.plist",
+    "Keyboard/LocalFlowKeyboard.entitlements",
     "Keyboard/KeyboardViewController.swift",
     "Intents/DictateToClipboardIntent.swift"
   ]) {
@@ -109,4 +113,32 @@ test("iPhone keyboard extension inserts latest text or opens host app handoff", 
   assert.doesNotMatch(keyboard, /UIPasteboard\.general\.string/);
   assert.doesNotMatch(keyboard, /insertText\("Open Local Flow to dictate\."\)/);
   assert.doesNotMatch(keyboard, /AVAudioRecorder|SFSpeechRecognizer/);
+});
+
+test("iPhone Xcode handoff files declare permissions URL scheme app group and keyboard extension", async () => {
+  const appInfo = await readIosFile("App", "Info.plist");
+  const keyboardInfo = await readIosFile("Keyboard", "Info.plist");
+  const appEntitlements = await readIosFile("App", "LocalFlowiOS.entitlements");
+  const keyboardEntitlements = await readIosFile("Keyboard", "LocalFlowKeyboard.entitlements");
+  const readme = await readIosFile("README.md");
+
+  assert.match(appInfo, /NSMicrophoneUsageDescription/);
+  assert.match(appInfo, /NSSpeechRecognitionUsageDescription/);
+  assert.match(appInfo, /CFBundleURLSchemes/);
+  assert.match(appInfo, /localflow/);
+  assert.match(appEntitlements, /com\.apple\.security\.application-groups/);
+  assert.match(appEntitlements, /group\.com\.localflow\.dictation/);
+
+  assert.match(keyboardInfo, /NSExtensionPointIdentifier/);
+  assert.match(keyboardInfo, /com\.apple\.keyboard-service/);
+  assert.match(keyboardInfo, /RequestsOpenAccess/);
+  assert.match(keyboardEntitlements, /com\.apple\.security\.application-groups/);
+  assert.match(keyboardEntitlements, /group\.com\.localflow\.dictation/);
+
+  assert.match(readme, /App Group/);
+  assert.match(readme, /URL scheme/);
+  assert.match(readme, /NSMicrophoneUsageDescription/);
+  assert.match(readme, /NSSpeechRecognitionUsageDescription/);
+  assert.match(readme, /RequestsOpenAccess/);
+  assert.match(readme, /xcodebuild/);
 });
