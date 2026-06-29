@@ -116,7 +116,8 @@ function getFinalMessage(status, processingError) {
 }
 
 function getFinalReason(status) {
-  if (status === "failed" || status === "partial") return "target_output_failed";
+  if (status === "failed") return "target_output_failed";
+  if (status === "partial") return "raw_transcript_saved";
   return "";
 }
 

@@ -40,6 +40,7 @@ const hudLabels = {
       recording_failed: "Recording failed. Try again.",
       transcription_failed: "Transcription failed. Try again.",
       target_output_failed: "Target language output failed.",
+      raw_transcript_saved: "Raw transcript saved.",
       clipboard_unavailable: "Clipboard unavailable. Text saved.",
       paste_failed: "Paste failed. Text saved."
     }
@@ -73,6 +74,7 @@ const hudLabels = {
       recording_failed: "录音失败，请重试",
       transcription_failed: "转写失败，请重试",
       target_output_failed: "目标语言输出失败",
+      raw_transcript_saved: "原始转写已保存。",
       clipboard_unavailable: "剪贴板不可用，文本已保存",
       paste_failed: "粘贴失败，文本已保存。"
     }

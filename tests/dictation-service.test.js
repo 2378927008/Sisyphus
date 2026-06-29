@@ -99,7 +99,7 @@ test("processWav keeps partial failure reason in final warning status", async ()
 
   assert.equal(warningEvents.length, 1);
   assert.equal(finalEvent.phase, "warning");
-  assert.equal(finalEvent.reason, "target_output_failed");
+  assert.equal(finalEvent.reason, "raw_transcript_saved");
   assert.match(finalEvent.message, /Install a language model/);
   assert.equal(history[0], entry);
   assert.equal(history[0].outputLanguage, "auto");

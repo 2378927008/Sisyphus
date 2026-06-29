@@ -85,6 +85,28 @@ test("getHudViewState uses mapped target output reason instead of provider diagn
   assert.equal(view.message, "Target language output failed.");
 });
 
+test("getHudViewState uses raw transcript saved reason instead of provider diagnostics", () => {
+  const view = getHudViewState({
+    phase: "warning",
+    reason: "raw_transcript_saved",
+    message: "Raw transcript saved. Local language model exited with code 1.",
+    language: "en"
+  });
+
+  assert.equal(view.message, "Raw transcript saved.");
+});
+
+test("getHudViewState maps raw transcript saved reason in Simplified Chinese", () => {
+  const view = getHudViewState({
+    phase: "warning",
+    reason: "raw_transcript_saved",
+    message: "Raw transcript saved. Local language model exited with code 1.",
+    language: "zh-Hans"
+  });
+
+  assert.equal(view.message, "原始转写已保存。");
+});
+
 test("getHudViewState rejects provider and model diagnostics from non-terminal phases", () => {
   const cases = [
     {
@@ -159,6 +181,7 @@ test("getHudViewState maps every known reason without showing unsafe raw message
     "recording_failed",
     "transcription_failed",
     "target_output_failed",
+    "raw_transcript_saved",
     "clipboard_unavailable",
     "paste_failed"
   ];
