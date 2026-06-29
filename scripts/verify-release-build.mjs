@@ -7,18 +7,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
 const expectedIconPath = "assets/local-flow-icon.ico";
-const requiredFiles = [
-  "assets/local-flow-icon.ico",
-  "dist/Local Flow Setup 0.1.0.exe",
-  "dist/win-unpacked/Local Flow.exe",
-  "dist/win-unpacked/resources/app/assets/local-flow-icon.ico"
-];
 const ignoredPaths = [
   "dist",
   "node_modules",
   "vendor/whisper",
   "vendor/llm"
 ];
+
+function buildReleaseRequirements(pkg) {
+  const outputDir = pkg.build?.directories?.output || "dist";
+  const productName = pkg.build?.productName || "Local Flow";
+  const installerName = `${productName} Setup ${pkg.version}.exe`;
+
+  return [
+    "assets/local-flow-icon.ico",
+    `${outputDir}/${installerName}`,
+    `${outputDir}/win-unpacked/${productName}.exe`,
+    `${outputDir}/win-unpacked/resources/app/assets/local-flow-icon.ico`
+  ];
+}
 
 function toFsPath(relativePath) {
   return path.join(projectRoot, ...relativePath.split("/"));
@@ -66,6 +73,7 @@ try {
     throw new Error(`build.nsis.uninstallerIcon must be ${expectedIconPath}`);
   }
 
+  const requiredFiles = buildReleaseRequirements(pkg);
   const files = [];
   for (const relativePath of requiredFiles) {
     const minBytes = relativePath.endsWith(".exe") ? 1024 * 1024 : 1024;
@@ -83,7 +91,6 @@ try {
   }, null, 2));
 } catch (error) {
   fail(error.message, {
-    requiredFiles,
     ignoredPaths
   });
 }

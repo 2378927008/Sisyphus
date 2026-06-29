@@ -4,6 +4,7 @@ vendor/*
 !vendor/.gitkeep
 dist/
 out/
+.tmp/
 .env
 .env.local
 npm-debug.log*

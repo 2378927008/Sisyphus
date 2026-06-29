@@ -13,6 +13,8 @@
     "test": "node --test tests/*.test.js",
     "package:win": "electron-builder --win --dir",
     "dist:win": "electron-builder --win nsis",
+    "check:packaged": "node scripts/packaged-start-smoke.mjs",
+    "check:product": "node scripts/product-readiness-report.mjs",
     "verify:release": "node scripts/verify-release-build.mjs"
   },
   "devDependencies": {

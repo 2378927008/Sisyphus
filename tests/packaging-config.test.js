@@ -7,7 +7,59 @@ test("package exposes Windows packaging scripts and electron-builder dependency"
 
   assert.equal(pkg.scripts["package:win"], "electron-builder --win --dir");
   assert.equal(pkg.scripts["dist:win"], "electron-builder --win nsis");
+  assert.equal(pkg.scripts["check:packaged"], "node scripts/packaged-start-smoke.mjs");
+  assert.equal(pkg.scripts["check:product"], "node scripts/product-readiness-report.mjs");
   assert.ok(pkg.devDependencies["electron-builder"]);
+});
+
+test("packaged smoke script launches the unpacked Windows app in hidden mode", async () => {
+  const smokeSource = await readFile(new URL("../scripts/packaged-start-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /dist\/win-unpacked\/Local Flow\.exe/);
+  assert.match(smokeSource, /--hidden/);
+  assert.match(smokeSource, /LOCAL_FLOW_PACKAGED_SMOKE_MS/);
+  assert.match(smokeSource, /maxSmokeMs/);
+  assert.match(smokeSource, /child\.once\("error"/);
+  assert.match(smokeSource, /process\.kill|child\.kill/);
+});
+
+test("product readiness script checks Windows release and iPhone handoff artifacts", async () => {
+  const readinessSource = await readFile(new URL("../scripts/product-readiness-report.mjs", import.meta.url), "utf8");
+
+  assert.match(readinessSource, /buildReleaseRequirements/);
+  assert.doesNotMatch(readinessSource, /dist\/Local Flow Setup 0\.1\.0\.exe/);
+  assert.match(readinessSource, /`\$\{productName\} Setup \$\{pkg\.version\}\.exe`/);
+  assert.match(readinessSource, /`\$\{outputDir\}\/win-unpacked\/\$\{appExeName\}`/);
+  assert.match(readinessSource, /contentIncludes/);
+  assert.match(readinessSource, /NSMicrophoneUsageDescription/);
+  assert.match(readinessSource, /SFSpeechRecognizer/);
+  assert.match(readinessSource, /group\.com\.localflow\.dictation/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/README\.md/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/LocalFlowCore\/Package\.swift/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/App\/SpeechDictationViewModel\.swift/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/Keyboard\/KeyboardViewController\.swift/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/Intents\/DictateToClipboardIntent\.swift/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/App\/Info\.plist/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/Keyboard\/Info\.plist/);
+  assert.match(readinessSource, /manualValidationRequired/);
+});
+
+test("gitignore ignores temporary product smoke data", async () => {
+  const gitignore = await readFile(new URL("../.gitignore", import.meta.url), "utf8");
+  const ignoredEntries = gitignore.split(/\r?\n/).map((line) => line.trim());
+
+  assert.ok(ignoredEntries.includes(".tmp/"));
+});
+
+test("product trial guide gives a concrete Windows and iPhone trial path", async () => {
+  const guide = await readFile(new URL("../docs/release/product-trial-guide.md", import.meta.url), "utf8");
+
+  assert.match(guide, /Local Flow Setup 0\.1\.0\.exe/);
+  assert.match(guide, /Ctrl \+ Alt \+ Space/);
+  assert.match(guide, /npm\.cmd run check:packaged/);
+  assert.match(guide, /npm\.cmd run check:product/);
+  assert.match(guide, /Apple Speech/);
+  assert.match(guide, /xcodebuild/);
 });
 
 test("electron-builder configuration targets Local Flow Windows NSIS builds", async () => {

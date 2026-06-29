@@ -42,8 +42,10 @@ test("Windows icon generator is checked in", async () => {
 test("release verifier checks installer executable and icon config", async () => {
   const script = await readFile(new URL("../scripts/verify-release-build.mjs", import.meta.url), "utf8");
 
-  assert.match(script, /Local Flow Setup 0\.1\.0\.exe/);
-  assert.match(script, /dist\/win-unpacked\/Local Flow\.exe/);
+  assert.match(script, /buildReleaseRequirements/);
+  assert.doesNotMatch(script, /dist\/Local Flow Setup 0\.1\.0\.exe/);
+  assert.match(script, /`\$\{productName\} Setup \$\{pkg\.version\}\.exe`/);
+  assert.match(script, /`\$\{outputDir\}\/win-unpacked\/\$\{productName\}\.exe`/);
   assert.match(script, /assets\/local-flow-icon\.ico/);
   assert.match(script, /git check-ignore/);
 });
