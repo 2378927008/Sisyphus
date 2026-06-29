@@ -18,8 +18,40 @@ test("processWav saves polished result and pastes when enabled", async () => {
   assert.equal(entry.text, "hello world");
   assert.equal(entry.transcript, "um hello world");
   assert.equal(entry.status, "complete");
+  assert.equal(entry.pasteStatus, "complete");
+  assert.equal(entry.pasteError, "");
   assert.equal(entry.detectedLanguage, "en");
+  assert.equal(history[0], entry);
   assert.equal(history.at(-1).pasted, "hello world");
+});
+
+test("processWav saves complete text and warns when paste fails", async () => {
+  const history = [];
+  const events = [];
+  const pasteError = new Error("Paste command exited with code 1.");
+  pasteError.code = "paste_failed";
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, { pasteAfterTranscribe: true, historyLimit: 20 }),
+    clipboard: {},
+    transcribe: async () => "um hello world",
+    polish: async () => "hello world",
+    paste: async () => {
+      throw pasteError;
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+  const finalEvent = events.at(-1);
+
+  assert.equal(entry.status, "complete");
+  assert.equal(entry.text, "hello world");
+  assert.equal(entry.pasteStatus, "failed");
+  assert.match(entry.pasteError, /Paste command exited with code 1/);
+  assert.equal(history[0], entry);
+  assert.equal(finalEvent.phase, "warning");
+  assert.equal(finalEvent.reason, "paste_failed");
+  assert.match(finalEvent.message, /Text saved/);
 });
 
 test("processWav preserves raw transcript when text processing fails", async () => {
@@ -67,6 +99,7 @@ test("processWav keeps partial failure reason in final warning status", async ()
 
   assert.equal(warningEvents.length, 1);
   assert.equal(finalEvent.phase, "warning");
+  assert.equal(finalEvent.reason, "raw_transcript_saved");
   assert.match(finalEvent.message, /Install a language model/);
   assert.equal(history[0], entry);
   assert.equal(history[0].outputLanguage, "auto");
@@ -105,6 +138,7 @@ test("processWav does not expose raw transcript as output when target language p
   assert.equal(entry.processingError, "Local language model exited with code 3221225477.");
   assert.equal(history[0], entry);
   assert.equal(events.at(-1).phase, "error");
+  assert.equal(events.at(-1).reason, "target_output_failed");
 });
 
 test("processWav stores detected language metadata for automatic output", async () => {
@@ -121,6 +155,8 @@ test("processWav stores detected language metadata for automatic output", async 
 
   assert.equal(entry.detectedLanguage, "zh");
   assert.equal(entry.outputLanguage, "auto");
+  assert.equal(entry.pasteStatus, "skipped");
+  assert.equal(entry.pasteError, "");
 });
 
 test("processWav blocks transcription when the selected ASR provider is not ready", async () => {

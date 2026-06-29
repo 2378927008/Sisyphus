@@ -66,18 +66,37 @@ export class DictationService {
       detectedLanguage,
       providerMode: providers.mode,
       status,
-      processingError
+      processingError,
+      pasteStatus: settings.pasteAfterTranscribe ? "pending" : "skipped",
+      pasteError: ""
     };
-
-    await this.settingsStore.addHistory(entry, settings.historyLimit);
 
     if (settings.pasteAfterTranscribe && status === "complete") {
       this.notifyStatus({ phase: "pasting", message: "Pasting into the active app..." });
-      await this.paste(text, { clipboard: this.clipboard });
+      try {
+        await this.paste(text, { clipboard: this.clipboard });
+        entry.pasteStatus = "complete";
+      } catch (error) {
+        entry.pasteStatus = "failed";
+        entry.pasteError = getErrorMessage(error);
+        await this.settingsStore.addHistory(entry, settings.historyLimit);
+        this.notifyStatus({
+          phase: "warning",
+          reason: error?.code || "paste_failed",
+          message: "Paste failed. Text saved."
+        });
+        return entry;
+      }
+    } else if (settings.pasteAfterTranscribe) {
+      entry.pasteStatus = "skipped";
     }
 
+    await this.settingsStore.addHistory(entry, settings.historyLimit);
+
+    const finalReason = getFinalReason(status);
     this.notifyStatus({
       phase: getFinalPhase(status),
+      ...(finalReason ? { reason: finalReason } : {}),
       message: getFinalMessage(status, processingError)
     });
     return entry;
@@ -94,6 +113,16 @@ function getFinalMessage(status, processingError) {
   if (status === "complete") return "Dictation complete.";
   if (status === "failed") return `Target language output failed. ${processingError}`;
   return `Raw transcript saved. ${processingError}`;
+}
+
+function getFinalReason(status) {
+  if (status === "failed") return "target_output_failed";
+  if (status === "partial") return "raw_transcript_saved";
+  return "";
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function assertTextProviderCanProcess(providers = {}) {

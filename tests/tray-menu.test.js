@@ -40,9 +40,16 @@ test("buildTrayMenuTemplate reflects recording and paused state", () => {
     state: { phase: "recording" },
     settings: { globalShortcutPaused: true }
   });
+  const chineseTemplate = buildTrayMenuTemplate({
+    language: "zh-Hans",
+    state: { phase: "recording" },
+    settings: { globalShortcutPaused: true }
+  });
 
   assert.equal(template[1].label, "Stop dictation");
   assert.equal(template[2].label, "Resume shortcut");
+  assert.equal(chineseTemplate[1].label, "停止语音输入");
+  assert.equal(chineseTemplate[2].label, "恢复全局快捷键");
 });
 
 test("buildTrayMenuTemplate marks startup checkboxes from settings", () => {
@@ -67,7 +74,7 @@ test("buildTrayMenuTemplate returns Simplified Chinese labels", () => {
     "开始语音输入",
     "暂停全局快捷键",
     "separator",
-    "开机自动启动",
+    "开机自启",
     "启动后最小化到托盘",
     "separator",
     "设置",
@@ -82,14 +89,26 @@ function getVisibleMenuText(item) {
 test("getTrayTooltip returns localized phase status and fallback", () => {
   assert.equal(getTrayTooltip({ state: { phase: "recording" } }), "Local Flow - Recording");
   assert.equal(getTrayTooltip({ state: { phase: "pasting" } }), "Local Flow - Pasting");
-  assert.equal(getTrayTooltip({
-    language: "zh-Hans",
-    state: { phase: "error" }
-  }), "Local Flow - 错误");
-  assert.equal(getTrayTooltip({
-    language: "zh-Hans",
-    state: { phase: "pasting" }
-  }), "Local Flow - 正在粘贴");
+
+  const chinesePhaseTooltips = [
+    ["idle", "Local Flow - 空闲"],
+    ["starting", "Local Flow - 正在启动"],
+    ["recording", "Local Flow - 正在录音"],
+    ["stopping", "Local Flow - 正在停止"],
+    ["transcribing", "Local Flow - 正在转写"],
+    ["pasting", "Local Flow - 正在粘贴"],
+    ["done", "Local Flow - 已完成"],
+    ["warning", "Local Flow - 需要确认"],
+    ["error", "Local Flow - 错误"]
+  ];
+
+  for (const [phase, tooltip] of chinesePhaseTooltips) {
+    assert.equal(getTrayTooltip({
+      language: "zh-Hans",
+      state: { phase }
+    }), tooltip);
+  }
+
   assert.equal(getTrayTooltip({
     language: "unknown",
     state: { phase: "unknown" }

@@ -392,8 +392,8 @@ test("HUD preload exposes only system input status subscription", async () => {
   assert.deepEqual(states, [{ phase: "warning" }]);
 });
 
-test("HUD renderer names warning lifecycle states", async () => {
-  const hudSource = await readFile(new URL("../src/renderer/hud.js", import.meta.url), "utf8");
+test("HUD view model names warning lifecycle states", async () => {
+  const hudSource = await readFile(new URL("../src/renderer/hud-state.js", import.meta.url), "utf8");
 
   assert.match(hudSource, /warning:\s*"[^"]+"/);
 });
@@ -562,6 +562,19 @@ test("main process uses explicit renderer commands for system input start and st
   assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
 });
 
+test("main process injects renderer reset into the system input controller", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const controllerOptionsMatch = mainSource.match(
+    /systemInputController = createSystemInputController\(\{(?<body>[\s\S]*?)\r?\n\s*\}\);\r?\n\s*hotkeyManager =/
+  );
+
+  assert.ok(controllerOptionsMatch, "system input controller options should be inline and inspectable");
+  assert.match(
+    controllerOptionsMatch.groups.body,
+    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+  );
+});
+
 test("main process creates HUD with dedicated least-privilege preload", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const createHudMatch = mainSource.match(/function createHudWindow\(\) \{(?<body>[\s\S]*?)\n\}/);
@@ -599,18 +612,19 @@ test("main process only accepts recording status from the main renderer", async 
   );
 });
 
-test("main process sets command busy phases and times out missing renderer acknowledgements", async () => {
+test("main process delegates recording command timeouts to the system input controller", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
   assert.match(mainSource, /systemInputController\.setPhase\("starting"/);
   assert.match(mainSource, /systemInputController\.setPhase\("stopping"/);
-  assert.match(mainSource, /scheduleRecordingCommandTimeout\("starting"/);
-  assert.match(mainSource, /scheduleRecordingCommandTimeout\("stopping"/);
-  assert.match(mainSource, /setTimeout\(\(\) => \{/);
-  assert.match(mainSource, /reason: "renderer_timeout"/);
-  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:reset"\)/);
-  assert.match(mainSource, /clearRecordingCommandTimeout\(\)/);
-  assert.match(mainSource, /if \(!\["starting", "stopping"\]\.includes\(status\.phase\)\) \{\s*clearRecordingCommandTimeout\(\);\s*\}/);
+  assert.match(
+    mainSource,
+    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+  );
+  assert.doesNotMatch(mainSource, /scheduleRecordingCommandTimeout/);
+  assert.doesNotMatch(mainSource, /clearRecordingCommandTimeout/);
+  assert.doesNotMatch(mainSource, /recordingCommandTimeoutMs/);
+  assert.doesNotMatch(mainSource, /let recordingCommandTimeout\b/);
   assert.doesNotMatch(mainSource, /function toggleRecording\(\)/);
 });
 
@@ -619,17 +633,48 @@ test("main process hides HUD when system input returns idle", async () => {
   const sendStatusMatch = mainSource.match(/function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
-  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*clearTerminalAutoIdle\(\);\s*hideHud\(\);\s*return;\s*\}/);
+  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
   assert.match(mainSource, /function hideHud\(\) \{/);
 });
 
-test("main process auto-idles terminal HUD states and caps renderer status payloads", async () => {
+test("main process sends HUD system input status with interface language", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(
+    /function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction showHud/
+  );
 
+  assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
+  const body = sendStatusMatch.groups.body;
+  const normalizedStateIndex = body.indexOf("lastSystemInputState = state && typeof state === \"object\" ? state : { phase: \"idle\" }");
+  const hudStateIndex = body.indexOf("const hudState = {");
+  const hudSendIndex = body.indexOf("sendWindowMessage(hudWindow, \"system-input:status\", hudState)");
+
+  assert.notEqual(normalizedStateIndex, -1, "system input state should be normalized first");
+  assert.notEqual(hudStateIndex, -1, "HUD status should be built from a dedicated payload");
+  assert.ok(hudStateIndex > normalizedStateIndex, "HUD status should use the normalized latest system input state");
+  assert.match(body, /sendWindowMessage\(mainWindow, "system-input:status", state\)/);
+  assert.match(
+    body,
+    /const hudState = \{\s*\.\.\.lastSystemInputState,\s*language: lastSettings\?\.interfaceLanguage \|\| "zh-Hans"\s*\}/
+  );
+  assert.notEqual(hudSendIndex, -1, "HUD should receive the language-aware status payload");
+  assert.ok(hudSendIndex > hudStateIndex, "HUD status should be sent after the payload is created");
+  assert.doesNotMatch(body, /sendWindowMessage\(hudWindow, "system-input:status", state\)/);
+});
+
+test("main process shows terminal HUD states without owning terminal auto-idle", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(
+    /function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction showHud/
+  );
+
+  assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
   assert.match(mainSource, /const terminalSystemInputPhases = new Set\(\["done", "warning", "error"\]\)/);
-  assert.match(mainSource, /scheduleTerminalAutoIdle\(state\)/);
-  assert.match(mainSource, /systemInputController\?\.setPhase\("idle"/);
-  assert.match(mainSource, /clearTerminalAutoIdle\(\)/);
+  assert.match(sendStatusMatch.groups.body, /if \(terminalSystemInputPhases\.has\(state\?\.phase\)\) \{\s*showHud\(\);\s*return;\s*\}/);
+  assert.doesNotMatch(mainSource, /scheduleTerminalAutoIdle/);
+  assert.doesNotMatch(mainSource, /clearTerminalAutoIdle/);
+  assert.doesNotMatch(mainSource, /terminalAutoIdleTimeout/);
+  assert.doesNotMatch(mainSource, /terminalAutoIdleMs/);
   assert.match(mainSource, /slice\(0, maxRendererStatusTextLength\)/);
   assert.match(mainSource, /const maxRendererStatusTextLength = 240/);
   assert.match(mainSource, /"starting"/);

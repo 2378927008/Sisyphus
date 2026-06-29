@@ -502,45 +502,109 @@ textarea {
 .hud-shell {
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
+  min-width: 100vw;
+  min-height: 100vh;
   width: 100vw;
   height: 100vh;
-  padding: 18px 20px;
-  color: #f7f3ea;
-  background: #171717;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 14px 18px;
+  color: #f8fafc;
+  background: #131716;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.24);
+}
+
+.hud-copy {
+  min-width: 0;
 }
 
 .hud-shell strong {
   display: block;
+  overflow: hidden;
   font-size: 15px;
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hud-shell p {
   margin: 4px 0 0;
-  color: rgba(247, 243, 234, 0.72);
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.72);
   font-size: 13px;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-timer {
+  min-width: 48px;
+  color: rgba(248, 250, 252, 0.84);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+  text-align: right;
 }
 
 .hud-dot {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: #9ca3af;
+}
+
+.hud-shell[data-phase="starting"],
+.hud-shell[data-phase="stopping"] {
+  border-color: rgba(20, 184, 166, 0.48);
+}
+
+.hud-shell[data-phase="starting"] .hud-dot,
+.hud-shell[data-phase="stopping"] .hud-dot {
+  background: #14b8a6;
 }
 
 .hud-shell[data-phase="recording"] .hud-dot {
   background: #ef4444;
 }
 
+.hud-shell[data-phase="recording"] {
+  border-color: rgba(239, 68, 68, 0.52);
+}
+
+.hud-shell[data-phase="transcribing"],
+.hud-shell[data-phase="pasting"] {
+  border-color: rgba(56, 189, 248, 0.46);
+}
+
+.hud-shell[data-phase="transcribing"] .hud-dot,
+.hud-shell[data-phase="pasting"] .hud-dot {
+  background: #38bdf8;
+}
+
 .hud-shell[data-phase="done"] .hud-dot {
   background: #22c55e;
 }
 
-.hud-shell[data-phase="error"] .hud-dot {
+.hud-shell[data-phase="done"] {
+  border-color: rgba(34, 197, 94, 0.46);
+}
+
+.hud-shell[data-phase="warning"] {
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.hud-shell[data-phase="warning"] .hud-dot {
   background: #f59e0b;
+}
+
+.hud-shell[data-phase="error"] .hud-dot {
+  background: #f97316;
+}
+
+.hud-shell[data-phase="error"] {
+  border-color: rgba(249, 115, 22, 0.56);
 }

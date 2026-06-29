@@ -33,8 +33,6 @@ const rendererRecordingPhases = new Set([
   "warning"
 ]);
 const terminalSystemInputPhases = new Set(["done", "warning", "error"]);
-const recordingCommandTimeoutMs = 8000;
-const terminalAutoIdleMs = 2500;
 const maxRendererStatusTextLength = 240;
 
 applyElectronRuntimeSwitches(app);
@@ -46,8 +44,6 @@ let dictationService;
 let modelSetupService;
 let hudWindow;
 let systemInputController;
-let recordingCommandTimeout;
-let terminalAutoIdleTimeout;
 let runtimeRoot;
 let vendorRoot;
 let appRoot;
@@ -178,7 +174,6 @@ function sendRecordingStartCommand() {
   systemInputController.setPhase("starting", {
     message: "Starting recording..."
   });
-  scheduleRecordingCommandTimeout("starting", "Recording did not start.");
   sendWindowMessage(mainWindow, "recording:start");
 }
 
@@ -186,7 +181,6 @@ function sendRecordingStopCommand() {
   systemInputController.setPhase("stopping", {
     message: "Stopping recording..."
   });
-  scheduleRecordingCommandTimeout("stopping", "Recording did not stop.");
   sendWindowMessage(mainWindow, "recording:stop");
 }
 
@@ -200,23 +194,24 @@ function sendStatus(payload) {
 
 function sendSystemInputStatus(state) {
   lastSystemInputState = state && typeof state === "object" ? state : { phase: "idle" };
+  const hudState = {
+    ...lastSystemInputState,
+    language: lastSettings?.interfaceLanguage || "zh-Hans"
+  };
   refreshTrayMenu();
   sendWindowMessage(mainWindow, "system-input:status", state);
-  sendWindowMessage(hudWindow, "system-input:status", state);
+  sendWindowMessage(hudWindow, "system-input:status", hudState);
 
   if (state?.phase === "idle") {
-    clearTerminalAutoIdle();
     hideHud();
     return;
   }
 
   if (terminalSystemInputPhases.has(state?.phase)) {
     showHud();
-    scheduleTerminalAutoIdle(state);
     return;
   }
 
-  clearTerminalAutoIdle();
   if (isActiveSystemInputPhase(state?.phase)) {
     showHud();
   }
@@ -252,45 +247,6 @@ function isUsableWindow(window) {
 
 function isActiveSystemInputPhase(phase) {
   return Boolean(phase && phase !== "idle");
-}
-
-function scheduleRecordingCommandTimeout(expectedPhase, message) {
-  clearRecordingCommandTimeout();
-  recordingCommandTimeout = setTimeout(() => {
-    if (systemInputController?.getState().phase === expectedPhase) {
-      sendWindowMessage(mainWindow, "recording:reset");
-      systemInputController.setPhase("error", {
-        reason: "renderer_timeout",
-        message
-      });
-    }
-  }, recordingCommandTimeoutMs);
-}
-
-function clearRecordingCommandTimeout() {
-  if (recordingCommandTimeout) {
-    clearTimeout(recordingCommandTimeout);
-    recordingCommandTimeout = null;
-  }
-}
-
-function scheduleTerminalAutoIdle(state) {
-  clearTerminalAutoIdle();
-  const terminalPhase = state?.phase;
-  const terminalUpdatedAt = state?.updatedAt;
-  terminalAutoIdleTimeout = setTimeout(() => {
-    const currentState = systemInputController?.getState();
-    if (currentState?.phase === terminalPhase && currentState?.updatedAt === terminalUpdatedAt) {
-      systemInputController?.setPhase("idle");
-    }
-  }, terminalAutoIdleMs);
-}
-
-function clearTerminalAutoIdle() {
-  if (terminalAutoIdleTimeout) {
-    clearTimeout(terminalAutoIdleTimeout);
-    terminalAutoIdleTimeout = null;
-  }
 }
 
 function sanitizeRecordingStatusPayload(payload = {}) {
@@ -365,9 +321,6 @@ function wireIpc() {
     }
 
     const status = sanitizeRecordingStatusPayload(payload);
-    if (!["starting", "stopping"].includes(status.phase)) {
-      clearRecordingCommandTimeout();
-    }
     systemInputController?.handleRendererStatus(status);
   });
   ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
@@ -442,7 +395,8 @@ app.whenReady().then(async () => {
     stopRecording: async () => {
       sendRecordingStopCommand();
     },
-    isReadyToRecord: () => true
+    isReadyToRecord: () => true,
+    requestRendererReset: () => sendWindowMessage(mainWindow, "recording:reset")
   });
   hotkeyManager = createHotkeyManager({
     globalShortcut,
