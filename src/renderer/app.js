@@ -421,7 +421,7 @@ async function runModelSetup(type) {
     await refreshProviderStatus();
     setStatus(result.status === "complete"
       ? t(type === "whisper" ? "setup.whisper.complete" : "setup.llm.complete")
-      : result.error || t("setup.failed"));
+      : getSetupFailureMessage(result));
   } catch (error) {
     setStatus(error.message);
   } finally {
@@ -439,7 +439,7 @@ async function cancelActiveModelSetup() {
     const result = await window.localFlow.cancelModelSetup(activeSetupType);
     currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
     renderSetupChecklist();
-    setStatus(result.error || t("setup.cancelled"));
+    setStatus(getSetupFailureMessage(result, "setup.cancelled"));
   } catch (error) {
     setStatus(error.message);
   }
@@ -506,11 +506,13 @@ function renderSetupChecklist() {
   const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
   const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
   const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
-  const textSetupState = getTextSetupState(llmReady, llmStatus);
+  const whisperSetup = currentSetupStatus.setups?.whisper || {};
+  const llmSetup = currentSetupStatus.setups?.llm || {};
+  const textSetupState = getTextSetupState(llmReady, llmStatus, llmSetup);
 
-  whisperSetupStatus.textContent = t(getSetupStatusKey("whisper", whisperReady, whisperStatus));
+  whisperSetupStatus.textContent = getSetupStatusText("whisper", whisperReady, whisperStatus, whisperSetup);
   llmSetupTitle.textContent = t(`model.provider.${textSetupState.provider}`);
-  llmSetupStatus.textContent = t(textSetupState.statusKey);
+  llmSetupStatus.textContent = textSetupState.statusText || t(textSetupState.statusKey);
   setupChecklist.dataset.whisperReady = String(whisperReady);
   setupChecklist.dataset.llmReady = String(textSetupState.ready);
   installWhisper.hidden = whisperReady;
@@ -523,7 +525,7 @@ function renderSetupChecklist() {
   renderSetupOutput(getActiveSetupStatus(whisperStatus, llmStatus));
 }
 
-function getTextSetupState(llmReady, llmStatus) {
+function getTextSetupState(llmReady, llmStatus, setup = {}) {
   const provider = currentSettings?.llmProvider || form.llmProvider?.value || "mymemory";
 
   if (provider === "embedded") {
@@ -531,7 +533,8 @@ function getTextSetupState(llmReady, llmStatus) {
       provider,
       ready: llmReady,
       showInstall: !llmReady,
-      statusKey: getSetupStatusKey("llm", llmReady, llmStatus)
+      statusKey: getSetupStatusKey("llm", llmReady, llmStatus),
+      statusText: getSetupStatusText("llm", llmReady, llmStatus, setup)
     };
   }
 
@@ -617,6 +620,23 @@ function getSetupStatusKey(type, ready, status) {
   if (status === "running") return `setup.${type}.installing`;
   if (status === "failed") return `setup.${type}.failed`;
   return `setup.${type}.missing`;
+}
+
+function getSetupStatusText(type, ready, status, setup) {
+  if (!ready && status === "failed") {
+    return getSetupFailureMessage(setup, `setup.${type}.failed`);
+  }
+  return t(getSetupStatusKey(type, ready, status));
+}
+
+function getSetupFailureMessage(setup, fallbackKey = "setup.failed") {
+  if (setup?.failureReason) {
+    const message = t(`setup.failure.${setup.failureReason}`);
+    if (message !== `setup.failure.${setup.failureReason}`) {
+      return message;
+    }
+  }
+  return setup?.error || t(fallbackKey);
 }
 
 async function copyLatestResult() {

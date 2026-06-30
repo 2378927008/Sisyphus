@@ -106,10 +106,10 @@ export function createModelSetupService({
       if (activeRun.cancelled) {
         return getStatus(type);
       }
-      return failSetup(type, {
+      return failSetup(type, createSetupFailure(type, {
         output: error.output || [],
-        error: formatSetupError(error)
-      });
+        error
+      }));
     } finally {
       if (activeRuns.get(type) === activeRun) {
         activeRuns.delete(type);
@@ -123,21 +123,32 @@ export function createModelSetupService({
     try {
       const assets = await refreshModelAssets();
       const assetError = result.code === 0 ? getSetupAssetError(type, assets) : "";
+      const setupFailure = result.code === 0 && assetError
+        ? createSetupFailure(type, {
+          output: result.output,
+          reason: getSetupAssetFailureReason(type),
+          fallbackError: assetError
+        })
+        : createSetupFailure(type, {
+          output: result.output,
+          code: result.code
+        });
       const nextState = {
         ...getStatus(type),
         status: result.code === 0 && !assetError ? "complete" : "failed",
         output: result.output,
-        error: result.code === 0 ? assetError : `Setup exited with code ${result.code}.`,
+        error: result.code === 0 && !assetError ? "" : setupFailure.error,
+        failureReason: result.code === 0 && !assetError ? "" : setupFailure.failureReason,
         completedAt: new Date().toISOString(),
         assets
       };
       setState(type, nextState);
       return getStatus(type);
     } catch (error) {
-      return failSetup(type, {
+      return failSetup(type, createSetupFailure(type, {
         output: result.output,
-        error: formatSetupError(error)
-      });
+        error
+      }));
     }
   }
 
@@ -188,12 +199,13 @@ export function createModelSetupService({
     state.set(type, value);
   }
 
-  function failSetup(type, { output, error }) {
+  function failSetup(type, { output, error, failureReason = "" }) {
     const nextState = {
       ...getStatus(type),
       status: "failed",
       output: [...output],
       error,
+      failureReason,
       completedAt: new Date().toISOString()
     };
     setState(type, nextState);
@@ -248,6 +260,12 @@ function getSetupAssetError(type, assets) {
   }
 
   return "Setup finished but required assets were not found.";
+}
+
+function getSetupAssetFailureReason(type) {
+  if (type === "whisper") return "whisper_assets_missing";
+  if (type === "llm") return "llm_assets_missing";
+  return "setup_assets_missing";
 }
 
 export function killSetupProcessTree(child, spawn = nodeSpawn, platform = process.platform) {
@@ -370,6 +388,72 @@ function formatSetupError(error) {
     return error.message;
   }
   return String(error);
+}
+
+function createSetupFailure(type, { output = [], error, code, reason, fallbackError } = {}) {
+  const failureReason = reason ||
+    findStructuredSetupReason(output) ||
+    classifySetupError(error) ||
+    (Number.isInteger(code) && code !== 0 ? "setup_exit_code" : "");
+  const message = getSetupFailureMessage(type, failureReason, {
+    code,
+    error,
+    fallbackError
+  });
+
+  return {
+    output: [...output],
+    error: message,
+    failureReason
+  };
+}
+
+function findStructuredSetupReason(output = []) {
+  for (const line of output) {
+    const match = String(line).match(/\bLOCAL_FLOW_SETUP_ERROR:([a-z0-9_]+)/i);
+    if (match) {
+      return match[1];
+    }
+  }
+  return "";
+}
+
+function classifySetupError(error) {
+  const message = formatSetupError(error);
+  if (/timed out/i.test(message)) return "setup_timeout";
+  if (/spawn .*powershell|powershell.*ENOENT|powershell.*not found/i.test(message)) {
+    return "setup_spawn_failed";
+  }
+  return "";
+}
+
+function getSetupFailureMessage(type, reason, { code, error, fallbackError } = {}) {
+  const messages = {
+    whisper_release_metadata: "Could not fetch whisper.cpp release metadata. Check your network or proxy, then retry.",
+    whisper_release_asset_missing: "The current whisper.cpp release did not include the expected Windows x64 package. Update Local Flow or retry later.",
+    whisper_runtime_download: "Whisper runtime download failed. Check your network or proxy, then retry.",
+    whisper_extract_failed: "Whisper runtime archive could not be extracted. Delete the cached zip and retry.",
+    whisper_runtime_missing: "Whisper runtime was extracted, but whisper-cli.exe was not found. Delete the cached runtime and retry.",
+    whisper_model_download: "Whisper model download failed. Check your network or proxy, then retry.",
+    whisper_assets_missing: "Whisper setup finished but required assets were not found.",
+    llm_release_metadata: "Could not fetch llama.cpp release metadata. Check your network or proxy, then retry.",
+    llm_release_asset_missing: "The current llama.cpp release did not include a compatible Windows runtime. Update Local Flow or retry later.",
+    llm_runtime_download: "llama.cpp runtime download failed. Check your network or proxy, then retry.",
+    llm_extract_failed: "llama.cpp runtime archive could not be extracted. Delete the cached zip and retry.",
+    llm_runtime_missing: "llama.cpp runtime was extracted, but llama-cli.exe or llama-server.exe was not found.",
+    llm_model_download: "Qwen model download failed. This file is large; check network stability, disk space, and proxy settings, then retry.",
+    llm_assets_missing: "Qwen setup finished but required assets were not found.",
+    setup_timeout: "Model setup timed out. Check network stability and retry.",
+    setup_spawn_failed: "Model setup could not start PowerShell. Restart Local Flow and try again.",
+    setup_assets_missing: "Setup finished but required assets were not found."
+  };
+
+  if (messages[reason]) return messages[reason];
+  if (reason === "setup_exit_code" && Number.isInteger(code)) {
+    return `Setup exited with code ${code}.`;
+  }
+  if (fallbackError) return fallbackError;
+  return formatSetupError(error);
 }
 
 function createLineBuffer(output, onOutput = () => {}) {

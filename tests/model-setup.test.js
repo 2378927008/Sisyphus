@@ -181,6 +181,36 @@ test("setup scripts accept a NodeExe parameter for packaged builds", () => {
   }
 });
 
+test("setup scripts emit structured failure markers", () => {
+  const whisperScript = readFileSync(path.join(process.cwd(), "scripts", "setup-whisper.ps1"), "utf8");
+  const llmScript = readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8");
+
+  for (const reason of [
+    "whisper_release_metadata",
+    "whisper_release_asset_missing",
+    "whisper_runtime_download",
+    "whisper_extract_failed",
+    "whisper_runtime_missing",
+    "whisper_model_download"
+  ]) {
+    assert.match(whisperScript, new RegExp(`Fail-Setup -Code "${reason}"`));
+  }
+
+  for (const reason of [
+    "llm_release_metadata",
+    "llm_release_asset_missing",
+    "llm_runtime_download",
+    "llm_extract_failed",
+    "llm_runtime_missing",
+    "llm_model_download"
+  ]) {
+    assert.match(llmScript, new RegExp(`Fail-Setup -Code "${reason}"`));
+  }
+
+  assert.match(whisperScript, /LOCAL_FLOW_SETUP_ERROR:\$Code/);
+  assert.match(llmScript, /LOCAL_FLOW_SETUP_ERROR:\$Code/);
+});
+
 test("createModelSetupService rejects inherited setup type names without spawning", async () => {
   let spawnCalls = 0;
   const service = createModelSetupService({
@@ -311,6 +341,65 @@ test("createModelSetupService reports failed setup with captured output", async 
   assert.deepEqual(result.output, ["download started", "network failed"]);
 });
 
+test("createModelSetupService classifies structured setup failures", async () => {
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    spawn: () => fakeChildProcess({
+      code: 1,
+      stdout: [
+        "Downloading ggml-base.bin...\n",
+        "LOCAL_FLOW_SETUP_ERROR:whisper_model_download\n"
+      ],
+      stderr: ["Download failed after 3 attempts: HTTP 403"]
+    }),
+    refreshAssets: async () => ({ whisper: {}, llm: {} })
+  });
+
+  const result = await service.start("whisper");
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.failureReason, "whisper_model_download");
+  assert.match(result.error, /Whisper model download failed/);
+  assert.deepEqual(result.output, [
+    "Downloading ggml-base.bin...",
+    "LOCAL_FLOW_SETUP_ERROR:whisper_model_download",
+    "Download failed after 3 attempts: HTTP 403"
+  ]);
+});
+
+test("createModelSetupService classifies timeout and spawn failures without leaking raw commands", async () => {
+  const timeoutService = createModelSetupService({
+    rootPath: "C:/app",
+    setupTimeoutMs: 5,
+    killProcessTree: () => {},
+    spawnImpl: () => fakeStuckChildProcess(),
+    refreshAssets: async () => readyAssets()
+  });
+  const timeoutResult = await Promise.race([
+    timeoutService.start("whisper"),
+    delay(50).then(() => ({ status: "timed-out-test-sentinel" }))
+  ]);
+
+  assert.equal(timeoutResult.status, "failed");
+  assert.equal(timeoutResult.failureReason, "setup_timeout");
+  assert.match(timeoutResult.error, /timed out/);
+  assert.doesNotMatch(timeoutResult.error, /powershell\.exe/i);
+
+  const spawnService = createModelSetupService({
+    rootPath: "C:/app",
+    spawnImpl: () => {
+      throw new Error("spawn powershell.exe ENOENT");
+    },
+    refreshAssets: async () => readyAssets()
+  });
+  const spawnResult = await spawnService.start("llm");
+
+  assert.equal(spawnResult.status, "failed");
+  assert.equal(spawnResult.failureReason, "setup_spawn_failed");
+  assert.match(spawnResult.error, /could not start/);
+  assert.doesNotMatch(spawnResult.error, /ENOENT/);
+});
+
 test("createModelSetupService fails successful Whisper script when assets are not detected", async () => {
   const service = createModelSetupService({
     rootPath: "C:/app",
@@ -321,6 +410,7 @@ test("createModelSetupService fails successful Whisper script when assets are no
   const result = await service.start("whisper");
 
   assert.equal(result.status, "failed");
+  assert.equal(result.failureReason, "whisper_assets_missing");
   assert.match(result.error, /Whisper setup finished but required assets were not found/);
   assert.deepEqual(result.output, ["script complete"]);
 });

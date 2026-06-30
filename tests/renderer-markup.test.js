@@ -35,3 +35,12 @@ test("home screen exposes a contextual recovery action when recording is blocked
   assert.match(appSource, /getRecordRecoveryAction/);
   assert.match(appSource, /applyRecordRecoveryAction/);
 });
+
+test("setup failures render localized failure reasons instead of raw diagnostics", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /getSetupFailureMessage/);
+  assert.match(appSource, /failureReason/);
+  assert.match(appSource, /setup\.failure\.\$\{setup\.failureReason\}/);
+  assert.match(appSource, /getSetupStatusText/);
+});

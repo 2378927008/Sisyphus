@@ -40,6 +40,17 @@ test("local model setup copy frames dictation as target-language output", () => 
   assert.doesNotMatch(getUiText("zh-Hans", "setup.llm.missing"), /翻译/);
 });
 
+test("getUiText returns localized setup failure reasons", () => {
+  assert.match(getUiText("en", "setup.failure.whisper_model_download"), /Whisper model download failed/);
+  assert.match(getUiText("zh-Hans", "setup.failure.whisper_model_download"), /Whisper 模型下载失败/);
+  assert.match(getUiText("en", "setup.failure.setup_spawn_failed"), /could not start PowerShell/);
+  assert.match(getUiText("zh-Hans", "setup.failure.setup_spawn_failed"), /无法启动 PowerShell/);
+  assert.notEqual(
+    getUiText("zh-Hans", "setup.failure.whisper_model_download"),
+    getUiText("en", "setup.failure.whisper_model_download")
+  );
+});
+
 test("getUiText returns Windows productization labels", () => {
   assert.equal(getUiText("en", "label.launchAtLogin"), "Launch Local Flow at login");
   assert.equal(getUiText("en", "label.startMinimizedToTray"), "Start minimized to tray");
