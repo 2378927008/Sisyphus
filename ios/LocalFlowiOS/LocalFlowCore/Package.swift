@@ -5,7 +5,8 @@ import PackageDescription
 let package = Package(
     name: "LocalFlowCore",
     platforms: [
-        .iOS(.v16)
+        .iOS(.v16),
+        .macOS(.v13)
     ],
     products: [
         .library(name: "LocalFlowCore", targets: ["LocalFlowCore"])

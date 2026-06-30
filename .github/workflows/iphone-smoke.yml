@@ -1,0 +1,39 @@
+name: iPhone Source Smoke
+
+on:
+  pull_request:
+    paths:
+      - "ios/LocalFlowiOS/**"
+      - "tests/iphone-mvp-scaffold.test.js"
+      - ".github/workflows/iphone-smoke.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "ios/LocalFlowiOS/**"
+      - "tests/iphone-mvp-scaffold.test.js"
+      - ".github/workflows/iphone-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  iphone-source-smoke:
+    name: iPhone source smoke
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Test LocalFlowCore Swift package
+        working-directory: ios/LocalFlowiOS/LocalFlowCore
+        run: swift test
+
+      - name: Check iPhone handoff source contract
+        run: node --test tests/iphone-mvp-scaffold.test.js

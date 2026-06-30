@@ -1,0 +1,43 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+test("GitHub Actions defines a macOS iPhone source smoke workflow", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/iphone-smoke.yml", import.meta.url), "utf8");
+
+  assert.match(workflow, /name:\s*iPhone Source Smoke/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /push:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /runs-on:\s*macos-latest/);
+  assert.match(workflow, /actions\/checkout@v4/);
+  assert.match(workflow, /actions\/setup-node@v4/);
+  assert.match(workflow, /node-version:\s*22/);
+  assert.match(workflow, /swift --version/);
+  assert.match(workflow, /working-directory:\s*ios\/LocalFlowiOS\/LocalFlowCore/);
+  assert.match(workflow, /swift test/);
+  assert.match(workflow, /node --test tests\/iphone-mvp-scaffold\.test\.js/);
+  assert.doesNotMatch(workflow, /APPLE_ID|APP_STORE_CONNECT|MATCH_PASSWORD|FASTLANE|OPENAI_API_KEY|sk-proj/i);
+});
+
+test("iPhone README documents the Windows-only cloud macOS validation path", async () => {
+  const readme = await readFile(new URL("../ios/LocalFlowiOS/README.md", import.meta.url), "utf8");
+
+  assert.match(readme, /GitHub Actions/);
+  assert.match(readme, /\.github\/workflows\/iphone-smoke\.yml/);
+  assert.match(readme, /macOS/);
+  assert.match(readme, /swift test/);
+  assert.match(readme, /node --test tests\/iphone-mvp-scaffold\.test\.js/);
+  assert.match(readme, /does not sign/);
+  assert.match(readme, /does not require an Apple Developer account/);
+});
+
+test("LocalFlowCore can run Swift package tests on the macOS GitHub runner", async () => {
+  const packageSource = await readFile(
+    new URL("../ios/LocalFlowiOS/LocalFlowCore/Package.swift", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(packageSource, /\.iOS\(\.v16\)/);
+  assert.match(packageSource, /\.macOS\(\.v13\)/);
+});

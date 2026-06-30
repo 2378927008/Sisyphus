@@ -37,6 +37,14 @@ On macOS, use Xcode's UI first for signing and entitlements. After the project i
 xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
+## Cloud macOS Validation
+
+For a Windows-only development machine, GitHub Actions provides the first cloud macOS validation gate in `.github/workflows/iphone-smoke.yml`.
+
+The workflow runs on `macos-latest`, executes `swift test` inside `ios/LocalFlowiOS/LocalFlowCore`, and runs `node --test tests/iphone-mvp-scaffold.test.js` from the repository root. This catches Swift package and iPhone handoff regressions before a local Mac is available.
+
+This smoke workflow does not sign the app, does not create an Xcode project, does not upload to TestFlight, and does not require an Apple Developer account. Final host-app build, signing, keyboard extension validation, and device testing still require macOS with Xcode.
+
 ## Product Rules
 
 - Auto output preserves the recognized language.
