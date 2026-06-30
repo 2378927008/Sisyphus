@@ -58,6 +58,8 @@ test("product trial guide gives a concrete Windows and iPhone trial path", async
   assert.match(guide, /Ctrl \+ Alt \+ Space/);
   assert.match(guide, /npm\.cmd run check:packaged/);
   assert.match(guide, /npm\.cmd run check:product/);
+  assert.match(guide, /Windows Installer Artifact/);
+  assert.match(guide, /local-flow-windows-installer/);
   assert.match(guide, /Apple Speech/);
   assert.match(guide, /xcodebuild/);
 });

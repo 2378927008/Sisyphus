@@ -41,3 +41,22 @@ test("LocalFlowCore can run Swift package tests on the macOS GitHub runner", asy
   assert.match(packageSource, /\.iOS\(\.v16\)/);
   assert.match(packageSource, /\.macOS\(\.v13\)/);
 });
+
+test("GitHub Actions can build and upload the Windows installer artifact", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/windows-installer.yml", import.meta.url), "utf8");
+
+  assert.match(workflow, /name:\s*Windows Installer Artifact/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /push:/);
+  assert.match(workflow, /runs-on:\s*windows-latest/);
+  assert.match(workflow, /actions\/checkout@v4/);
+  assert.match(workflow, /actions\/setup-node@v4/);
+  assert.match(workflow, /node-version:\s*22/);
+  assert.match(workflow, /npm ci/);
+  assert.match(workflow, /npm test/);
+  assert.match(workflow, /npm run dist:win/);
+  assert.match(workflow, /npm run verify:release/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /Local Flow Setup 0\.1\.0\.exe/);
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY|sk-proj|APPLE_ID|APP_STORE_CONNECT/i);
+});

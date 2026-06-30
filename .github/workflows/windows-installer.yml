@@ -1,0 +1,52 @@
+name: Windows Installer Artifact
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - "assets/**"
+      - "scripts/**"
+      - "vendor/.gitkeep"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+jobs:
+  windows-installer:
+    name: Windows installer artifact
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Verify release artifacts
+        run: npm run verify:release
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-flow-windows-installer
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/Local Flow Setup 0.1.0.exe
+            dist/Local Flow Setup 0.1.0.exe.blockmap
+            dist/win-unpacked/**

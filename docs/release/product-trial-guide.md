@@ -10,6 +10,18 @@
 4. 输出语言选择为 `Auto` 时，产品目标是保留你实际说话的语言；它不是默认翻译成英文。只有明确选择目标输出语言时，才进入翻译/改写输出链路。
 5. 如果托盘图标可见，可以从托盘打开主窗口、暂停全局快捷键、打开设置或退出应用。
 
+## GitHub 安装包下载路径
+
+仓库推送后，GitHub Actions 会运行 `Windows Installer Artifact` 工作流。打开仓库的 Actions 页面，选择最新一次 `Windows Installer Artifact` 运行，在页面底部下载 `local-flow-windows-installer` artifact。
+
+artifact 内包含：
+
+- `Local Flow Setup 0.1.0.exe`
+- `Local Flow Setup 0.1.0.exe.blockmap`
+- `win-unpacked` 免安装启动目录
+
+Actions artifact 是试用分发通道，不是正式签名发布包。下载后如果 Windows SmartScreen 提示未知发布者，需要选择保留/仍要运行；后续正式发布应补代码签名和 GitHub Release。
+
 ## Windows 本地验证命令
 
 在项目根目录运行：
