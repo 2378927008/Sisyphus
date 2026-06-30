@@ -12,7 +12,7 @@
     "check:app": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-app-smoke.mjs",
     "test": "node --test tests/*.test.js",
     "package:win": "electron-builder --win --dir",
-    "dist:win": "electron-builder --win nsis",
+    "dist:win": "electron-builder --win nsis --publish never",
     "check:packaged": "node scripts/packaged-start-smoke.mjs",
     "check:product": "node scripts/product-readiness-report.mjs",
     "verify:release": "node scripts/verify-release-build.mjs"
