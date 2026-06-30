@@ -225,6 +225,30 @@ textarea {
   animation: pulse 1s infinite;
 }
 
+.record-recovery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: min(720px, 100%);
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--warning);
+  border-radius: 8px;
+  background: #fff8ea;
+}
+
+.record-recovery[hidden] {
+  display: none;
+}
+
+.record-recovery p {
+  color: #3d3120;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .status-line {
   display: grid;
   gap: 6px;
@@ -484,6 +508,10 @@ textarea {
   }
 
   .setup-row {
+    grid-template-columns: 1fr;
+  }
+
+  .record-recovery {
     grid-template-columns: 1fr;
   }
 

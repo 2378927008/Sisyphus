@@ -24,3 +24,14 @@ test("settings expose Windows productization controls", async () => {
   assert.match(html, /data-i18n="label.startMinimizedToTray"/);
   assert.match(html, /data-i18n="label.globalShortcutPaused"/);
 });
+
+test("home screen exposes a contextual recovery action when recording is blocked", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="recordRecovery"/);
+  assert.match(html, /id="recordRecoveryText"/);
+  assert.match(html, /id="recordRecoveryAction"/);
+  assert.match(appSource, /getRecordRecoveryAction/);
+  assert.match(appSource, /applyRecordRecoveryAction/);
+});

@@ -55,3 +55,13 @@ test("getUiText returns Windows productization labels", () => {
   assert.equal(getUiText("zh-Hans", "label.startMinimizedToTray"), "启动后最小化到托盘");
   assert.equal(getUiText("zh-Hans", "label.globalShortcutPaused"), "暂停全局快捷键");
 });
+
+test("getUiText returns localized record recovery actions", () => {
+  assert.equal(getUiText("en", "record.recovery.useAutoOutput"), "Use Auto output");
+  assert.equal(getUiText("zh-Hans", "record.recovery.useAutoOutput"), "使用自动输出");
+  assert.match(getUiText("zh-Hans", "record.recovery.targetOutput"), /保留你说话的语言/);
+  assert.notEqual(
+    getUiText("zh-Hans", "record.recovery.targetOutput"),
+    getUiText("en", "record.recovery.targetOutput")
+  );
+});

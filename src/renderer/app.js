@@ -1,5 +1,6 @@
 import { describeMicrophoneError } from "../shared/media-errors.js";
 import { getRecordReadiness } from "./record-readiness.js";
+import { getRecordRecoveryAction } from "./record-recovery-action.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -14,6 +15,9 @@ import { getUiText } from "./i18n.js";
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
 const recordLabel = document.querySelector("#recordLabel");
+const recordRecovery = document.querySelector("#recordRecovery");
+const recordRecoveryText = document.querySelector("#recordRecoveryText");
+const recordRecoveryAction = document.querySelector("#recordRecoveryAction");
 const statusText = document.querySelector("#statusText");
 const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
@@ -49,6 +53,7 @@ let recordingOperationToken = 0;
 let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
+let currentRecordRecoveryAction = null;
 let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
@@ -62,6 +67,7 @@ async function init() {
   fillSettings(currentSettings);
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
+  recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
   openSettings.addEventListener("click", () => setSettingsDrawer(true));
   closeSettings.addEventListener("click", () => setSettingsDrawer(false));
   settingsDrawer.addEventListener("click", closeSettingsFromBackdrop);
@@ -292,6 +298,7 @@ function ensureRecordReady() {
 function renderRecordReadiness(readiness) {
   recordButton.disabled = !readiness.ready && !isRecording;
   recordButton.title = readiness.ready ? "" : getRecordDisabledMessage(readiness);
+  renderRecordRecovery(readiness);
 }
 
 function showRecordReadinessReason(readiness) {
@@ -302,6 +309,47 @@ function showRecordReadinessReason(readiness) {
 
 function getRecordDisabledMessage(readiness) {
   return t(`record.disabled.${readiness.reason}`);
+}
+
+function renderRecordRecovery(readiness) {
+  currentRecordRecoveryAction = isRecording ? null : getRecordRecoveryAction(readiness);
+
+  if (!currentRecordRecoveryAction) {
+    recordRecovery.hidden = true;
+    recordRecoveryText.textContent = "";
+    recordRecoveryAction.textContent = "";
+    recordRecoveryAction.disabled = false;
+    return;
+  }
+
+  recordRecovery.hidden = false;
+  recordRecoveryText.textContent = t(currentRecordRecoveryAction.messageKey);
+  recordRecoveryAction.textContent = t(currentRecordRecoveryAction.labelKey);
+  recordRecoveryAction.disabled = isSetupBusy && currentRecordRecoveryAction.type === "installWhisper";
+}
+
+async function applyRecordRecoveryAction() {
+  const action = currentRecordRecoveryAction;
+  if (!action) return;
+
+  if (action.type === "installWhisper") {
+    await runModelSetup("whisper");
+    return;
+  }
+
+  if (action.type === "checkMicrophone") {
+    await runMicrophoneDiagnostics();
+    return;
+  }
+
+  if (action.type === "useAutoOutput") {
+    form.outputLanguage.value = "auto";
+    await saveSettingsFromCurrentForm();
+    setStatus(t("record.recovery.autoApplied"));
+    return;
+  }
+
+  setSettingsDrawer(true);
 }
 
 function showLocalModelInstallCommand() {
@@ -550,6 +598,7 @@ function sanitizeSetupOutputLine(line) {
 function setSetupBusy(busy) {
   isSetupBusy = busy;
   renderSetupChecklist();
+  applyRecordReadiness();
 }
 
 function createFailedSetupStatus(error) {
