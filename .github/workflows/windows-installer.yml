@@ -35,10 +35,28 @@ jobs:
         run: npm test
 
       - name: Build Windows installer
-        run: npm run dist:win
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp | Out-Null
+          npm run dist:win 2>&1 | Tee-Object -FilePath .tmp/dist-win.log
+          $buildExitCode = $LASTEXITCODE
+          if ($buildExitCode -ne 0) {
+            exit $buildExitCode
+          }
 
       - name: Verify release artifacts
         run: npm run verify:release
+
+      - name: Upload build diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            .tmp/dist-win.log
+            dist/builder-debug.yml
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

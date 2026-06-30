@@ -55,6 +55,9 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run dist:win/);
+  assert.match(workflow, /Tee-Object -FilePath \.tmp\/dist-win\.log/);
+  assert.match(workflow, /windows-build-diagnostics/);
+  assert.match(workflow, /if:\s*\$\{\{ always\(\) \}\}/);
   assert.match(workflow, /npm run verify:release/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Local Flow Setup 0\.1\.0\.exe/);
