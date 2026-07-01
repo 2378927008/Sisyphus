@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getUiText } from "../src/renderer/i18n.js";
+import { getUiText, uiTranslations } from "../src/renderer/i18n.js";
+
+const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|Fran莽ais|D茅|Arr锚|袧邪|褋|携蟹|贸|谩|Espa帽ol|銉|鞚|氇|瑾|閷|鞁/;
 
 test("getUiText returns localized record labels for supported interface languages", () => {
   assert.equal(getUiText("en", "record.start"), "Start recording");
   assert.equal(getUiText("zh-Hans", "record.start"), "开始录音");
-  assert.equal(getUiText("ja", "record.start"), "録音開始");
+  assert.equal(getUiText("ja", "record.start"), "録音を開始");
   assert.equal(getUiText("ko", "record.start"), "녹음 시작");
   assert.equal(getUiText("zh-Hant", "record.start"), "開始錄音");
   assert.equal(getUiText("fr", "record.start"), "Démarrer l'enregistrement");
@@ -21,6 +23,15 @@ test("getUiText returns localized language setting labels", () => {
   assert.equal(getUiText("es", "label.recognitionLanguage"), "Idioma de reconocimiento de voz");
 });
 
+test("getUiText returns native names for interface language options", () => {
+  assert.equal(getUiText("en", "language.interface.zh-Hans"), "简体中文");
+  assert.equal(getUiText("en", "language.interface.ja"), "日本語");
+  assert.equal(getUiText("en", "language.interface.ko"), "한국어");
+  assert.equal(getUiText("en", "language.interface.fr"), "Français");
+  assert.equal(getUiText("en", "language.interface.ru"), "Русский");
+  assert.equal(getUiText("en", "language.interface.es"), "Español");
+});
+
 test("getUiText returns MyMemory provider labels", () => {
   assert.equal(getUiText("en", "model.provider.mymemory"), "MyMemory Free (cloud)");
   assert.equal(getUiText("fr", "model.provider.mymemory"), "MyMemory Free (cloud)");
@@ -29,8 +40,8 @@ test("getUiText returns MyMemory provider labels", () => {
 test("legacy translate mode is not framed as English-only translation", () => {
   assert.equal(getUiText("en", "mode.translate"), "Target language output");
   assert.equal(getUiText("zh-Hans", "mode.translate"), "目标语言输出");
-  assert.equal(getUiText("ja", "mode.translate"), "出力言語に変換");
-  assert.equal(getUiText("ko", "mode.translate"), "출력 언어로 변환");
+  assert.equal(getUiText("ja", "mode.translate"), "目標言語で出力");
+  assert.equal(getUiText("ko", "mode.translate"), "대상 언어로 출력");
 });
 
 test("local model setup copy frames dictation as target-language output", () => {
@@ -75,4 +86,12 @@ test("getUiText returns localized record recovery actions", () => {
     getUiText("zh-Hans", "record.recovery.targetOutput"),
     getUiText("en", "record.recovery.targetOutput")
   );
+});
+
+test("localized UI resources do not contain common mojibake artifacts", () => {
+  for (const [language, dictionary] of Object.entries(uiTranslations)) {
+    for (const [key, value] of Object.entries(dictionary)) {
+      assert.doesNotMatch(String(value), mojibakePattern, `${language}.${key}`);
+    }
+  }
 });

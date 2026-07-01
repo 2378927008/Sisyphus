@@ -104,7 +104,7 @@ test("getHudViewState maps raw transcript saved reason in Simplified Chinese", (
     language: "zh-Hans"
   });
 
-  assert.equal(view.message, "原始转写已保存。");
+  assert.equal(view.message, "原始转写已保存");
 });
 
 test("getHudViewState rejects provider and model diagnostics from non-terminal phases", () => {

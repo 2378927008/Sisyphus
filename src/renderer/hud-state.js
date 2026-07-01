@@ -74,7 +74,7 @@ const hudLabels = {
       recording_failed: "录音失败，请重试",
       transcription_failed: "转写失败，请重试",
       target_output_failed: "目标语言输出失败",
-      raw_transcript_saved: "原始转写已保存。",
+      raw_transcript_saved: "原始转写已保存",
       clipboard_unavailable: "剪贴板不可用，文本已保存",
       paste_failed: "粘贴失败，文本已保存。"
     }

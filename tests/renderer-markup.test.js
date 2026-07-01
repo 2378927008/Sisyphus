@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|銉|鞚|氇|瑾|閷|鞁/;
+
 test("settings expose dictation modes without a legacy translation mode", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
@@ -34,6 +36,23 @@ test("home screen exposes a contextual recovery action when recording is blocked
   assert.match(html, /id="recordRecoveryAction"/);
   assert.match(appSource, /getRecordRecoveryAction/);
   assert.match(appSource, /applyRecordRecoveryAction/);
+});
+
+test("renderer fallback markup uses readable Chinese copy", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  assert.match(html, /<title>Local Flow 本地语音输入<\/title>/);
+  assert.match(html, />开始录音<\/span>/);
+  assert.match(html, />安装 Whisper<\/button>/);
+  assert.match(html, />还没有转写结果。<\/p>/);
+  assert.doesNotMatch(html, mojibakePattern);
+});
+
+test("HUD fallback markup uses readable Chinese copy", async () => {
+  const html = await readFile(new URL("../src/renderer/hud.html", import.meta.url), "utf8");
+
+  assert.match(html, /<p id="hudMessage">按快捷键开始或停止录音<\/p>/);
+  assert.doesNotMatch(html, mojibakePattern);
 });
 
 test("setup failures render localized failure reasons instead of raw diagnostics", async () => {
