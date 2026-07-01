@@ -7,9 +7,11 @@ import { pipeline } from "node:stream/promises";
 
 const [url, outputPath] = process.argv.slice(2);
 const maxRedirects = 8;
-const maxAttempts = 3;
-const timeoutMs = 120000;
-const stallTimeoutMs = 30000;
+const maxAttempts = readPositiveIntegerEnv("LOCAL_FLOW_DOWNLOAD_MAX_ATTEMPTS", 3);
+const timeoutMs = readPositiveIntegerEnv("LOCAL_FLOW_DOWNLOAD_TIMEOUT_MS", 120000);
+const stallTimeoutMs = readPositiveIntegerEnv("LOCAL_FLOW_DOWNLOAD_STALL_TIMEOUT_MS", 30000);
+const minProgressBytes = readPositiveIntegerEnv("LOCAL_FLOW_DOWNLOAD_MIN_PROGRESS_BYTES", 64 * 1024);
+const minProgressIntervalMs = readPositiveIntegerEnv("LOCAL_FLOW_DOWNLOAD_MIN_PROGRESS_INTERVAL_MS", 120000);
 
 if (!url || !outputPath) {
   console.error("Usage: node scripts/download-file.mjs <url> <output-path>");
@@ -103,6 +105,14 @@ async function download(inputUrl, outputFile, { redirectsLeft }) {
         let lastReported = received;
         const totalHeader = Number(response.headers["content-length"] || 0);
         const expectedTotal = append && totalHeader ? existingBytes + totalHeader : totalHeader;
+        const progressWatchdog = createProgressWatchdog({
+          initialBytes: received,
+          onSlowProgress: () => {
+            request.destroy(new Error(
+              `download too slow; received less than ${formatBytes(minProgressBytes)} in ${minProgressIntervalMs}ms`
+            ));
+          }
+        });
         const stallTimer = createStallTimer(() => {
           request.destroy(new Error(`no download progress for ${stallTimeoutMs}ms`));
         });
@@ -110,6 +120,7 @@ async function download(inputUrl, outputFile, { redirectsLeft }) {
         response.on("data", (chunk) => {
           received += chunk.length;
           stallTimer.bump();
+          progressWatchdog.bump(received);
 
           if (received - lastReported >= 5 * 1024 * 1024) {
             lastReported = received;
@@ -120,11 +131,14 @@ async function download(inputUrl, outputFile, { redirectsLeft }) {
 
         try {
           stallTimer.bump();
+          progressWatchdog.start();
           await pipeline(response, createWriteStream(outputFile, { flags: append ? "a" : "w" }));
           stallTimer.stop();
+          progressWatchdog.stop();
           resolve();
         } catch (error) {
           stallTimer.stop();
+          progressWatchdog.stop();
           reject(error);
         }
       }
@@ -164,6 +178,30 @@ function createStallTimer(onStall) {
   };
 }
 
+function createProgressWatchdog({ initialBytes = 0, onSlowProgress }) {
+  let timer;
+  let windowStartBytes = initialBytes;
+
+  function reset() {
+    clearTimeout(timer);
+    timer = setTimeout(onSlowProgress, minProgressIntervalMs);
+  }
+
+  return {
+    start() {
+      reset();
+    },
+    bump(receivedBytes) {
+      if (receivedBytes - windowStartBytes < minProgressBytes) return;
+      windowStartBytes = receivedBytes;
+      reset();
+    },
+    stop() {
+      clearTimeout(timer);
+    }
+  };
+}
+
 function formatBytes(bytes) {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -174,4 +212,9 @@ function formatBytes(bytes) {
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function readPositiveIntegerEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
