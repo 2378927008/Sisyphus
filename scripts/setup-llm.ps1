@@ -20,6 +20,67 @@ function Fail-Setup {
   exit 1
 }
 
+function Get-EnvUrls {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Names
+  )
+
+  $urls = @()
+  foreach ($name in $Names) {
+    $raw = [Environment]::GetEnvironmentVariable($name)
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    $urls += $raw -split "[;`r`n]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
+  }
+  return $urls
+}
+
+function Format-DownloadSource {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Url
+  )
+
+  try {
+    $uri = [Uri]$Url
+    return $uri.Host
+  } catch {
+    return "custom source"
+  }
+}
+
+function Download-WithFallback {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Urls,
+    [Parameter(Mandatory = $true)]
+    [string]$DestinationPath,
+    [Parameter(Mandatory = $true)]
+    [string]$FailureCode,
+    [Parameter(Mandatory = $true)]
+    [string]$FailureMessage
+  )
+
+  $validUrls = @($Urls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  for ($index = 0; $index -lt $validUrls.Count; $index += 1) {
+    $url = $validUrls[$index]
+    Write-Host "Downloading from $(Format-DownloadSource -Url $url)..."
+    & $NodeExe $downloadScript $url $DestinationPath
+    if ($LASTEXITCODE -eq 0) {
+      return
+    }
+
+    if ($index -lt $validUrls.Count - 1) {
+      Remove-Item -LiteralPath "$DestinationPath.part" -Force -ErrorAction SilentlyContinue
+      Write-Host "Download source failed. Trying next source..."
+    }
+  }
+
+  Fail-Setup -Code $FailureCode -Message $FailureMessage
+}
+
 $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
   $InstallDir = Join-Path $repoRoot "vendor\llm"
@@ -59,10 +120,19 @@ $asset = $assetJson | ConvertFrom-Json
 $zipPath = Join-Path $downloadDir $asset.name
 if (-not (Test-Path -LiteralPath $zipPath)) {
   Write-Host "Downloading $($asset.name)..."
-  & $NodeExe $downloadScript $asset.browser_download_url $zipPath
-  if ($LASTEXITCODE -ne 0) {
-    Fail-Setup -Code "llm_runtime_download" -Message "Failed to download $($asset.name)."
+  $runtimeOverrideUrls = @(Get-EnvUrls -Names @("LOCAL_FLOW_LLAMA_RUNTIME_URL"))
+  $runtimeUrls = @()
+  if ($runtimeOverrideUrls.Count -gt 0) {
+    $runtimeUrls += $runtimeOverrideUrls
+  } else {
+    $runtimeUrls += $asset.browser_download_url
   }
+  $runtimeUrls += Get-EnvUrls -Names @("LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS")
+  Download-WithFallback `
+    -Urls $runtimeUrls `
+    -DestinationPath $zipPath `
+    -FailureCode "llm_runtime_download" `
+    -FailureMessage "Failed to download $($asset.name)."
 } else {
   Write-Host "Using existing $zipPath"
 }
@@ -89,14 +159,20 @@ if ($server -and $server.DirectoryName -ne $binDir) {
 
 if (-not (Test-Path -LiteralPath $modelPath)) {
   Write-Host "Downloading $modelFile. This is about 2.5 GB..."
-  & $NodeExe $downloadScript $modelUrl $modelPath
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "Primary Hugging Face download failed. Trying mirror..."
-    & $NodeExe $downloadScript $modelMirrorUrl $modelPath
-    if ($LASTEXITCODE -ne 0) {
-      Fail-Setup -Code "llm_model_download" -Message "Failed to download $modelFile from primary and mirror URLs."
-    }
+  $modelOverrideUrls = @(Get-EnvUrls -Names @("LOCAL_FLOW_QWEN_MODEL_URL"))
+  $modelUrls = @()
+  if ($modelOverrideUrls.Count -gt 0) {
+    $modelUrls += $modelOverrideUrls
+  } else {
+    $modelUrls += $modelUrl
+    $modelUrls += $modelMirrorUrl
   }
+  $modelUrls += Get-EnvUrls -Names @("LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS")
+  Download-WithFallback `
+    -Urls $modelUrls `
+    -DestinationPath $modelPath `
+    -FailureCode "llm_model_download" `
+    -FailureMessage "Failed to download $modelFile from primary and mirror URLs."
 } else {
   Write-Host "Using existing $modelPath"
 }

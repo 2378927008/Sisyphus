@@ -199,16 +199,28 @@ test("setup scripts emit structured failure markers", () => {
   for (const reason of [
     "llm_release_metadata",
     "llm_release_asset_missing",
-    "llm_runtime_download",
     "llm_extract_failed",
     "llm_runtime_missing",
-    "llm_model_download"
   ]) {
     assert.match(llmScript, new RegExp(`Fail-Setup -Code "${reason}"`));
   }
+  assert.match(llmScript, /-FailureCode "llm_runtime_download"/);
+  assert.match(llmScript, /-FailureCode "llm_model_download"/);
 
   assert.match(whisperScript, /LOCAL_FLOW_SETUP_ERROR:\$Code/);
   assert.match(llmScript, /LOCAL_FLOW_SETUP_ERROR:\$Code/);
+});
+
+test("setup-llm supports deployment supplied fallback download URLs", () => {
+  const llmScript = readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8");
+
+  assert.match(llmScript, /Download-WithFallback/);
+  assert.match(llmScript, /LOCAL_FLOW_LLAMA_RUNTIME_URL/);
+  assert.match(llmScript, /LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS/);
+  assert.match(llmScript, /LOCAL_FLOW_QWEN_MODEL_URL/);
+  assert.match(llmScript, /LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS/);
+  assert.match(llmScript, /\$asset\.browser_download_url/);
+  assert.match(llmScript, /\$modelMirrorUrl/);
 });
 
 test("createModelSetupService rejects inherited setup type names without spawning", async () => {

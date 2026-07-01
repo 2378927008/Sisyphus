@@ -177,4 +177,16 @@ powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-llm.ps1
 
 The script downloads llama.cpp Windows binaries from the latest GitHub release and the Qwen3 GGUF model from Hugging Face. The app detects the installed files on next start or after `刷新安装状态`.
 
+If GitHub or Hugging Face is too slow in your network, you can point the installer at your own direct-download mirrors before running the script. These URLs should serve the same llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
+
+```powershell
+$env:LOCAL_FLOW_LLAMA_RUNTIME_URL='https://your-mirror.example/llama-bin-win-cpu-x64.zip'
+$env:LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS='https://backup.example/llama-bin-win-cpu-x64.zip'
+$env:LOCAL_FLOW_QWEN_MODEL_URL='https://your-mirror.example/Qwen3-4B-Q4_K_M.gguf'
+$env:LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS='https://backup.example/Qwen3-4B-Q4_K_M.gguf'
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-llm.ps1
+```
+
+`LOCAL_FLOW_LLAMA_RUNTIME_URL` and `LOCAL_FLOW_QWEN_MODEL_URL` replace the default primary source. The `*_MIRROR_URLS` variables add fallback sources; separate multiple URLs with semicolons or new lines. This is intended for company mirrors, local HTTP caches, or a self-hosted copy of the official files.
+
 The app stores settings locally and never sends audio or text to OpenAI.

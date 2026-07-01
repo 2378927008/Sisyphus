@@ -11,6 +11,8 @@ test("README contains readable Chinese first-run guidance", async () => {
   assert.match(readme, /安装后首次启动/);
   assert.match(readme, /Local Flow 是语音输入软件，不是默认翻译软件/);
   assert.match(readme, /输出语言.*自动.*同语音/);
+  assert.match(readme, /LOCAL_FLOW_LLAMA_RUNTIME_URL/);
+  assert.match(readme, /LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS/);
   assert.doesNotMatch(readme, /涓|鍦|璇|鐨|妯|榛/);
 });
 
