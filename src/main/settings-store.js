@@ -35,6 +35,14 @@ export const defaultSettings = {
   llmProvider: "mymemory",
   embeddedLlmCliPath: "",
   embeddedLlmModelPath: "",
+  whisperRuntimeUrl: "",
+  whisperRuntimeMirrorUrls: "",
+  whisperModelUrl: "",
+  whisperModelMirrorUrls: "",
+  llamaRuntimeUrl: "",
+  llamaRuntimeMirrorUrls: "",
+  qwenModelUrl: "",
+  qwenModelMirrorUrls: "",
   dictionary: [],
   historyLimit: 20
 };
@@ -44,6 +52,17 @@ const localAssetPathKeys = [
   "whisperModelPath",
   "embeddedLlmCliPath",
   "embeddedLlmModelPath"
+];
+
+const downloadSourceKeys = [
+  "whisperRuntimeUrl",
+  "whisperRuntimeMirrorUrls",
+  "whisperModelUrl",
+  "whisperModelMirrorUrls",
+  "llamaRuntimeUrl",
+  "llamaRuntimeMirrorUrls",
+  "qwenModelUrl",
+  "qwenModelMirrorUrls"
 ];
 
 export function createSafeStorageSecretCodec(safeStorage) {
@@ -98,6 +117,9 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   merged.llmProvider = normalizeTextProvider(merged.llmProvider);
   merged.cloudApiBaseUrl = String(merged.cloudApiBaseUrl || "").trim();
   merged.cloudApiKey = String(merged.cloudApiKey || "").trim();
+  for (const key of downloadSourceKeys) {
+    merged[key] = String(merged[key] || "").trim();
+  }
   merged.providerStatus = getProcessingProviderStatus(merged);
 
   return merged;

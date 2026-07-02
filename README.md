@@ -84,6 +84,8 @@ Local Flow 是语音输入软件，不是默认翻译软件。输出语言为 `�
 
 录音前必须配置 Whisper 语音模型。如果首页的 `开始录音` 按钮不可用，先点击 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。Qwen3 是可选的本地文本模型，不是录音必需项；默认试用可以先不安装 Qwen。
 
+如果 `安装 Whisper` 或 `安装 Qwen` 因 GitHub / Hugging Face 网络问题失败，打开 `设置` > `模型下载源`，填入可直连的主下载地址或备用镜像地址后重试。留空会继续使用默认官方源；多个备用地址可用分号或换行分隔。
+
 ## Startup And Tray Behavior
 
 The installed app keeps running from the tray when the main window is closed. Use the tray menu to show Local Flow, start or stop dictation, pause or resume the global shortcut, toggle launch at login, toggle start minimized to tray, open settings, or quit.
@@ -151,6 +153,7 @@ In the app settings:
 - `Whisper 模型文件`: full path to a `.bin` model file.
 - `文本模型提供方`: defaults to `MyMemory Free`. With `输出语言=自动`, the app keeps the spoken language and uses local cleanup. When a target output language is selected, MyMemory Free is used for target-language output.
 - `Ollama` / `内置 Qwen3`: optional advanced fallbacks. If you use Ollama, set a model such as `qwen3:4b`.
+- `模型下载源`: optional direct-download URLs for Whisper, llama.cpp, and Qwen. Leave blank for the official defaults; use it only when GitHub or Hugging Face downloads fail.
 
 You can download the Windows x64 whisper.cpp build and a multilingual model into `vendor/whisper`:
 
@@ -159,6 +162,16 @@ powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-whisper.ps1 -Model 
 ```
 
 After it finishes, click `刷新安装状态` or copy the printed executable and model paths into the app settings and click `检查本地 Whisper`.
+
+If GitHub or Hugging Face is too slow in your network, configure `设置` > `模型下载源` before clicking `安装 Whisper`, or pass direct-download mirrors to the script:
+
+```powershell
+$env:LOCAL_FLOW_WHISPER_RUNTIME_URL='https://your-mirror.example/whisper-bin-x64.zip'
+$env:LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS='https://backup.example/whisper-bin-x64.zip'
+$env:LOCAL_FLOW_WHISPER_MODEL_URL='https://your-mirror.example/ggml-base.bin'
+$env:LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS='https://backup.example/ggml-base.bin'
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-whisper.ps1 -Model base
+```
 
 ## Optional Built-in Local Language Model
 
@@ -177,7 +190,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-llm.ps1
 
 The script downloads llama.cpp Windows binaries from the latest GitHub release and the Qwen3 GGUF model from Hugging Face. The app detects the installed files on next start or after `刷新安装状态`.
 
-If GitHub or Hugging Face is too slow in your network, you can point the installer at your own direct-download mirrors before running the script. These URLs should serve the same llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
+If GitHub or Hugging Face is too slow in your network, configure `设置` > `模型下载源` before clicking `安装 Qwen`, or point the installer at your own direct-download mirrors before running the script. These URLs should serve the same llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
 
 ```powershell
 $env:LOCAL_FLOW_LLAMA_RUNTIME_URL='https://your-mirror.example/llama-bin-win-cpu-x64.zip'

@@ -9,7 +9,7 @@ import { detectWhisperAssets } from "./whisper-assets.js";
 import { configureMediaPermissions } from "./media-permissions.js";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { getProcessingProviderStatus } from "./provider-registry.js";
-import { createModelSetupService } from "./model-setup.js";
+import { buildSetupDownloadEnv, createModelSetupService } from "./model-setup.js";
 import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
 import { createSystemInputController } from "./system-input-controller.js";
@@ -382,9 +382,10 @@ app.whenReady().then(async () => {
     scriptRootPath: appRoot,
     assetRootPath: runtimeRoot,
     nodeExecutable: process.execPath,
-    setupEnv: {
-      ELECTRON_RUN_AS_NODE: "1"
-    }
+    setupEnv: async () => ({
+      ELECTRON_RUN_AS_NODE: "1",
+      ...buildSetupDownloadEnv(await settingsStore.getSettings())
+    })
   });
   systemInputController = createSystemInputController({
     sendToMain: sendSystemInputStatus,

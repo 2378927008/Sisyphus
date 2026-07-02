@@ -159,6 +159,43 @@
           </section>
 
           <section class="drawer-section">
+            <h3 data-i18n="section.downloadSources">模型下载源</h3>
+            <p class="drawer-hint" data-i18n="hint.downloadSources">留空使用默认官方源；多个备用地址可用分号或换行分隔。</p>
+            <label>
+              <span data-i18n="label.whisperRuntimeUrl">Whisper 运行时主下载地址</span>
+              <input id="whisperRuntimeUrl" name="whisperRuntimeUrl" placeholder="https://github.com/.../whisper-bin-x64.zip" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperRuntimeMirrorUrls">Whisper 运行时备用镜像地址</span>
+              <textarea id="whisperRuntimeMirrorUrls" name="whisperRuntimeMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelUrl">Whisper 模型主下载地址</span>
+              <input id="whisperModelUrl" name="whisperModelUrl" placeholder="https://huggingface.co/.../ggml-base.bin" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelMirrorUrls">Whisper 模型备用镜像地址</span>
+              <textarea id="whisperModelMirrorUrls" name="whisperModelMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.llamaRuntimeUrl">llama.cpp 运行时主下载地址</span>
+              <input id="llamaRuntimeUrl" name="llamaRuntimeUrl" placeholder="https://github.com/.../llama-...zip" />
+            </label>
+            <label>
+              <span data-i18n="label.llamaRuntimeMirrorUrls">llama.cpp 运行时备用镜像地址</span>
+              <textarea id="llamaRuntimeMirrorUrls" name="llamaRuntimeMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.qwenModelUrl">Qwen 模型主下载地址</span>
+              <input id="qwenModelUrl" name="qwenModelUrl" placeholder="https://huggingface.co/.../Qwen3-4B-Q4_K_M.gguf" />
+            </label>
+            <label>
+              <span data-i18n="label.qwenModelMirrorUrls">Qwen 模型备用镜像地址</span>
+              <textarea id="qwenModelMirrorUrls" name="qwenModelMirrorUrls" rows="2"></textarea>
+            </label>
+          </section>
+
+          <section class="drawer-section">
             <h3 data-i18n="section.localCleanup">文本整理</h3>
             <label>
               <span data-i18n="label.polishMode">处理模式</span>

@@ -830,6 +830,14 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     llmProvider: data.get("llmProvider"),
     embeddedLlmCliPath: data.get("embeddedLlmCliPath"),
     embeddedLlmModelPath: data.get("embeddedLlmModelPath"),
+    whisperRuntimeUrl: data.get("whisperRuntimeUrl"),
+    whisperRuntimeMirrorUrls: data.get("whisperRuntimeMirrorUrls"),
+    whisperModelUrl: data.get("whisperModelUrl"),
+    whisperModelMirrorUrls: data.get("whisperModelMirrorUrls"),
+    llamaRuntimeUrl: data.get("llamaRuntimeUrl"),
+    llamaRuntimeMirrorUrls: data.get("llamaRuntimeMirrorUrls"),
+    qwenModelUrl: data.get("qwenModelUrl"),
+    qwenModelMirrorUrls: data.get("qwenModelMirrorUrls"),
     dictionary: data.get("dictionary")
   };
 

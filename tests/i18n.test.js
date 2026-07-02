@@ -88,6 +88,14 @@ test("getUiText returns localized record recovery actions", () => {
   );
 });
 
+test("getUiText returns model download source labels", () => {
+  assert.equal(getUiText("en", "section.downloadSources"), "Model download sources");
+  assert.equal(getUiText("zh-Hans", "section.downloadSources"), "模型下载源");
+  assert.match(getUiText("en", "hint.downloadSources"), /Leave blank/);
+  assert.match(getUiText("zh-Hans", "hint.downloadSources"), /留空/);
+  assert.equal(getUiText("zh-Hans", "label.qwenModelMirrorUrls"), "Qwen 模型备用镜像地址");
+});
+
 test("localized UI resources do not contain common mojibake artifacts", () => {
   for (const [language, dictionary] of Object.entries(uiTranslations)) {
     for (const [key, value] of Object.entries(dictionary)) {

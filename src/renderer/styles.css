@@ -386,6 +386,13 @@ textarea {
   border-bottom: 1px solid var(--line);
 }
 
+.drawer-hint {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .drawer-section label + label,
 .drawer-section .button-row,
 .drawer-section .model-status,

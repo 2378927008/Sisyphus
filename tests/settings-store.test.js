@@ -317,6 +317,38 @@ test("saveSettings persists Windows productization settings", async () => {
   }
 });
 
+test("saveSettings persists model download source settings", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+
+    await store.saveSettings({
+      whisperRuntimeUrl: " https://mirror.example/whisper.zip ",
+      whisperRuntimeMirrorUrls: "https://backup.example/whisper.zip",
+      whisperModelUrl: "https://mirror.example/ggml-base.bin",
+      whisperModelMirrorUrls: "https://backup.example/ggml-base.bin",
+      llamaRuntimeUrl: "https://mirror.example/llama.zip",
+      llamaRuntimeMirrorUrls: "https://backup.example/llama.zip",
+      qwenModelUrl: "https://mirror.example/Qwen3-4B-Q4_K_M.gguf",
+      qwenModelMirrorUrls: "https://backup.example/Qwen3-4B-Q4_K_M.gguf"
+    });
+
+    const settings = await store.getSettings();
+
+    assert.equal(settings.whisperRuntimeUrl, "https://mirror.example/whisper.zip");
+    assert.equal(settings.whisperRuntimeMirrorUrls, "https://backup.example/whisper.zip");
+    assert.equal(settings.whisperModelUrl, "https://mirror.example/ggml-base.bin");
+    assert.equal(settings.whisperModelMirrorUrls, "https://backup.example/ggml-base.bin");
+    assert.equal(settings.llamaRuntimeUrl, "https://mirror.example/llama.zip");
+    assert.equal(settings.llamaRuntimeMirrorUrls, "https://backup.example/llama.zip");
+    assert.equal(settings.qwenModelUrl, "https://mirror.example/Qwen3-4B-Q4_K_M.gguf");
+    assert.equal(settings.qwenModelMirrorUrls, "https://backup.example/Qwen3-4B-Q4_K_M.gguf");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("getSettings redacts cloud credentials unless secrets are explicitly requested", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
 

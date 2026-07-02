@@ -48,6 +48,26 @@ test("renderer fallback markup uses readable Chinese copy", async () => {
   assert.doesNotMatch(html, mojibakePattern);
 });
 
+test("settings drawer exposes configurable model download sources", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  for (const field of [
+    "whisperRuntimeUrl",
+    "whisperRuntimeMirrorUrls",
+    "whisperModelUrl",
+    "whisperModelMirrorUrls",
+    "llamaRuntimeUrl",
+    "llamaRuntimeMirrorUrls",
+    "qwenModelUrl",
+    "qwenModelMirrorUrls"
+  ]) {
+    assert.match(html, new RegExp(`name="${field}"`), field);
+  }
+
+  assert.match(html, /data-i18n="section.downloadSources"/);
+  assert.match(html, /data-i18n="hint.downloadSources"/);
+});
+
 test("HUD fallback markup uses readable Chinese copy", async () => {
   const html = await readFile(new URL("../src/renderer/hud.html", import.meta.url), "utf8");
 

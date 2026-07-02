@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  buildSetupDownloadEnv,
   createModelSetupService,
   getModelSetupScript,
   killSetupProcessTree
@@ -188,13 +189,13 @@ test("setup scripts emit structured failure markers", () => {
   for (const reason of [
     "whisper_release_metadata",
     "whisper_release_asset_missing",
-    "whisper_runtime_download",
     "whisper_extract_failed",
     "whisper_runtime_missing",
-    "whisper_model_download"
   ]) {
     assert.match(whisperScript, new RegExp(`Fail-Setup -Code "${reason}"`));
   }
+  assert.match(whisperScript, /-FailureCode "whisper_runtime_download"/);
+  assert.match(whisperScript, /-FailureCode "whisper_model_download"/);
 
   for (const reason of [
     "llm_release_metadata",
@@ -221,6 +222,69 @@ test("setup-llm supports deployment supplied fallback download URLs", () => {
   assert.match(llmScript, /LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS/);
   assert.match(llmScript, /\$asset\.browser_download_url/);
   assert.match(llmScript, /\$modelMirrorUrl/);
+});
+
+test("setup-whisper supports deployment supplied fallback download URLs", () => {
+  const whisperScript = readFileSync(path.join(process.cwd(), "scripts", "setup-whisper.ps1"), "utf8");
+
+  assert.match(whisperScript, /Download-WithFallback/);
+  assert.match(whisperScript, /LOCAL_FLOW_WHISPER_RUNTIME_URL/);
+  assert.match(whisperScript, /LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS/);
+  assert.match(whisperScript, /LOCAL_FLOW_WHISPER_MODEL_URL/);
+  assert.match(whisperScript, /LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS/);
+  assert.match(whisperScript, /\$asset\.browser_download_url/);
+  assert.match(whisperScript, /\$modelMirrorUrl/);
+});
+
+test("buildSetupDownloadEnv maps saved download source settings to setup environment", () => {
+  assert.deepEqual(buildSetupDownloadEnv({
+    whisperRuntimeUrl: " https://mirror.example/whisper.zip ",
+    whisperRuntimeMirrorUrls: "https://backup.example/whisper.zip",
+    whisperModelUrl: "https://mirror.example/ggml-base.bin",
+    whisperModelMirrorUrls: "https://backup.example/ggml-base.bin",
+    llamaRuntimeUrl: "https://mirror.example/llama.zip",
+    llamaRuntimeMirrorUrls: "https://backup.example/llama.zip",
+    qwenModelUrl: "https://mirror.example/Qwen3-4B-Q4_K_M.gguf",
+    qwenModelMirrorUrls: "https://backup.example/Qwen3-4B-Q4_K_M.gguf"
+  }), {
+    LOCAL_FLOW_WHISPER_RUNTIME_URL: "https://mirror.example/whisper.zip",
+    LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS: "https://backup.example/whisper.zip",
+    LOCAL_FLOW_WHISPER_MODEL_URL: "https://mirror.example/ggml-base.bin",
+    LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS: "https://backup.example/ggml-base.bin",
+    LOCAL_FLOW_LLAMA_RUNTIME_URL: "https://mirror.example/llama.zip",
+    LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS: "https://backup.example/llama.zip",
+    LOCAL_FLOW_QWEN_MODEL_URL: "https://mirror.example/Qwen3-4B-Q4_K_M.gguf",
+    LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS: "https://backup.example/Qwen3-4B-Q4_K_M.gguf"
+  });
+
+  assert.deepEqual(buildSetupDownloadEnv({
+    whisperRuntimeUrl: " ",
+    qwenModelUrl: null
+  }), {});
+});
+
+test("createModelSetupService resolves setupEnv before spawning each setup", async () => {
+  const spawned = [];
+  const service = createModelSetupService({
+    rootPath: "C:/app",
+    setupEnv: async (type) => ({
+      ELECTRON_RUN_AS_NODE: "1",
+      LOCAL_FLOW_SETUP_TYPE: type,
+      LOCAL_FLOW_QWEN_MODEL_URL: "https://mirror.example/qwen.gguf"
+    }),
+    spawn: (file, args, options) => {
+      spawned.push({ file, args, options });
+      return fakeChildProcess({ code: 0, stdout: ["ok"] });
+    },
+    refreshAssets: async () => readyAssets()
+  });
+
+  const result = await service.start("llm");
+
+  assert.equal(result.status, "complete");
+  assert.equal(spawned[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(spawned[0].options.env.LOCAL_FLOW_SETUP_TYPE, "llm");
+  assert.equal(spawned[0].options.env.LOCAL_FLOW_QWEN_MODEL_URL, "https://mirror.example/qwen.gguf");
 });
 
 test("createModelSetupService rejects inherited setup type names without spawning", async () => {

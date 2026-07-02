@@ -18,6 +18,30 @@ const setupScripts = {
   }
 };
 
+const setupDownloadEnvKeys = {
+  whisperRuntimeUrl: "LOCAL_FLOW_WHISPER_RUNTIME_URL",
+  whisperRuntimeMirrorUrls: "LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS",
+  whisperModelUrl: "LOCAL_FLOW_WHISPER_MODEL_URL",
+  whisperModelMirrorUrls: "LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS",
+  llamaRuntimeUrl: "LOCAL_FLOW_LLAMA_RUNTIME_URL",
+  llamaRuntimeMirrorUrls: "LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS",
+  qwenModelUrl: "LOCAL_FLOW_QWEN_MODEL_URL",
+  qwenModelMirrorUrls: "LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS"
+};
+
+export function buildSetupDownloadEnv(settings = {}) {
+  const env = {};
+
+  for (const [settingKey, envKey] of Object.entries(setupDownloadEnvKeys)) {
+    const value = String(settings?.[settingKey] || "").trim();
+    if (value) {
+      env[envKey] = value;
+    }
+  }
+
+  return env;
+}
+
 export function getModelSetupScript(type, setupRoot) {
   if (!Object.hasOwn(setupScripts, type)) {
     return null;
@@ -90,6 +114,7 @@ export function createModelSetupService({
 
     let result;
     try {
+      const resolvedSetupEnv = await resolveSetupEnv(setupEnv, type);
       result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree, (output) => {
         const current = state.get(type);
         if (current?.status === "running") {
@@ -101,7 +126,7 @@ export function createModelSetupService({
       }, (controls) => {
         activeRun.cancel = controls.cancel;
         activeRun.getOutput = controls.getOutput;
-      }, setupEnv);
+      }, resolvedSetupEnv);
     } catch (error) {
       if (activeRun.cancelled) {
         return getStatus(type);
@@ -218,6 +243,11 @@ export function createModelSetupService({
     refresh,
     getStatus
   };
+}
+
+async function resolveSetupEnv(setupEnv, type) {
+  const value = typeof setupEnv === "function" ? await setupEnv(type) : setupEnv;
+  return value && typeof value === "object" ? value : undefined;
 }
 
 function resolveSetupRoots(setupRoot) {

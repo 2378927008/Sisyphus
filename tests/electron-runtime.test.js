@@ -436,7 +436,7 @@ test("preload exposes safe renderer recording status reporting without raw ipcRe
 test("main process delegates model setup IPC wiring to the setup IPC module", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
-  assert.match(mainSource, /import \{ createModelSetupService \} from "\.\/model-setup\.js";/);
+  assert.match(mainSource, /import \{[^}]*createModelSetupService[^}]*\} from "\.\/model-setup\.js";/);
   assert.match(mainSource, /import \{ wireModelSetupIpc \} from "\.\/model-setup-ipc\.js";/);
   assert.match(mainSource, /let modelSetupService;/);
   assert.match(mainSource, /modelSetupService = createModelSetupService\(\{/);
@@ -496,7 +496,9 @@ test("main process wires packaged runtime roots into asset detection and setup",
   assert.match(modelSetupMatch.groups.body, /scriptRootPath: appRoot/);
   assert.match(modelSetupMatch.groups.body, /assetRootPath: runtimeRoot/);
   assert.match(modelSetupMatch.groups.body, /nodeExecutable: process\.execPath/);
-  assert.match(modelSetupMatch.groups.body, /setupEnv:\s*\{\s*ELECTRON_RUN_AS_NODE: "1"\s*\}/);
+  assert.match(modelSetupMatch.groups.body, /setupEnv:\s*async\s*\(\)\s*=>/);
+  assert.match(modelSetupMatch.groups.body, /ELECTRON_RUN_AS_NODE: "1"/);
+  assert.match(modelSetupMatch.groups.body, /buildSetupDownloadEnv\(await settingsStore\.getSettings\(\)\)/);
 });
 
 test("main process delegates hotkeys startup settings and tray state to product modules", async () => {
@@ -751,6 +753,10 @@ test("renderer sends Windows productization fields when settings form saves", as
   assert.match(saveSettingsMatch.groups.body, /globalShortcutPaused:\s*form\.globalShortcutPaused\.checked/);
   assert.match(saveSettingsMatch.groups.body, /launchAtLogin:\s*form\.launchAtLogin\.checked/);
   assert.match(saveSettingsMatch.groups.body, /startMinimizedToTray:\s*form\.startMinimizedToTray\.checked/);
+  assert.match(saveSettingsMatch.groups.body, /whisperRuntimeUrl:\s*data\.get\("whisperRuntimeUrl"\)/);
+  assert.match(saveSettingsMatch.groups.body, /whisperModelMirrorUrls:\s*data\.get\("whisperModelMirrorUrls"\)/);
+  assert.match(saveSettingsMatch.groups.body, /llamaRuntimeUrl:\s*data\.get\("llamaRuntimeUrl"\)/);
+  assert.match(saveSettingsMatch.groups.body, /qwenModelMirrorUrls:\s*data\.get\("qwenModelMirrorUrls"\)/);
 });
 
 test("renderer resets stale recording operations and ignores late completions", async () => {
