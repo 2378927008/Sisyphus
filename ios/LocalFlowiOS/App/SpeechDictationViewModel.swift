@@ -4,6 +4,13 @@ import Foundation
 import LocalFlowCore
 import Speech
 
+struct DeviceReadinessItem: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let isReady: Bool
+}
+
 @MainActor
 final class SpeechDictationViewModel: ObservableObject {
     @Published var settings = DictationSettings()
@@ -12,6 +19,8 @@ final class SpeechDictationViewModel: ObservableObject {
     @Published var statusText = "Checking permissions..."
     @Published var isRecording = false
     @Published var canRecord = false
+    @Published var microphonePermissionGranted = false
+    @Published var speechPermissionGranted = false
     @Published var history: [DictationHistoryItem] = []
 
     private let audioEngine = AVAudioEngine()
@@ -22,12 +31,39 @@ final class SpeechDictationViewModel: ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
 
+    var deviceReadinessItems: [DeviceReadinessItem] {
+        [
+            DeviceReadinessItem(
+                id: "microphone",
+                title: "Microphone",
+                detail: microphonePermissionGranted
+                    ? "Allowed for this app."
+                    : "Allow microphone access in iPhone Settings.",
+                isReady: microphonePermissionGranted
+            ),
+            DeviceReadinessItem(
+                id: "speech-recognition",
+                title: "Speech Recognition",
+                detail: speechPermissionGranted
+                    ? "Apple Speech permission is enabled."
+                    : "Allow speech recognition so Local Flow can transcribe locally through Apple Speech.",
+                isReady: speechPermissionGranted
+            ),
+            DeviceReadinessItem(
+                id: "keyboard-extension",
+                title: "Local Flow Keyboard",
+                detail: "Enable Local Flow Keyboard in Settings > General > Keyboard > Keyboards, then turn on Allow Full Access.",
+                isReady: false
+            )
+        ]
+    }
+
     func requestPermissions() async {
         loadHistory()
-        let microphoneGranted = await requestMicrophonePermission()
-        let speechGranted = await requestSpeechPermission()
+        microphonePermissionGranted = await requestMicrophonePermission()
+        speechPermissionGranted = await requestSpeechPermission()
 
-        canRecord = microphoneGranted && speechGranted
+        canRecord = microphonePermissionGranted && speechPermissionGranted
         statusText = canRecord
             ? "Ready. Auto output keeps the speech language."
             : "Microphone or speech recognition permission is disabled."

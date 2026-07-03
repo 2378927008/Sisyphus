@@ -44,6 +44,12 @@ After signing is configured, a command-line smoke build should look like:
 xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
+## Device Trial Checklist
+
+Use `docs/release/iphone-device-trial-checklist.md` before handing the app to a tester. It covers Signing & Capabilities, the `group.com.localflow.dictation` App Group, microphone and speech recognition prompts, and the Local Flow Keyboard setup path.
+
+For the keyboard extension, install and run the host app once, then open `Settings > General > Keyboard > Keyboards`, add `Local Flow Keyboard`, and enable `Allow Full Access`.
+
 ## Cloud macOS Validation
 
 For a Windows-only development machine, GitHub Actions provides the first cloud macOS validation gate in `.github/workflows/iphone-smoke.yml`.

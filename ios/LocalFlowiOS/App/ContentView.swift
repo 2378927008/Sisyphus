@@ -4,19 +4,22 @@ import UIKit
 
 struct ContentView: View {
     @ObservedObject var model: SpeechDictationViewModel
-    @State private var shareText = ""
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                providerHeader
-                languageControls
-                recordButton
-                resultEditor
-                actions
-                historyList
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    providerHeader
+                    recordingSurface
+                    resultEditor
+                    actions
+                    languageControls
+                    deviceReadinessPanel
+                    keyboardSetupGuide
+                    historyList
+                }
+                .padding()
             }
-            .padding()
             .navigationTitle("Local Flow")
             .task {
                 await model.requestPermissions()
@@ -26,8 +29,8 @@ struct ContentView: View {
 
     private var providerHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("System Apple Speech")
-                .font(.headline)
+            Text("Voice Input")
+                .font(.title2.weight(.semibold))
             Text(model.statusText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -35,44 +38,72 @@ struct ContentView: View {
     }
 
     private var languageControls: some View {
-        VStack(spacing: 12) {
-            Picker("Recognition", selection: $model.settings.recognitionLanguage) {
-                ForEach(RecognitionLanguage.allCases) { language in
-                    Text(language.rawValue).tag(language)
-                }
-            }
-            .pickerStyle(.menu)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Language")
+                .font(.headline)
 
-            Picker("Output", selection: $model.settings.outputSelection) {
-                ForEach(LocalFlowLanguage.supportedOutputLanguages) { language in
-                    Text(language.rawValue).tag(language)
+            HStack {
+                Picker("Recognition", selection: $model.settings.recognitionLanguage) {
+                    ForEach(RecognitionLanguage.allCases) { language in
+                        Text(language.rawValue).tag(language)
+                    }
                 }
+                .pickerStyle(.menu)
+
+                Picker("Output", selection: $model.settings.outputSelection) {
+                    ForEach(LocalFlowLanguage.supportedOutputLanguages) { language in
+                        Text(language.rawValue).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
             }
-            .pickerStyle(.menu)
         }
     }
 
-    private var recordButton: some View {
-        Button {
-            Task {
-                await model.toggleRecording()
+    private var recordingSurface: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.isRecording ? "Listening" : "Ready to dictate")
+                        .font(.headline)
+                    Text("System Apple Speech")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Circle()
+                    .fill(model.isRecording ? Color.red : Color.accentColor)
+                    .frame(width: 12, height: 12)
             }
-        } label: {
-            Text(model.isRecording ? "Stop" : "Record")
-                .font(.title2.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 72)
+
+            Button {
+                Task {
+                    await model.toggleRecording()
+                }
+            } label: {
+                Text(model.isRecording ? "Stop Dictation" : "Start Dictation")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 68)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.canRecord)
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(!model.canRecord)
     }
 
     private var resultEditor: some View {
-        TextEditor(text: $model.editableText)
-            .frame(minHeight: 180)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.quaternary)
-            )
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Result")
+                .font(.headline)
+            TextEditor(text: $model.editableText)
+                .frame(minHeight: 180)
+                .padding(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.quaternary)
+                )
+        }
     }
 
     private var actions: some View {
@@ -90,6 +121,44 @@ struct ContentView: View {
         }
     }
 
+    private var deviceReadinessPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Device setup")
+                    .font(.headline)
+                Spacer()
+                Button("Open iPhone Settings") {
+                    openSystemSettings()
+                }
+                .font(.subheadline)
+            }
+
+            ForEach(model.deviceReadinessItems) { item in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: item.isReady ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .foregroundStyle(item.isReady ? .green : .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                        Text(item.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var keyboardSetupGuide: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Enable Local Flow Keyboard")
+                .font(.headline)
+            Text("Settings > General > Keyboard > Keyboards > Add New Keyboard > Local Flow Keyboard, then enable Allow Full Access.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -102,7 +171,7 @@ struct ContentView: View {
                 .disabled(model.history.isEmpty)
             }
 
-            List(model.history.prefix(5)) { item in
+            ForEach(model.history.prefix(5)) { item in
                 Button {
                     model.editableText = item.text
                 } label: {
@@ -115,7 +184,11 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(minHeight: 160)
         }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }

@@ -91,6 +91,18 @@ function buildReleaseRequirements(pkg) {
       minBytes: 512,
       area: "iphone-intent-handoff"
     },
+    {
+      path: "docs/release/iphone-device-trial-checklist.md",
+      minBytes: 1024,
+      area: "iphone-device-trial",
+      contentIncludes: [
+        "Signing & Capabilities",
+        "group.com.localflow.dictation",
+        "NSMicrophoneUsageDescription",
+        "NSSpeechRecognitionUsageDescription",
+        "Settings > General > Keyboard > Keyboards"
+      ]
+    },
     { path: "docs/release/product-trial-guide.md", minBytes: 1024, area: "trial-guide" }
   ];
 }

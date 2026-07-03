@@ -42,6 +42,7 @@ test("product readiness script checks Windows release and iPhone handoff artifac
   assert.match(readinessSource, /ios\/LocalFlowiOS\/Intents\/DictateToClipboardIntent\.swift/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/App\/Info\.plist/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/Keyboard\/Info\.plist/);
+  assert.match(readinessSource, /docs\/release\/iphone-device-trial-checklist\.md/);
   assert.match(readinessSource, /manualValidationRequired/);
 });
 
@@ -63,6 +64,20 @@ test("product trial guide gives a concrete Windows and iPhone trial path", async
   assert.match(guide, /local-flow-windows-installer/);
   assert.match(guide, /Apple Speech/);
   assert.match(guide, /xcodebuild/);
+});
+
+test("iPhone device trial checklist covers signing permissions and keyboard setup", async () => {
+  const checklist = await readFile(new URL("../docs/release/iphone-device-trial-checklist.md", import.meta.url), "utf8");
+
+  assert.match(checklist, /XcodeGen/);
+  assert.match(checklist, /Signing & Capabilities/);
+  assert.match(checklist, /group\.com\.localflow\.dictation/);
+  assert.match(checklist, /NSMicrophoneUsageDescription/);
+  assert.match(checklist, /NSSpeechRecognitionUsageDescription/);
+  assert.match(checklist, /Settings > General > Keyboard > Keyboards/);
+  assert.match(checklist, /Allow Full Access/);
+  assert.match(checklist, /Local Flow Keyboard/);
+  assert.match(checklist, /localflow:\/\/quick-dictation/);
 });
 
 test("electron-builder configuration targets Local Flow Windows NSIS builds", async () => {

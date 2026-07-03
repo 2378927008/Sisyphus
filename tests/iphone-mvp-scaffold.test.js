@@ -207,3 +207,31 @@ test("iPhone source handoff includes an XcodeGen project for host app and keyboa
   assert.match(readme, /XcodeGen/);
   assert.match(readme, /xcodegen generate --spec ios\/LocalFlowiOS\/project\.yml/);
 });
+
+test("iPhone app surfaces real device readiness and keyboard setup guidance", async () => {
+  const viewModel = await readIosFile("App", "SpeechDictationViewModel.swift");
+  const contentView = await readIosFile("App", "ContentView.swift");
+  const readme = await readIosFile("README.md");
+
+  assert.match(viewModel, /struct DeviceReadinessItem/);
+  assert.match(viewModel, /@Published var microphonePermissionGranted/);
+  assert.match(viewModel, /@Published var speechPermissionGranted/);
+  assert.match(viewModel, /var deviceReadinessItems: \[DeviceReadinessItem\]/);
+  assert.match(viewModel, /Settings > General > Keyboard > Keyboards/);
+  assert.match(viewModel, /Allow Full Access/);
+
+  assert.match(contentView, /ScrollView/);
+  assert.match(contentView, /recordingSurface/);
+  assert.match(contentView, /deviceReadinessPanel/);
+  assert.match(contentView, /keyboardSetupGuide/);
+  assert.match(contentView, /ForEach\(model\.deviceReadinessItems\)/);
+  assert.match(contentView, /UIApplication\.openSettingsURLString/);
+  assert.match(contentView, /Open iPhone Settings/);
+  assert.match(contentView, /Enable Local Flow Keyboard/);
+  assert.match(contentView, /Settings > General > Keyboard > Keyboards/);
+
+  assert.match(readme, /Device Trial Checklist/);
+  assert.match(readme, /Signing & Capabilities/);
+  assert.match(readme, /Local Flow Keyboard/);
+  assert.match(readme, /Settings > General > Keyboard > Keyboards/);
+});
