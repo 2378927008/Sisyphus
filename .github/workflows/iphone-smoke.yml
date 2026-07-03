@@ -31,6 +31,12 @@ jobs:
       - name: Show Swift toolchain
         run: swift --version
 
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec ios/LocalFlowiOS/project.yml
+
       - name: Test LocalFlowCore Swift package
         working-directory: ios/LocalFlowiOS/LocalFlowCore
         run: swift test

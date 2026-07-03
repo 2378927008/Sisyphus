@@ -14,6 +14,8 @@ test("GitHub Actions defines a macOS iPhone source smoke workflow", async () => 
   assert.match(workflow, /actions\/setup-node@v4/);
   assert.match(workflow, /node-version:\s*22/);
   assert.match(workflow, /swift --version/);
+  assert.match(workflow, /brew install xcodegen/);
+  assert.match(workflow, /xcodegen generate --spec ios\/LocalFlowiOS\/project\.yml/);
   assert.match(workflow, /working-directory:\s*ios\/LocalFlowiOS\/LocalFlowCore/);
   assert.match(workflow, /swift test/);
   assert.match(workflow, /node --test tests\/iphone-mvp-scaffold\.test\.js/);

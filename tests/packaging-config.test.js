@@ -35,6 +35,7 @@ test("product readiness script checks Windows release and iPhone handoff artifac
   assert.match(readinessSource, /SFSpeechRecognizer/);
   assert.match(readinessSource, /group\.com\.localflow\.dictation/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/README\.md/);
+  assert.match(readinessSource, /ios\/LocalFlowiOS\/project\.yml/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/LocalFlowCore\/Package\.swift/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/App\/SpeechDictationViewModel\.swift/);
   assert.match(readinessSource, /ios\/LocalFlowiOS\/Keyboard\/KeyboardViewController\.swift/);
@@ -96,6 +97,7 @@ test("build output directories stay ignored by git", async () => {
 
   assert.ok(ignoredEntries.includes("dist/"));
   assert.ok(ignoredEntries.includes("out/"));
+  assert.ok(ignoredEntries.includes("ios/LocalFlowiOS/*.xcodeproj/"));
 });
 
 test("vendor placeholder can be committed without allowing real vendor contents", async () => {

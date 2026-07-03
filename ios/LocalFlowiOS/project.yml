@@ -1,0 +1,62 @@
+name: LocalFlowiOS
+
+options:
+  bundleIdPrefix: com.localflow
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.1.0"
+
+packages:
+  LocalFlowCore:
+    path: LocalFlowCore
+
+targets:
+  LocalFlowiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App
+      - path: Intents
+    dependencies:
+      - package: LocalFlowCore
+      - target: LocalFlowKeyboard
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.localflow.dictation
+        PRODUCT_NAME: Local Flow
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/LocalFlowiOS.entitlements
+
+  LocalFlowKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Keyboard
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.localflow.dictation.keyboard
+        PRODUCT_NAME: Local Flow Keyboard
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Keyboard/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Keyboard/LocalFlowKeyboard.entitlements
+
+schemes:
+  LocalFlowiOS:
+    build:
+      targets:
+        LocalFlowiOS: all
+        LocalFlowKeyboard: all
+    run:
+      config: Debug
+    test:
+      config: Debug

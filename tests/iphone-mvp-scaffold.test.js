@@ -19,6 +19,7 @@ async function readIosFile(...parts) {
 test("iPhone MVP source tree includes app core keyboard and intent slices", () => {
   for (const file of [
     "README.md",
+    "project.yml",
     "LocalFlowCore/Package.swift",
     "LocalFlowCore/Sources/LocalFlowCore/LocalFlowLanguage.swift",
     "LocalFlowCore/Sources/LocalFlowCore/DictationModels.swift",
@@ -168,4 +169,41 @@ test("iPhone history persists locally through an app group store", async () => {
   assert.match(viewModel, /func clearHistory\(\)/);
   assert.match(contentView, /Clear history/);
   assert.match(contentView, /model\.clearHistory\(\)/);
+});
+
+test("iPhone source handoff includes an XcodeGen project for host app and keyboard extension", async () => {
+  const project = await readIosFile("project.yml");
+  const readme = await readIosFile("README.md");
+
+  assert.match(project, /name:\s*LocalFlowiOS/);
+  assert.match(project, /deploymentTarget:/);
+  assert.match(project, /iOS:\s*"?17\.0"?/);
+  assert.match(project, /packages:/);
+  assert.match(project, /LocalFlowCore:/);
+  assert.match(project, /path:\s*LocalFlowCore/);
+
+  assert.match(project, /LocalFlowiOS:/);
+  assert.match(project, /type:\s*application/);
+  assert.match(project, /sources:\s*\n\s*-\s*path:\s*App/);
+  assert.match(project, /-\s*path:\s*Intents/);
+  assert.match(project, /App\/Info\.plist/);
+  assert.match(project, /App\/LocalFlowiOS\.entitlements/);
+  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER:\s*com\.localflow\.dictation/);
+  assert.match(project, /GENERATE_INFOPLIST_FILE:\s*NO/);
+  assert.match(project, /INFOPLIST_FILE:\s*App\/Info\.plist/);
+  assert.match(project, /CODE_SIGN_ENTITLEMENTS:\s*App\/LocalFlowiOS\.entitlements/);
+
+  assert.match(project, /LocalFlowKeyboard:/);
+  assert.match(project, /type:\s*app-extension/);
+  assert.match(project, /Keyboard\/Info\.plist/);
+  assert.match(project, /Keyboard\/LocalFlowKeyboard\.entitlements/);
+  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER:\s*com\.localflow\.dictation\.keyboard/);
+  assert.match(project, /INFOPLIST_FILE:\s*Keyboard\/Info\.plist/);
+  assert.match(project, /CODE_SIGN_ENTITLEMENTS:\s*Keyboard\/LocalFlowKeyboard\.entitlements/);
+  assert.match(project, /target:\s*LocalFlowKeyboard/);
+  assert.match(project, /embed:\s*true/);
+  assert.match(project, /schemes:/);
+
+  assert.match(readme, /XcodeGen/);
+  assert.match(readme, /xcodegen generate --spec ios\/LocalFlowiOS\/project\.yml/);
 });

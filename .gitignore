@@ -5,6 +5,7 @@ vendor/*
 dist/
 out/
 .tmp/
+ios/LocalFlowiOS/*.xcodeproj/
 .env
 .env.local
 npm-debug.log*

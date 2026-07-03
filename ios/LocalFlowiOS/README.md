@@ -16,23 +16,29 @@ Apple Speech does not provide the same cross-language automatic detection contra
 
 ## Xcode Integration
 
-This Windows workspace cannot compile or run an iPhone app locally. To build on macOS:
+This Windows workspace cannot compile or run an iPhone app locally. The iPhone handoff includes an XcodeGen project spec so a Mac can generate the Xcode project from the checked-in source layout instead of recreating targets by hand.
 
-1. Create an iOS app project named `LocalFlowiOS` in Xcode.
-2. Add `LocalFlowCore` as a local Swift Package from `ios/LocalFlowiOS/LocalFlowCore`.
-3. Add the files under `App` to the host app target.
-4. Set the host app `Info.plist` to `App/Info.plist`.
-5. Set the host app entitlements file to `App/LocalFlowiOS.entitlements`.
-6. Add a custom keyboard extension target and include `Keyboard/KeyboardViewController.swift`.
-7. Set the keyboard extension `Info.plist` to `Keyboard/Info.plist`.
-8. Set the keyboard extension entitlements file to `Keyboard/LocalFlowKeyboard.entitlements`.
-9. Add `Intents/DictateToClipboardIntent.swift` to the host app target or to a dedicated App Intents target.
-10. Configure the URL scheme `localflow` if Xcode does not pick it up from `App/Info.plist`.
-11. Configure the App Group `group.com.localflow.dictation` for both the host app and keyboard extension.
-12. Confirm `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription` are present in the built host app.
-13. Confirm the keyboard extension has `RequestsOpenAccess` enabled because the MVP uses the shared App Group result.
+On macOS:
 
-On macOS, use Xcode's UI first for signing and entitlements. After the project is created, a command-line smoke build should look like:
+```bash
+brew install xcodegen
+xcodegen generate --spec ios/LocalFlowiOS/project.yml
+open ios/LocalFlowiOS/LocalFlowiOS.xcodeproj
+```
+
+The generated project contains:
+
+1. A host app target named `LocalFlowiOS`.
+2. A keyboard extension target named `LocalFlowKeyboard`.
+3. A local Swift Package dependency on `LocalFlowCore`.
+4. Host app sources from `App` and `Intents`.
+5. Keyboard extension sources from `Keyboard`.
+6. Host app `Info.plist` and entitlements from `App`.
+7. Keyboard extension `Info.plist` and entitlements from `Keyboard`.
+
+After opening the project, configure signing in Xcode for the host app and keyboard extension. Confirm the App Group `group.com.localflow.dictation` is available to both targets, the URL scheme `localflow` is present, the host app includes `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`, and the keyboard extension keeps `RequestsOpenAccess` enabled because the MVP reads the shared App Group result.
+
+After signing is configured, a command-line smoke build should look like:
 
 ```bash
 xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build
@@ -42,9 +48,9 @@ xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone
 
 For a Windows-only development machine, GitHub Actions provides the first cloud macOS validation gate in `.github/workflows/iphone-smoke.yml`.
 
-The workflow runs on `macos-latest`, executes `swift test` inside `ios/LocalFlowiOS/LocalFlowCore`, and runs `node --test tests/iphone-mvp-scaffold.test.js` from the repository root. This catches Swift package and iPhone handoff regressions before a local Mac is available.
+The workflow runs on `macos-latest`, installs XcodeGen, generates the Xcode project from `ios/LocalFlowiOS/project.yml`, executes `swift test` inside `ios/LocalFlowiOS/LocalFlowCore`, and runs `node --test tests/iphone-mvp-scaffold.test.js` from the repository root. This catches Swift package and iPhone handoff regressions before a local Mac is available.
 
-This smoke workflow does not sign the app, does not create an Xcode project, does not upload to TestFlight, and does not require an Apple Developer account. Final host-app build, signing, keyboard extension validation, and device testing still require macOS with Xcode.
+This smoke workflow does not sign the app, does not upload to TestFlight, and does not require an Apple Developer account. Final host-app build, signing, keyboard extension validation, and device testing still require macOS with Xcode.
 
 ## Product Rules
 

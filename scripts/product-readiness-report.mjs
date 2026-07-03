@@ -16,6 +16,12 @@ function buildReleaseRequirements(pkg) {
     { path: `${outputDir}/win-unpacked/${appExeName}`, minBytes: 1024 * 1024, area: "windows-unpacked-app" },
     { path: "assets/local-flow-icon.ico", minBytes: 1024, area: "windows-branding" },
     { path: "ios/LocalFlowiOS/README.md", minBytes: 1024, area: "iphone-source-handoff" },
+    {
+      path: "ios/LocalFlowiOS/project.yml",
+      minBytes: 1024,
+      area: "iphone-source-handoff",
+      contentIncludes: ["LocalFlowiOS", "LocalFlowKeyboard", "LocalFlowCore"]
+    },
     { path: "ios/LocalFlowiOS/LocalFlowCore/Package.swift", minBytes: 256, area: "iphone-source-handoff" },
     {
       path: "ios/LocalFlowiOS/LocalFlowCore/Sources/LocalFlowCore/LocalFlowLanguage.swift",
