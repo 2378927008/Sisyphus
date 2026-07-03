@@ -17,11 +17,13 @@ final class SpeechDictationViewModel: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let appGroupIdentifier = "group.com.localflow.dictation"
     private let latestResultKey = "latestResultText"
+    private lazy var historyStore = DictationHistoryStore(appGroupIdentifier: appGroupIdentifier)
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
 
     func requestPermissions() async {
+        loadHistory()
         let microphoneGranted = await requestMicrophonePermission()
         let speechGranted = await requestSpeechPermission()
 
@@ -154,8 +156,20 @@ final class SpeechDictationViewModel: ObservableObject {
         )
         history.insert(item, at: 0)
         history = Array(history.prefix(settings.historyLimit))
+        historyStore.saveHistory(history)
         UserDefaults(suiteName: appGroupIdentifier)?.set(text, forKey: latestResultKey)
         _ = warning
+    }
+
+    func loadHistory() {
+        history = Array(historyStore.loadHistory().prefix(settings.historyLimit))
+    }
+
+    func clearHistory() {
+        history = []
+        historyStore.clearHistory()
+        UserDefaults(suiteName: appGroupIdentifier)?.removeObject(forKey: latestResultKey)
+        statusText = "History cleared."
     }
 
     private func stopRecognitionTask() {

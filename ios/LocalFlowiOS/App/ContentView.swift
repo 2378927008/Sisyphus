@@ -91,19 +91,31 @@ struct ContentView: View {
     }
 
     private var historyList: some View {
-        List(model.history.prefix(5)) { item in
-            Button {
-                model.editableText = item.text
-            } label: {
-                VStack(alignment: .leading) {
-                    Text(item.text)
-                        .lineLimit(2)
-                    Text(item.createdAt, style: .time)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent dictation")
+                    .font(.headline)
+                Spacer()
+                Button("Clear history") {
+                    model.clearHistory()
+                }
+                .disabled(model.history.isEmpty)
+            }
+
+            List(model.history.prefix(5)) { item in
+                Button {
+                    model.editableText = item.text
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(item.text)
+                            .lineLimit(2)
+                        Text(item.createdAt, style: .time)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .frame(minHeight: 160)
         }
-        .frame(minHeight: 160)
     }
 }

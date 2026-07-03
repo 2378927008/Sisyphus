@@ -12,6 +12,7 @@ Apple Speech does not provide the same cross-language automatic detection contra
 - `App`: SwiftUI host app source for recording, editing, copying, sharing, and reviewing history.
 - `Keyboard`: custom keyboard extension source for inserting the latest result or handing off to the host app.
 - `Intents`: App Intent scaffold for a future quick dictate-to-clipboard Shortcut.
+- Local history is stored on-device through `LocalFlowCore` and shared with extensions through the App Group where needed.
 
 ## Xcode Integration
 

@@ -23,7 +23,9 @@ test("iPhone MVP source tree includes app core keyboard and intent slices", () =
     "LocalFlowCore/Sources/LocalFlowCore/LocalFlowLanguage.swift",
     "LocalFlowCore/Sources/LocalFlowCore/DictationModels.swift",
     "LocalFlowCore/Sources/LocalFlowCore/OutputBehavior.swift",
+    "LocalFlowCore/Sources/LocalFlowCore/DictationHistoryStore.swift",
     "LocalFlowCore/Tests/LocalFlowCoreTests/OutputBehaviorTests.swift",
+    "LocalFlowCore/Tests/LocalFlowCoreTests/DictationHistoryStoreTests.swift",
     "App/Info.plist",
     "App/LocalFlowiOS.entitlements",
     "App/LocalFlowiOSApp.swift",
@@ -141,4 +143,29 @@ test("iPhone Xcode handoff files declare permissions URL scheme app group and ke
   assert.match(readme, /NSSpeechRecognitionUsageDescription/);
   assert.match(readme, /RequestsOpenAccess/);
   assert.match(readme, /xcodebuild/);
+});
+
+test("iPhone history persists locally through an app group store", async () => {
+  const store = await readIosFile("LocalFlowCore", "Sources", "LocalFlowCore", "DictationHistoryStore.swift");
+  const storeTests = await readIosFile("LocalFlowCore", "Tests", "LocalFlowCoreTests", "DictationHistoryStoreTests.swift");
+  const viewModel = await readIosFile("App", "SpeechDictationViewModel.swift");
+  const contentView = await readIosFile("App", "ContentView.swift");
+
+  assert.match(store, /public struct DictationHistoryStore/);
+  assert.match(store, /UserDefaults/);
+  assert.match(store, /JSONEncoder/);
+  assert.match(store, /JSONDecoder/);
+  assert.match(store, /func loadHistory\(\) -> \[DictationHistoryItem\]/);
+  assert.match(store, /func saveHistory\(_ history: \[DictationHistoryItem\]\)/);
+  assert.match(store, /func clearHistory\(\)/);
+
+  assert.match(storeTests, /testSaveAndLoadHistory/);
+  assert.match(storeTests, /testClearHistory/);
+
+  assert.match(viewModel, /DictationHistoryStore\(appGroupIdentifier: appGroupIdentifier\)/);
+  assert.match(viewModel, /historyStore\.loadHistory\(\)/);
+  assert.match(viewModel, /historyStore\.saveHistory\(history\)/);
+  assert.match(viewModel, /func clearHistory\(\)/);
+  assert.match(contentView, /Clear history/);
+  assert.match(contentView, /model\.clearHistory\(\)/);
 });
