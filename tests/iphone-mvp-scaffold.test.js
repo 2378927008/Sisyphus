@@ -167,7 +167,7 @@ test("iPhone history persists locally through an app group store", async () => {
   assert.match(viewModel, /historyStore\.loadHistory\(\)/);
   assert.match(viewModel, /historyStore\.saveHistory\(history\)/);
   assert.match(viewModel, /func clearHistory\(\)/);
-  assert.match(contentView, /Clear history/);
+  assert.match(contentView, /model\.copy\.clearHistory/);
   assert.match(contentView, /model\.clearHistory\(\)/);
 });
 
@@ -217,8 +217,8 @@ test("iPhone app surfaces real device readiness and keyboard setup guidance", as
   assert.match(viewModel, /@Published var microphonePermissionGranted/);
   assert.match(viewModel, /@Published var speechPermissionGranted/);
   assert.match(viewModel, /var deviceReadinessItems: \[DeviceReadinessItem\]/);
-  assert.match(viewModel, /Settings > General > Keyboard > Keyboards/);
-  assert.match(viewModel, /Allow Full Access/);
+  assert.match(viewModel, /copy\.keyboardTitle/);
+  assert.match(viewModel, /copy\.keyboardDetail/);
 
   assert.match(contentView, /ScrollView/);
   assert.match(contentView, /recordingSurface/);
@@ -226,9 +226,9 @@ test("iPhone app surfaces real device readiness and keyboard setup guidance", as
   assert.match(contentView, /keyboardSetupGuide/);
   assert.match(contentView, /ForEach\(model\.deviceReadinessItems\)/);
   assert.match(contentView, /UIApplication\.openSettingsURLString/);
-  assert.match(contentView, /Open iPhone Settings/);
-  assert.match(contentView, /Enable Local Flow Keyboard/);
-  assert.match(contentView, /Settings > General > Keyboard > Keyboards/);
+  assert.match(contentView, /model\.copy\.openIPhoneSettings/);
+  assert.match(contentView, /model\.copy\.keyboardSetupTitle/);
+  assert.match(contentView, /model\.copy\.keyboardSetupDetail/);
 
   assert.match(readme, /Device Trial Checklist/);
   assert.match(readme, /Signing & Capabilities/);
@@ -242,20 +242,55 @@ test("iPhone app supports history reuse empty result state and keyboard feedback
   const keyboard = await readIosFile("Keyboard", "KeyboardViewController.swift");
 
   assert.match(viewModel, /func useHistoryItem\(_ item: DictationHistoryItem\)/);
-  assert.match(viewModel, /statusText = "Loaded from history\."/);
+  assert.match(viewModel, /statusText = copy\.loadedFromHistory/);
 
   assert.match(contentView, /emptyResultState/);
-  assert.match(contentView, /Dictate first, then edit or share the result here\./);
+  assert.match(contentView, /model\.copy\.emptyResult/);
   assert.match(contentView, /historyRow\(for item: DictationHistoryItem\)/);
   assert.match(contentView, /model\.useHistoryItem\(item\)/);
-  assert.match(contentView, /Button\("Use"\)/);
-  assert.match(contentView, /Button\("Copy"\)/);
+  assert.match(contentView, /Button\(model\.copy\.useAction\)/);
+  assert.match(contentView, /Button\(model\.copy\.copyAction\)/);
   assert.match(contentView, /UIPasteboard\.general\.string = item\.text/);
-  assert.match(contentView, /No recent dictation yet\./);
+  assert.match(contentView, /model\.copy\.noRecentDictation/);
 
   assert.match(keyboard, /private let statusLabel = UILabel\(\)/);
   assert.match(keyboard, /configureStatusLabel/);
   assert.match(keyboard, /No saved result yet\. Opening Local Flow\./);
   assert.match(keyboard, /setStatus\("Inserted latest result\."\)/);
   assert.match(keyboard, /Opening Local Flow\./);
+});
+
+test("iPhone app has selectable localized interface copy without garbled language names", async () => {
+  const language = await readIosFile("LocalFlowCore", "Sources", "LocalFlowCore", "LocalFlowLanguage.swift");
+  const copy = await readIosFile("LocalFlowCore", "Sources", "LocalFlowCore", "InterfaceCopy.swift");
+  const viewModel = await readIosFile("App", "SpeechDictationViewModel.swift");
+  const contentView = await readIosFile("App", "ContentView.swift");
+
+  for (const label of ["简体中文", "日本語", "한국어", "繁體中文", "Français", "Русский", "Español"]) {
+    assert.match(language, new RegExp(label));
+  }
+
+  for (const phrase of [
+    "语音输入",
+    "开始听写",
+    "结果",
+    "最近听写",
+    "Enable Local Flow Keyboard",
+    "ローカルフローキーボードを有効にする",
+    "Local Flow 키보드 활성화",
+    "Activer le clavier Local Flow",
+    "Включить клавиатуру Local Flow",
+    "Activar el teclado Local Flow"
+  ]) {
+    assert.match(copy, new RegExp(phrase));
+  }
+
+  assert.match(viewModel, /var copy: InterfaceCopy/);
+  assert.match(viewModel, /loadSettings\(\)/);
+  assert.match(viewModel, /saveSettings\(\)/);
+  assert.match(contentView, /Picker\(model\.copy\.interfaceLanguage/);
+  assert.match(contentView, /LocalFlowLanguage\.supportedInterfaceLanguages/);
+  assert.match(contentView, /model\.copy\.startDictation/);
+  assert.match(contentView, /model\.copy\.keyboardSetupTitle/);
+  assert.doesNotMatch(language, /绠|鏃|頃|莽|袪|帽/);
 });

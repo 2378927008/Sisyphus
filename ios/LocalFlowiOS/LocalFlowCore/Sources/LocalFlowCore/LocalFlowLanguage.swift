@@ -62,6 +62,19 @@ public enum RecognitionLanguage: String, CaseIterable, Codable, Identifiable, Se
 
     public var id: String { rawValue }
 
+    public var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .english: return "English"
+        case .chinese: return "中文"
+        case .japanese: return "日本語"
+        case .korean: return "한국어"
+        case .french: return "Français"
+        case .russian: return "Русский"
+        case .spanish: return "Español"
+        }
+    }
+
     public var localeIdentifier: String? {
         switch self {
         case .auto: return nil
@@ -75,6 +88,7 @@ public enum RecognitionLanguage: String, CaseIterable, Codable, Identifiable, Se
         }
     }
 }
+
 public enum OutputSelection: String, CaseIterable, Codable, Identifiable, Sendable {
     case auto
     case original
@@ -88,4 +102,19 @@ public enum OutputSelection: String, CaseIterable, Codable, Identifiable, Sendab
     case spanish
 
     public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .original: return "Original"
+        case .english: return "English"
+        case .simplifiedChinese: return "简体中文"
+        case .japanese: return "日本語"
+        case .korean: return "한국어"
+        case .traditionalChinese: return "繁體中文"
+        case .french: return "Français"
+        case .russian: return "Русский"
+        case .spanish: return "Español"
+        }
+    }
 }

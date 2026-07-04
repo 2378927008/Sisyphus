@@ -20,16 +20,22 @@ struct ContentView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Local Flow")
+            .navigationTitle(model.copy.appTitle)
             .task {
                 await model.requestPermissions()
+            }
+            .onChange(of: model.settings) { _, _ in
+                model.saveSettings()
+            }
+            .onChange(of: model.settings.interfaceLanguage) { _, _ in
+                model.refreshInterfaceLanguage()
             }
         }
     }
 
     private var providerHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Voice Input")
+            Text(model.copy.voiceInput)
                 .font(.title2.weight(.semibold))
             Text(model.statusText)
                 .font(.subheadline)
@@ -39,20 +45,27 @@ struct ContentView: View {
 
     private var languageControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Language")
+            Text(model.copy.language)
                 .font(.headline)
 
-            HStack {
-                Picker("Recognition", selection: $model.settings.recognitionLanguage) {
-                    ForEach(RecognitionLanguage.allCases) { language in
-                        Text(language.rawValue).tag(language)
+            VStack(alignment: .leading, spacing: 8) {
+                Picker(model.copy.interfaceLanguage, selection: $model.settings.interfaceLanguage) {
+                    ForEach(LocalFlowLanguage.supportedInterfaceLanguages) { language in
+                        Text(language.displayName).tag(language)
                     }
                 }
                 .pickerStyle(.menu)
 
-                Picker("Output", selection: $model.settings.outputSelection) {
+                Picker(model.copy.recognitionLanguage, selection: $model.settings.recognitionLanguage) {
+                    ForEach(RecognitionLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Picker(model.copy.outputLanguage, selection: $model.settings.outputSelection) {
                     ForEach(LocalFlowLanguage.supportedOutputLanguages) { language in
-                        Text(language.rawValue).tag(language)
+                        Text(language.displayName).tag(language)
                     }
                 }
                 .pickerStyle(.menu)
@@ -64,9 +77,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.isRecording ? "Listening" : "Ready to dictate")
+                    Text(model.isRecording ? model.copy.listening : model.copy.readyToDictate)
                         .font(.headline)
-                    Text("System Apple Speech")
+                    Text(model.copy.systemAppleSpeech)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -83,7 +96,7 @@ struct ContentView: View {
                     await model.toggleRecording()
                 }
             } label: {
-                Text(model.isRecording ? "Stop Dictation" : "Start Dictation")
+                Text(model.isRecording ? model.copy.stopDictation : model.copy.startDictation)
                     .font(.title3.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 68)
             }
@@ -94,7 +107,7 @@ struct ContentView: View {
 
     private var resultEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Result")
+            Text(model.copy.result)
                 .font(.headline)
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $model.editableText)
@@ -115,21 +128,21 @@ struct ContentView: View {
     }
 
     private var emptyResultState: some View {
-        Text("Dictate first, then edit or share the result here.")
+        Text(model.copy.emptyResult)
             .font(.subheadline)
             .foregroundStyle(.tertiary)
     }
 
     private var actions: some View {
         HStack {
-            Button("Copy") {
+            Button(model.copy.copyAction) {
                 UIPasteboard.general.string = model.editableText
-                model.statusText = "Copied to clipboard."
+                model.statusText = model.copy.copiedToClipboard
             }
             .disabled(model.editableText.isEmpty)
 
             ShareLink(item: model.editableText) {
-                Text("Share")
+                Text(model.copy.shareAction)
             }
             .disabled(model.editableText.isEmpty)
         }
@@ -138,10 +151,10 @@ struct ContentView: View {
     private var deviceReadinessPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Device setup")
+                Text(model.copy.deviceSetup)
                     .font(.headline)
                 Spacer()
-                Button("Open iPhone Settings") {
+                Button(model.copy.openIPhoneSettings) {
                     openSystemSettings()
                 }
                 .font(.subheadline)
@@ -165,9 +178,9 @@ struct ContentView: View {
 
     private var keyboardSetupGuide: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Enable Local Flow Keyboard")
+            Text(model.copy.keyboardSetupTitle)
                 .font(.headline)
-            Text("Settings > General > Keyboard > Keyboards > Add New Keyboard > Local Flow Keyboard, then enable Allow Full Access.")
+            Text(model.copy.keyboardSetupDetail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -176,17 +189,17 @@ struct ContentView: View {
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Recent dictation")
+                Text(model.copy.recentDictation)
                     .font(.headline)
                 Spacer()
-                Button("Clear history") {
+                Button(model.copy.clearHistory) {
                     model.clearHistory()
                 }
                 .disabled(model.history.isEmpty)
             }
 
             if model.history.isEmpty {
-                Text("No recent dictation yet.")
+                Text(model.copy.noRecentDictation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -207,12 +220,12 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button("Use") {
+                Button(model.copy.useAction) {
                     model.useHistoryItem(item)
                 }
-                Button("Copy") {
+                Button(model.copy.copyAction) {
                     UIPasteboard.general.string = item.text
-                    model.statusText = "Copied history item."
+                    model.statusText = model.copy.copiedHistoryItem
                 }
             }
             .font(.caption.weight(.semibold))

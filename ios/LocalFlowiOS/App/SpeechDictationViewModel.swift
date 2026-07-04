@@ -16,7 +16,7 @@ final class SpeechDictationViewModel: ObservableObject {
     @Published var settings = DictationSettings()
     @Published var editableText = ""
     @Published var transcript = ""
-    @Published var statusText = "Checking permissions..."
+    @Published var statusText = InterfaceCopy.localized(for: .simplifiedChinese).checkingPermissions
     @Published var isRecording = false
     @Published var canRecord = false
     @Published var microphonePermissionGranted = false
@@ -26,47 +26,53 @@ final class SpeechDictationViewModel: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let appGroupIdentifier = "group.com.localflow.dictation"
     private let latestResultKey = "latestResultText"
+    private let settingsKey = "dictationSettings"
     private lazy var historyStore = DictationHistoryStore(appGroupIdentifier: appGroupIdentifier)
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
 
+    var copy: InterfaceCopy {
+        InterfaceCopy.localized(for: settings.interfaceLanguage)
+    }
+
     var deviceReadinessItems: [DeviceReadinessItem] {
         [
             DeviceReadinessItem(
                 id: "microphone",
-                title: "Microphone",
+                title: copy.microphoneTitle,
                 detail: microphonePermissionGranted
-                    ? "Allowed for this app."
-                    : "Allow microphone access in iPhone Settings.",
+                    ? copy.microphoneAllowed
+                    : copy.microphoneDenied,
                 isReady: microphonePermissionGranted
             ),
             DeviceReadinessItem(
                 id: "speech-recognition",
-                title: "Speech Recognition",
+                title: copy.speechRecognitionTitle,
                 detail: speechPermissionGranted
-                    ? "Apple Speech permission is enabled."
-                    : "Allow speech recognition so Local Flow can transcribe locally through Apple Speech.",
+                    ? copy.speechEnabled
+                    : copy.speechDenied,
                 isReady: speechPermissionGranted
             ),
             DeviceReadinessItem(
                 id: "keyboard-extension",
-                title: "Local Flow Keyboard",
-                detail: "Enable Local Flow Keyboard in Settings > General > Keyboard > Keyboards, then turn on Allow Full Access.",
+                title: copy.keyboardTitle,
+                detail: copy.keyboardDetail,
                 isReady: false
             )
         ]
     }
 
     func requestPermissions() async {
+        loadSettings()
         loadHistory()
         microphonePermissionGranted = await requestMicrophonePermission()
         speechPermissionGranted = await requestSpeechPermission()
 
         canRecord = microphonePermissionGranted && speechPermissionGranted
         statusText = canRecord
-            ? "Ready. Auto output keeps the speech language."
-            : "Microphone or speech recognition permission is disabled."
+            ? copy.readyAuto
+            : copy.permissionDisabled
     }
 
     func toggleRecording() async {
@@ -80,7 +86,7 @@ final class SpeechDictationViewModel: ObservableObject {
     func handleOpenURL(_ url: URL) async {
         guard url.scheme == "localflow", url.host == "quick-dictation" else { return }
 
-        statusText = "Quick dictation requested."
+        statusText = copy.quickDictationRequested
         if !canRecord {
             await requestPermissions()
         }
@@ -90,7 +96,7 @@ final class SpeechDictationViewModel: ObservableObject {
     func startRecording() async {
         guard !isRecording else { return }
         guard canRecord else {
-            statusText = "Enable microphone and speech recognition in Settings."
+            statusText = copy.enablePermissions
             return
         }
 
@@ -99,13 +105,13 @@ final class SpeechDictationViewModel: ObservableObject {
         speechRecognizer = SFSpeechRecognizer(locale: locale)
 
         guard let speechRecognizer, speechRecognizer.isAvailable else {
-            statusText = "Apple Speech is unavailable right now."
+            statusText = copy.appleSpeechUnavailable
             return
         }
 
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         guard let recognitionRequest else {
-            statusText = "Could not create a speech recognition request."
+            statusText = copy.createRequestFailed
             return
         }
 
@@ -123,11 +129,11 @@ final class SpeechDictationViewModel: ObservableObject {
             try audioEngine.start()
             isRecording = true
             statusText = settings.recognitionLanguage == .auto
-                ? "Listening with iOS preferred speech language..."
-                : "Listening..."
+                ? copy.listeningPreferred
+                : copy.listeningStatus
         } catch {
             deactivateAudioSession()
-            statusText = "Could not start microphone recording."
+            statusText = copy.startMicFailed
             return
         }
 
@@ -153,12 +159,12 @@ final class SpeechDictationViewModel: ObservableObject {
         if let result {
             transcript = result.bestTranscription.formattedString
             editableText = transcript
-            statusText = result.isFinal ? "Recognized." : "Listening..."
+            statusText = result.isFinal ? copy.recognized : copy.listeningStatus
         }
 
         if error != nil {
             stopRecording()
-            statusText = transcript.isEmpty ? "No speech detected. Try again." : "Partial transcript saved."
+            statusText = transcript.isEmpty ? copy.noSpeechDetected : copy.partialTranscriptSaved
         }
     }
 
@@ -171,7 +177,7 @@ final class SpeechDictationViewModel: ObservableObject {
         switch result {
         case .success(let text):
             editableText = text
-            statusText = text.isEmpty ? "No speech detected. Try again." : "Ready to copy or share."
+            statusText = text.isEmpty ? copy.noSpeechDetected : copy.readyCopyShare
             saveHistory(text: text, warning: nil)
         case .requiresProvider(let rawTranscript, let message):
             editableText = rawTranscript
@@ -205,7 +211,7 @@ final class SpeechDictationViewModel: ObservableObject {
         history = []
         historyStore.clearHistory()
         UserDefaults(suiteName: appGroupIdentifier)?.removeObject(forKey: latestResultKey)
-        statusText = "History cleared."
+        statusText = copy.historyCleared
     }
 
     func useHistoryItem(_ item: DictationHistoryItem) {
@@ -214,7 +220,30 @@ final class SpeechDictationViewModel: ObservableObject {
         settings.recognitionLanguage = item.recognitionLanguage
         settings.outputSelection = item.outputSelection
         UserDefaults(suiteName: appGroupIdentifier)?.set(item.text, forKey: latestResultKey)
-        statusText = "Loaded from history."
+        saveSettings()
+        statusText = copy.loadedFromHistory
+    }
+
+    func loadSettings() {
+        guard
+            let data = UserDefaults(suiteName: appGroupIdentifier)?.data(forKey: settingsKey),
+            let savedSettings = try? JSONDecoder().decode(DictationSettings.self, from: data)
+        else {
+            return
+        }
+
+        settings = savedSettings
+        statusText = copy.checkingPermissions
+    }
+
+    func saveSettings() {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        UserDefaults(suiteName: appGroupIdentifier)?.set(data, forKey: settingsKey)
+    }
+
+    func refreshInterfaceLanguage() {
+        saveSettings()
+        statusText = canRecord ? copy.readyAuto : copy.checkingPermissions
     }
 
     private func stopRecognitionTask() {
