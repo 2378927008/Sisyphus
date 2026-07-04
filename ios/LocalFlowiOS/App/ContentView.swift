@@ -96,14 +96,28 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Result")
                 .font(.headline)
-            TextEditor(text: $model.editableText)
-                .frame(minHeight: 180)
-                .padding(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.quaternary)
-                )
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $model.editableText)
+                    .frame(minHeight: 180)
+                    .padding(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.quaternary)
+                    )
+
+                if model.editableText.isEmpty {
+                    emptyResultState
+                        .padding(14)
+                        .allowsHitTesting(false)
+                }
+            }
         }
+    }
+
+    private var emptyResultState: some View {
+        Text("Dictate first, then edit or share the result here.")
+            .font(.subheadline)
+            .foregroundStyle(.tertiary)
     }
 
     private var actions: some View {
@@ -171,20 +185,39 @@ struct ContentView: View {
                 .disabled(model.history.isEmpty)
             }
 
-            ForEach(model.history.prefix(5)) { item in
-                Button {
-                    model.editableText = item.text
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(item.text)
-                            .lineLimit(2)
-                        Text(item.createdAt, style: .time)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            if model.history.isEmpty {
+                Text("No recent dictation yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.history.prefix(5)) { item in
+                    historyRow(for: item)
                 }
             }
         }
+    }
+
+    private func historyRow(for item: DictationHistoryItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.text)
+                .font(.subheadline)
+                .lineLimit(2)
+            Text(item.createdAt, style: .time)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("Use") {
+                    model.useHistoryItem(item)
+                }
+                Button("Copy") {
+                    UIPasteboard.general.string = item.text
+                    model.statusText = "Copied history item."
+                }
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .padding(.vertical, 6)
     }
 
     private func openSystemSettings() {

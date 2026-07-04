@@ -235,3 +235,27 @@ test("iPhone app surfaces real device readiness and keyboard setup guidance", as
   assert.match(readme, /Local Flow Keyboard/);
   assert.match(readme, /Settings > General > Keyboard > Keyboards/);
 });
+
+test("iPhone app supports history reuse empty result state and keyboard feedback", async () => {
+  const viewModel = await readIosFile("App", "SpeechDictationViewModel.swift");
+  const contentView = await readIosFile("App", "ContentView.swift");
+  const keyboard = await readIosFile("Keyboard", "KeyboardViewController.swift");
+
+  assert.match(viewModel, /func useHistoryItem\(_ item: DictationHistoryItem\)/);
+  assert.match(viewModel, /statusText = "Loaded from history\."/);
+
+  assert.match(contentView, /emptyResultState/);
+  assert.match(contentView, /Dictate first, then edit or share the result here\./);
+  assert.match(contentView, /historyRow\(for item: DictationHistoryItem\)/);
+  assert.match(contentView, /model\.useHistoryItem\(item\)/);
+  assert.match(contentView, /Button\("Use"\)/);
+  assert.match(contentView, /Button\("Copy"\)/);
+  assert.match(contentView, /UIPasteboard\.general\.string = item\.text/);
+  assert.match(contentView, /No recent dictation yet\./);
+
+  assert.match(keyboard, /private let statusLabel = UILabel\(\)/);
+  assert.match(keyboard, /configureStatusLabel/);
+  assert.match(keyboard, /No saved result yet\. Opening Local Flow\./);
+  assert.match(keyboard, /setStatus\("Inserted latest result\."\)/);
+  assert.match(keyboard, /Opening Local Flow\./);
+});

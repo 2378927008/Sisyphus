@@ -208,6 +208,15 @@ final class SpeechDictationViewModel: ObservableObject {
         statusText = "History cleared."
     }
 
+    func useHistoryItem(_ item: DictationHistoryItem) {
+        transcript = item.transcript
+        editableText = item.text
+        settings.recognitionLanguage = item.recognitionLanguage
+        settings.outputSelection = item.outputSelection
+        UserDefaults(suiteName: appGroupIdentifier)?.set(item.text, forKey: latestResultKey)
+        statusText = "Loaded from history."
+    }
+
     private func stopRecognitionTask() {
         recognitionTask?.cancel()
         recognitionTask = nil
