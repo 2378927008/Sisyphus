@@ -19,6 +19,7 @@ import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.j
 import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
+import { pasteText } from "./paste.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererRecordingPhases = new Set([
@@ -51,6 +52,7 @@ let hotkeyManager;
 let lastSettings;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
+let lastDictationEntry;
 
 function createWindow({ showOnReady = true } = {}) {
   mainWindow = new BrowserWindow({
@@ -164,7 +166,9 @@ async function registerHotkey(settings = lastSettings) {
   refreshTrayMenu();
 
   if (!status.ok) {
-    sendStatus({ phase: "error", message: status.message, reason: status.reason });
+    sendTransientStatus({ phase: "error", message: status.message, reason: status.reason });
+  } else if (status.phase === "warning") {
+    sendTransientStatus({ phase: "warning", message: status.message, reason: status.reason });
   }
 
   return status;
@@ -190,6 +194,64 @@ function sendStatus(payload) {
     mainWindow.webContents.send("dictation:status", payload);
   }
   systemInputController?.handleRendererStatus(payload);
+}
+
+function sendTransientStatus(payload) {
+  if (isUsableWindow(mainWindow)) {
+    mainWindow.webContents.send("dictation:status", payload);
+  }
+  systemInputController?.handleRendererStatus(payload);
+}
+
+async function pasteLastDictation() {
+  const text = getLastDictationText(lastDictationStatus);
+  if (!text) {
+    sendTransientStatus({
+      phase: "warning",
+      reason: "no_last_dictation",
+      message: "No previous dictation result to paste."
+    });
+    return;
+  }
+
+  sendTransientStatus({
+    phase: "pasting",
+    message: "Pasting last dictation..."
+  });
+
+  try {
+    await pasteText(text, { clipboard });
+    sendTransientStatus({
+      phase: "done",
+      message: "Last dictation pasted."
+    });
+  } catch (error) {
+    sendTransientStatus({
+      phase: "warning",
+      reason: error?.code || "paste_failed",
+      message: "Paste failed. Text copied."
+    });
+  }
+}
+
+function getLastDictationText(status) {
+  if (isPasteableDictationEntry(lastDictationEntry)) {
+    return lastDictationEntry.text.trim();
+  }
+
+  if (isPasteableDictationEntry(status?.entry)) {
+    return status.entry.text.trim();
+  }
+
+  if (typeof status?.text === "string" && status.text.trim()) {
+    return status.text.trim();
+  }
+
+  return "";
+}
+
+function isPasteableDictationEntry(entry) {
+  return Boolean(entry && entry.status === "complete" && typeof entry.text === "string" && entry.text.trim());
 }
 
 function sendSystemInputStatus(state) {
@@ -349,7 +411,11 @@ function wireIpc() {
   });
   ipcMain.handle("dictation:wav", async (_event, wavBytes) => {
     const buffer = Buffer.from(wavBytes);
-    return dictationService.processWav(buffer);
+    const entry = await dictationService.processWav(buffer);
+    if (isPasteableDictationEntry(entry)) {
+      lastDictationEntry = entry;
+    }
+    return entry;
   });
 }
 
@@ -401,7 +467,10 @@ app.whenReady().then(async () => {
   });
   hotkeyManager = createHotkeyManager({
     globalShortcut,
-    onToggle: () => systemInputController?.toggle()
+    onToggle: () => systemInputController?.toggle(),
+    onStart: () => systemInputController?.start(),
+    onStop: () => systemInputController?.stop(),
+    onPasteLast: () => pasteLastDictation()
   });
 
   wireIpc();

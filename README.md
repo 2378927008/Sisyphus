@@ -6,6 +6,8 @@ Local-first Windows voice dictation app inspired by Typeless and Wispr Flow. It 
 
 - Electron desktop app for Windows.
 - Global shortcut: `Ctrl + Alt + Space`.
+- Shortcut behavior can be set to toggle or hold-to-dictate. Hold mode needs a press/release shortcut adapter; the built-in Electron shortcut path falls back to toggle behavior when release events are unavailable.
+- Paste last result shortcut: `Ctrl + Alt + V` by default.
 - Background tray mode: closing the main window keeps Local Flow running.
 - Tray actions for showing the app, starting/stopping dictation, pausing the shortcut, launch-at-login, start-minimized, settings, and quit.
 - Microphone recording in the app window.
@@ -93,6 +95,15 @@ The installed app keeps running from the tray when the main window is closed. Us
 Launch at login is off by default. Enable it from Settings or the tray menu. Start minimized to tray is also off by default so first-run setup remains visible.
 
 If the global shortcut conflicts with another app, Local Flow shows a hotkey error in the main status/HUD. Use the tray menu or Settings to pause the shortcut, change the shortcut, then resume.
+
+## Desktop Convenience
+
+Open `设置` > `快捷键` to tune the desktop input loop:
+
+- `全局快捷键`: starts/stops dictation. Default: `Ctrl + Alt + Space`.
+- `语音输入快捷键行为`: choose press-to-toggle or hold-to-dictate. Electron's built-in global shortcut API does not expose key release events, so hold mode currently falls back to toggle unless a native press/release adapter is added.
+- `粘贴上一段结果快捷键`: pastes the last successful dictation again. Default: `Ctrl + Alt + V`.
+- Mouse side button: map `Mouse4` or `Mouse5` to the global dictation shortcut in your mouse driver, PowerToys, or device software. This is the recommended safe path until Local Flow ships a reviewed native Windows input hook.
 
 ## 中文试用步骤
 

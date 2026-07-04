@@ -66,6 +66,11 @@ test("getUiText returns Windows productization labels", () => {
   assert.equal(getUiText("en", "label.launchAtLogin"), "Launch Local Flow at login");
   assert.equal(getUiText("en", "label.startMinimizedToTray"), "Start minimized to tray");
   assert.equal(getUiText("en", "label.globalShortcutPaused"), "Pause global shortcut");
+  assert.equal(getUiText("en", "label.shortcutMode"), "Dictation shortcut behavior");
+  assert.equal(getUiText("en", "shortcut.mode.toggle"), "Press to start or stop");
+  assert.equal(getUiText("en", "shortcut.mode.hold"), "Hold to dictate");
+  assert.equal(getUiText("en", "label.pasteLastHotkey"), "Paste last result shortcut");
+  assert.match(getUiText("en", "hint.mouseShortcut"), /Mouse4/);
   const englishMissingPaths = getUiText("en", "record.disabled.embedded_llm_paths_missing");
   const chineseMissingPaths = getUiText("zh-Hans", "record.disabled.embedded_llm_paths_missing");
   assert.match(englishMissingPaths, /Auto \(same as speech\)/);
@@ -76,6 +81,11 @@ test("getUiText returns Windows productization labels", () => {
   assert.equal(getUiText("zh-Hans", "label.launchAtLogin"), "开机自动启动 Local Flow");
   assert.equal(getUiText("zh-Hans", "label.startMinimizedToTray"), "启动后最小化到托盘");
   assert.equal(getUiText("zh-Hans", "label.globalShortcutPaused"), "暂停全局快捷键");
+  assert.equal(getUiText("zh-Hans", "label.shortcutMode"), "语音输入快捷键行为");
+  assert.equal(getUiText("zh-Hans", "shortcut.mode.toggle"), "按一次开始或停止");
+  assert.equal(getUiText("zh-Hans", "shortcut.mode.hold"), "按住说话");
+  assert.equal(getUiText("zh-Hans", "label.pasteLastHotkey"), "粘贴上一段结果快捷键");
+  assert.match(getUiText("zh-Hans", "hint.mouseShortcut"), /Mouse4/);
 });
 
 test("getUiText returns localized record recovery actions", () => {

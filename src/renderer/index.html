@@ -233,6 +233,18 @@
               <span data-i18n="label.hotkey">全局快捷键</span>
               <input id="hotkey" name="hotkey" />
             </label>
+            <label>
+              <span data-i18n="label.shortcutMode">语音输入快捷键行为</span>
+              <select id="shortcutMode" name="shortcutMode">
+                <option value="toggle" data-i18n="shortcut.mode.toggle">按一次开始或停止</option>
+                <option value="hold" data-i18n="shortcut.mode.hold">按住说话</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="label.pasteLastHotkey">粘贴上一段结果快捷键</span>
+              <input id="pasteLastHotkey" name="pasteLastHotkey" />
+            </label>
+            <p class="drawer-hint" data-i18n="hint.mouseShortcut">要用鼠标侧键，请把 Mouse4 或 Mouse5 在鼠标驱动、PowerToys 或设备软件里映射到上面的语音输入快捷键。</p>
             <label class="checkbox-label">
               <input id="globalShortcutPaused" name="globalShortcutPaused" type="checkbox" />
               <span data-i18n="label.globalShortcutPaused">暂停全局快捷键</span>

@@ -19,6 +19,8 @@ export const defaultSettings = {
   launchAtLogin: false,
   startMinimizedToTray: false,
   globalShortcutPaused: false,
+  shortcutMode: "toggle",
+  pasteLastHotkey: "CommandOrControl+Alt+V",
   asrProvider: "localWhisper",
   whisperCliPath: "",
   whisperModelPath: "",
@@ -109,6 +111,8 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   merged.launchAtLogin = Boolean(merged.launchAtLogin);
   merged.startMinimizedToTray = Boolean(merged.startMinimizedToTray);
   merged.globalShortcutPaused = Boolean(merged.globalShortcutPaused);
+  merged.shortcutMode = normalizeShortcutMode(merged.shortcutMode);
+  merged.pasteLastHotkey = String(merged.pasteLastHotkey ?? "").trim();
   merged.interfaceLanguage = normalizeInterfaceLanguage(merged.interfaceLanguage);
   merged.whisperLanguage = normalizeWhisperLanguage(merged.whisperLanguage);
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
@@ -171,6 +175,10 @@ function normalizePolishMode(value) {
     return mode;
   }
   return "polish";
+}
+
+function normalizeShortcutMode(value) {
+  return String(value || "").trim() === "hold" ? "hold" : "toggle";
 }
 
 async function loadSettings(settingsPath, baseSettings, secretCodec) {

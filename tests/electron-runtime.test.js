@@ -517,6 +517,18 @@ test("main process delegates hotkeys startup settings and tray state to product 
   assert.doesNotMatch(mainSource, /globalShortcut\.unregisterAll\(\)/);
 });
 
+test("main process wires desktop convenience shortcut callbacks", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /import \{ pasteText \} from "\.\/paste\.js";/);
+  assert.match(mainSource, /async function pasteLastDictation\(\)/);
+  assert.match(mainSource, /function getLastDictationText\(status\)/);
+  assert.match(mainSource, /await pasteText\(text, \{ clipboard \}\)/);
+  assert.match(mainSource, /onStart:\s*\(\)\s*=>\s*systemInputController\?\.start\(\)/);
+  assert.match(mainSource, /onStop:\s*\(\)\s*=>\s*systemInputController\?\.stop\(\)/);
+  assert.match(mainSource, /onPasteLast:\s*\(\)\s*=>\s*pasteLastDictation\(\)/);
+});
+
 test("settings save handler preserves previous startup values if system startup apply fails", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
@@ -753,6 +765,8 @@ test("renderer sends Windows productization fields when settings form saves", as
   assert.match(saveSettingsMatch.groups.body, /globalShortcutPaused:\s*form\.globalShortcutPaused\.checked/);
   assert.match(saveSettingsMatch.groups.body, /launchAtLogin:\s*form\.launchAtLogin\.checked/);
   assert.match(saveSettingsMatch.groups.body, /startMinimizedToTray:\s*form\.startMinimizedToTray\.checked/);
+  assert.match(saveSettingsMatch.groups.body, /shortcutMode:\s*data\.get\("shortcutMode"\)/);
+  assert.match(saveSettingsMatch.groups.body, /pasteLastHotkey:\s*data\.get\("pasteLastHotkey"\)/);
   assert.match(saveSettingsMatch.groups.body, /whisperRuntimeUrl:\s*data\.get\("whisperRuntimeUrl"\)/);
   assert.match(saveSettingsMatch.groups.body, /whisperModelMirrorUrls:\s*data\.get\("whisperModelMirrorUrls"\)/);
   assert.match(saveSettingsMatch.groups.body, /llamaRuntimeUrl:\s*data\.get\("llamaRuntimeUrl"\)/);

@@ -33,18 +33,34 @@ test("mergeSettings includes Windows productization defaults", () => {
   assert.equal(settings.launchAtLogin, false);
   assert.equal(settings.startMinimizedToTray, false);
   assert.equal(settings.globalShortcutPaused, false);
+  assert.equal(settings.shortcutMode, "toggle");
+  assert.equal(settings.pasteLastHotkey, "CommandOrControl+Alt+V");
 });
 
-test("mergeSettings normalizes Windows productization booleans", () => {
+test("mergeSettings normalizes Windows productization settings", () => {
   const settings = mergeSettings({
     launchAtLogin: 1,
     startMinimizedToTray: "yes",
-    globalShortcutPaused: ""
+    globalShortcutPaused: "",
+    shortcutMode: "hold",
+    pasteLastHotkey: " CommandOrControl+Shift+V "
   });
 
   assert.equal(settings.launchAtLogin, true);
   assert.equal(settings.startMinimizedToTray, true);
   assert.equal(settings.globalShortcutPaused, false);
+  assert.equal(settings.shortcutMode, "hold");
+  assert.equal(settings.pasteLastHotkey, "CommandOrControl+Shift+V");
+});
+
+test("mergeSettings rejects unsupported shortcut modes and allows clearing paste-last hotkey", () => {
+  const settings = mergeSettings({
+    shortcutMode: "press",
+    pasteLastHotkey: "   "
+  });
+
+  assert.equal(settings.shortcutMode, "toggle");
+  assert.equal(settings.pasteLastHotkey, "");
 });
 
 test("mergeSettings accepts default overrides", () => {
@@ -300,7 +316,9 @@ test("saveSettings persists Windows productization settings", async () => {
     await store.saveSettings({
       launchAtLogin: true,
       startMinimizedToTray: true,
-      globalShortcutPaused: true
+      globalShortcutPaused: true,
+      shortcutMode: "hold",
+      pasteLastHotkey: "CommandOrControl+Shift+V"
     });
 
     const settings = await store.getSettings();
@@ -309,9 +327,13 @@ test("saveSettings persists Windows productization settings", async () => {
     assert.equal(settings.launchAtLogin, true);
     assert.equal(settings.startMinimizedToTray, true);
     assert.equal(settings.globalShortcutPaused, true);
+    assert.equal(settings.shortcutMode, "hold");
+    assert.equal(settings.pasteLastHotkey, "CommandOrControl+Shift+V");
     assert.equal(persisted.launchAtLogin, true);
     assert.equal(persisted.startMinimizedToTray, true);
     assert.equal(persisted.globalShortcutPaused, true);
+    assert.equal(persisted.shortcutMode, "hold");
+    assert.equal(persisted.pasteLastHotkey, "CommandOrControl+Shift+V");
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

@@ -819,6 +819,8 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     whisperLanguage: data.get("whisperLanguage"),
     outputLanguage: data.get("outputLanguage"),
     hotkey: data.get("hotkey"),
+    shortcutMode: data.get("shortcutMode"),
+    pasteLastHotkey: data.get("pasteLastHotkey"),
     globalShortcutPaused: form.globalShortcutPaused.checked,
     launchAtLogin: form.launchAtLogin.checked,
     startMinimizedToTray: form.startMinimizedToTray.checked,

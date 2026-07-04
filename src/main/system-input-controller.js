@@ -69,13 +69,8 @@ export function createSystemInputController({
     return getState();
   }
 
-  async function toggle() {
-    if (state.phase === "recording") {
-      await stopRecording();
-      return;
-    }
-
-    if (startRecordingPending || isBusyPhase(state.phase)) {
+  async function start() {
+    if (state.phase === "recording" || startRecordingPending || isBusyPhase(state.phase)) {
       return;
     }
 
@@ -93,6 +88,23 @@ export function createSystemInputController({
     } finally {
       startRecordingPending = false;
     }
+  }
+
+  async function stop() {
+    if (state.phase !== "recording") {
+      return;
+    }
+
+    await stopRecording();
+  }
+
+  async function toggle() {
+    if (state.phase === "recording") {
+      await stop();
+      return;
+    }
+
+    await start();
   }
 
   function handleRendererStatus(payload = {}) {
@@ -169,6 +181,8 @@ export function createSystemInputController({
   return {
     getState,
     setPhase,
+    start,
+    stop,
     toggle,
     handleRendererStatus
   };

@@ -25,6 +25,15 @@ test("settings expose Windows productization controls", async () => {
   assert.match(html, /data-i18n="label.launchAtLogin"/);
   assert.match(html, /data-i18n="label.startMinimizedToTray"/);
   assert.match(html, /data-i18n="label.globalShortcutPaused"/);
+  assert.match(html, /id="shortcutMode"/);
+  assert.match(html, /name="shortcutMode"/);
+  assert.match(html, /<option value="toggle"/);
+  assert.match(html, /<option value="hold"/);
+  assert.match(html, /id="pasteLastHotkey"/);
+  assert.match(html, /name="pasteLastHotkey"/);
+  assert.match(html, /data-i18n="label.shortcutMode"/);
+  assert.match(html, /data-i18n="label.pasteLastHotkey"/);
+  assert.match(html, /data-i18n="hint.mouseShortcut"/);
 });
 
 test("home screen exposes a contextual recovery action when recording is blocked", async () => {

@@ -1,9 +1,13 @@
 export function createHotkeyManager({
   globalShortcut,
   onToggle,
+  onStart = onToggle,
+  onStop = onToggle,
+  onPasteLast = () => {},
   onStatus = () => {}
 }) {
-  let registeredHotkey = "";
+  let registeredHotkeys = [];
+  let primaryHotkey = "";
   let paused = false;
 
   function emitStatus(status) {
@@ -12,12 +16,12 @@ export function createHotkeyManager({
   }
 
   function unregister() {
-    if (!registeredHotkey) {
-      return;
+    for (const hotkey of registeredHotkeys) {
+      globalShortcut.unregister(hotkey);
     }
 
-    globalShortcut.unregister(registeredHotkey);
-    registeredHotkey = "";
+    registeredHotkeys = [];
+    primaryHotkey = "";
   }
 
   function register(settings = {}) {
@@ -25,6 +29,8 @@ export function createHotkeyManager({
     paused = Boolean(settings.globalShortcutPaused);
 
     const hotkey = String(settings.hotkey ?? "").trim();
+    const pasteLastHotkey = String(settings.pasteLastHotkey ?? "").trim();
+    const shortcutMode = settings.shortcutMode === "hold" ? "hold" : "toggle";
 
     if (settings.globalShortcutPaused) {
       return emitStatus({
@@ -44,23 +50,101 @@ export function createHotkeyManager({
       });
     }
 
-    if (!globalShortcut.register(hotkey, onToggle)) {
+    if (pasteLastHotkey && pasteLastHotkey === hotkey) {
       return emitStatus({
         ok: false,
-        reason: "registration_failed",
+        reason: "duplicate_hotkey",
         phase: "error",
-        message: `Could not register hotkey: ${hotkey}`
+        message: "Dictation and paste-last shortcuts must be different."
       });
     }
 
-    registeredHotkey = hotkey;
+    const primaryStatus = registerPrimaryHotkey(hotkey, shortcutMode);
+    if (!primaryStatus.ok) {
+      return emitStatus(primaryStatus);
+    }
+
+    if (pasteLastHotkey) {
+      const pasteLastStatus = registerPlainHotkey(pasteLastHotkey, onPasteLast);
+      if (!pasteLastStatus.ok) {
+        unregister();
+        return emitStatus(pasteLastStatus);
+      }
+    }
+
     paused = false;
-    return emitStatus({
+    return emitStatus(primaryStatus);
+  }
+
+  function registerPrimaryHotkey(hotkey, shortcutMode) {
+    if (shortcutMode === "hold" && typeof globalShortcut.registerPressAndRelease === "function") {
+      const ok = globalShortcut.registerPressAndRelease(hotkey, {
+        onPress: onStart,
+        onRelease: onStop
+      });
+      if (!ok) {
+        return createRegistrationFailure(hotkey);
+      }
+
+      registeredHotkeys.push(hotkey);
+      primaryHotkey = hotkey;
+      return {
+        ok: true,
+        paused: false,
+        phase: "ready",
+        mode: "hold",
+        message: `Hold shortcut ready: ${hotkey}`
+      };
+    }
+
+    const status = registerPlainHotkey(hotkey, onToggle);
+    if (!status.ok) {
+      return status;
+    }
+
+    primaryHotkey = hotkey;
+
+    if (shortcutMode === "hold") {
+      return {
+        ok: true,
+        paused: false,
+        phase: "warning",
+        reason: "hold_shortcut_unsupported",
+        mode: "toggle",
+        message: `Hold shortcut needs native release events. Using toggle shortcut: ${hotkey}`
+      };
+    }
+
+    return {
+      ok: true,
+      paused: false,
+      phase: "ready",
+      mode: "toggle",
+      message: `Global shortcut ready: ${hotkey}`
+    };
+  }
+
+  function registerPlainHotkey(hotkey, callback) {
+    if (!globalShortcut.register(hotkey, callback)) {
+      return createRegistrationFailure(hotkey);
+    }
+
+    registeredHotkeys.push(hotkey);
+    return {
       ok: true,
       paused: false,
       phase: "ready",
       message: `Global shortcut ready: ${hotkey}`
-    });
+    };
+  }
+
+  function createRegistrationFailure(hotkey) {
+    return {
+      ok: false,
+      reason: "registration_failed",
+      phase: "error",
+      message: `Could not register hotkey: ${hotkey}`
+    };
   }
 
   function pause() {
@@ -87,7 +171,11 @@ export function createHotkeyManager({
   }
 
   function getRegisteredHotkey() {
-    return registeredHotkey;
+    return primaryHotkey;
+  }
+
+  function getRegisteredHotkeys() {
+    return [...registeredHotkeys];
   }
 
   return {
@@ -96,6 +184,7 @@ export function createHotkeyManager({
     pause,
     resume,
     isPaused,
-    getRegisteredHotkey
+    getRegisteredHotkey,
+    getRegisteredHotkeys
   };
 }

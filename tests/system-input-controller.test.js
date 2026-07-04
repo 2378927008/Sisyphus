@@ -32,6 +32,37 @@ test("system input controller toggles recording through injected callbacks", asy
   assert.deepEqual(calls, ["start", "stop"]);
 });
 
+test("system input controller exposes explicit start and stop commands", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start"),
+    stopRecording: async () => calls.push("stop")
+  });
+
+  await controller.start();
+  controller.setPhase("recording");
+  await controller.stop();
+
+  assert.deepEqual(calls, ["start", "stop"]);
+});
+
+test("system input controller explicit commands ignore invalid lifecycle states", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start"),
+    stopRecording: async () => calls.push("stop")
+  });
+
+  await controller.stop();
+  controller.setPhase("recording");
+  await controller.start();
+  controller.setPhase("transcribing");
+  await controller.start();
+  await controller.stop();
+
+  assert.deepEqual(calls, []);
+});
+
 test("system input controller exposes starting and stopping lifecycle phases", () => {
   const controller = createSystemInputController();
 
