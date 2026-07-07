@@ -134,6 +134,36 @@ test("hold shortcut mode falls back to toggle when release events are unavailabl
   assert.deepEqual(toggles, ["toggle"]);
 });
 
+test("hold shortcut mode falls back to toggle when the release adapter cannot register", () => {
+  const globalShortcut = createFakeGlobalShortcut({
+    pressAndRelease: true,
+    pressAndReleaseResult: false
+  });
+  const toggles = [];
+  const manager = createHotkeyManager({
+    globalShortcut,
+    onToggle: () => toggles.push("toggle")
+  });
+
+  const status = manager.register({
+    hotkey: "Ctrl+Alt+Space",
+    shortcutMode: "hold"
+  });
+
+  assert.equal(status.ok, true);
+  assert.equal(status.reason, "hold_shortcut_unavailable");
+  assert.equal(status.mode, "toggle");
+  assert.equal(status.phase, "warning");
+  assert.deepEqual(globalShortcut.calls, [
+    { type: "registerPressAndRelease", hotkey: "Ctrl+Alt+Space" },
+    { type: "register", hotkey: "Ctrl+Alt+Space" }
+  ]);
+
+  globalShortcut.trigger("Ctrl+Alt+Space");
+
+  assert.deepEqual(toggles, ["toggle"]);
+});
+
 test("reports registration conflicts", () => {
   const globalShortcut = createFakeGlobalShortcut({ registerResult: false });
   const statuses = [];
@@ -260,7 +290,11 @@ test("missing hotkey reports an error and clears any previous registration", () 
   assert.deepEqual(toggles, []);
 });
 
-function createFakeGlobalShortcut({ registerResult = true, pressAndRelease = false } = {}) {
+function createFakeGlobalShortcut({
+  registerResult = true,
+  pressAndRelease = false,
+  pressAndReleaseResult = registerResult
+} = {}) {
   const callbacks = new Map();
   const pressCallbacks = new Map();
   const releaseCallbacks = new Map();
@@ -294,7 +328,7 @@ function createFakeGlobalShortcut({ registerResult = true, pressAndRelease = fal
   if (pressAndRelease) {
     fake.registerPressAndRelease = (hotkey, handlers) => {
       calls.push({ type: "registerPressAndRelease", hotkey });
-      if (!registerResult) {
+      if (!pressAndReleaseResult) {
         return false;
       }
       pressCallbacks.set(hotkey, handlers.onPress);

@@ -20,6 +20,8 @@ import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
 import { pasteText } from "./paste.js";
+import { createNativeInputShortcutFromPackage } from "./native-input-shortcut.js";
+import { createShortcutBackend } from "./shortcut-backend.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererRecordingPhases = new Set([
@@ -49,6 +51,7 @@ let runtimeRoot;
 let vendorRoot;
 let appRoot;
 let hotkeyManager;
+let nativeShortcut;
 let lastSettings;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
@@ -465,8 +468,18 @@ app.whenReady().then(async () => {
     isReadyToRecord: () => true,
     requestRendererReset: () => sendWindowMessage(mainWindow, "recording:reset")
   });
-  hotkeyManager = createHotkeyManager({
+  nativeShortcut = await createNativeInputShortcutFromPackage({
+    platform: process.platform,
+    onError: (error) => {
+      console.warn(`Native input hook unavailable: ${getErrorMessage(error)}`);
+    }
+  });
+  const shortcutBackend = createShortcutBackend({
     globalShortcut,
+    nativeShortcut
+  });
+  hotkeyManager = createHotkeyManager({
+    globalShortcut: shortcutBackend,
     onToggle: () => systemInputController?.toggle(),
     onStart: () => systemInputController?.start(),
     onStop: () => systemInputController?.stop(),

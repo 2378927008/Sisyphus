@@ -453,6 +453,8 @@ test("main process imports Windows productization modules", async () => {
   assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
   assert.match(mainSource, /import \{ buildTrayMenuTemplate, getTrayTooltip \} from "\.\/tray-menu\.js";/);
   assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
+  assert.match(mainSource, /import \{ createNativeInputShortcutFromPackage \} from "\.\/native-input-shortcut\.js";/);
+  assert.match(mainSource, /import \{ createShortcutBackend \} from "\.\/shortcut-backend\.js";/);
 });
 
 test("main process stores and serves latest dictation status", async () => {
@@ -513,8 +515,20 @@ test("main process delegates hotkeys startup settings and tray state to product 
   assert.match(mainSource, /applyStartupSettings\(app, lastSettings\)/);
   assert.match(mainSource, /shouldStartMinimized\(process\.argv, lastSettings\)/);
   assert.match(mainSource, /hotkeyManager = createHotkeyManager\(\{/);
+  assert.match(mainSource, /const shortcutBackend = createShortcutBackend\(\{/);
+  assert.match(mainSource, /globalShortcut: shortcutBackend/);
   assert.match(mainSource, /await hotkeyManager\.register\(settings\)/);
   assert.doesNotMatch(mainSource, /globalShortcut\.unregisterAll\(\)/);
+});
+
+test("main process wires the optional native input hook backend", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+
+  assert.match(mainSource, /let nativeShortcut;/);
+  assert.match(mainSource, /nativeShortcut = await createNativeInputShortcutFromPackage\(\{/);
+  assert.match(mainSource, /platform: process\.platform/);
+  assert.match(mainSource, /Native input hook unavailable/);
+  assert.match(mainSource, /createShortcutBackend\(\{\s*globalShortcut,\s*nativeShortcut\s*\}\)/);
 });
 
 test("main process wires desktop convenience shortcut callbacks", async () => {

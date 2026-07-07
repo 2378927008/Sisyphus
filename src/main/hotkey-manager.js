@@ -82,19 +82,23 @@ export function createHotkeyManager({
         onPress: onStart,
         onRelease: onStop
       });
-      if (!ok) {
-        return createRegistrationFailure(hotkey);
+      if (ok) {
+        registeredHotkeys.push(hotkey);
+        primaryHotkey = hotkey;
+        return {
+          ok: true,
+          paused: false,
+          phase: "ready",
+          mode: "hold",
+          message: `Hold shortcut ready: ${hotkey}`
+        };
       }
 
-      registeredHotkeys.push(hotkey);
-      primaryHotkey = hotkey;
-      return {
-        ok: true,
-        paused: false,
-        phase: "ready",
-        mode: "hold",
-        message: `Hold shortcut ready: ${hotkey}`
-      };
+      return registerHoldFallback(hotkey, "hold_shortcut_unavailable");
+    }
+
+    if (shortcutMode === "hold") {
+      return registerHoldFallback(hotkey, "hold_shortcut_unsupported");
     }
 
     const status = registerPlainHotkey(hotkey, onToggle);
@@ -103,24 +107,29 @@ export function createHotkeyManager({
     }
 
     primaryHotkey = hotkey;
-
-    if (shortcutMode === "hold") {
-      return {
-        ok: true,
-        paused: false,
-        phase: "warning",
-        reason: "hold_shortcut_unsupported",
-        mode: "toggle",
-        message: `Hold shortcut needs native release events. Using toggle shortcut: ${hotkey}`
-      };
-    }
-
     return {
       ok: true,
       paused: false,
       phase: "ready",
       mode: "toggle",
       message: `Global shortcut ready: ${hotkey}`
+    };
+  }
+
+  function registerHoldFallback(hotkey, reason) {
+    const status = registerPlainHotkey(hotkey, onToggle);
+    if (!status.ok) {
+      return status;
+    }
+
+    primaryHotkey = hotkey;
+    return {
+      ok: true,
+      paused: false,
+      phase: "warning",
+      reason,
+      mode: "toggle",
+      message: `Hold shortcut needs native release events. Using toggle shortcut: ${hotkey}`
     };
   }
 

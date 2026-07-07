@@ -10,6 +10,7 @@ test("package exposes Windows packaging scripts and electron-builder dependency"
   assert.equal(pkg.scripts["check:packaged"], "node scripts/packaged-start-smoke.mjs");
   assert.equal(pkg.scripts["check:product"], "node scripts/product-readiness-report.mjs");
   assert.ok(pkg.devDependencies["electron-builder"]);
+  assert.equal(pkg.dependencies["uiohook-napi"], "^1.5.5");
 });
 
 test("packaged smoke script launches the unpacked Windows app in hidden mode", async () => {
@@ -89,6 +90,7 @@ test("electron-builder configuration targets Local Flow Windows NSIS builds", as
   assert.equal(pkg.build.appId, "com.localflow.dictation");
   assert.equal(pkg.build.productName, "Local Flow");
   assert.equal(pkg.build.asar, false);
+  assert.equal(pkg.build.npmRebuild, false);
   assert.equal(pkg.build.directories.output, "dist");
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
   assert.equal(pkg.build.nsis.createDesktopShortcut, true);

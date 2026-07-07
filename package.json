@@ -25,6 +25,7 @@
     "appId": "com.localflow.dictation",
     "productName": "Local Flow",
     "asar": false,
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
@@ -67,5 +68,8 @@
       "installerIcon": "assets/local-flow-icon.ico",
       "uninstallerIcon": "assets/local-flow-icon.ico"
     }
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
   }
 }

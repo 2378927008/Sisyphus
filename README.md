@@ -6,7 +6,7 @@ Local-first Windows voice dictation app inspired by Typeless and Wispr Flow. It 
 
 - Electron desktop app for Windows.
 - Global shortcut: `Ctrl + Alt + Space`.
-- Shortcut behavior can be set to toggle or hold-to-dictate. Hold mode needs a press/release shortcut adapter; the built-in Electron shortcut path falls back to toggle behavior when release events are unavailable.
+- Shortcut behavior can be set to toggle or hold-to-dictate. Hold mode uses the native input hook when available, and falls back to toggle behavior if native release events cannot be loaded.
 - Paste last result shortcut: `Ctrl + Alt + V` by default.
 - Background tray mode: closing the main window keeps Local Flow running.
 - Tray actions for showing the app, starting/stopping dictation, pausing the shortcut, launch-at-login, start-minimized, settings, and quit.
@@ -101,9 +101,9 @@ If the global shortcut conflicts with another app, Local Flow shows a hotkey err
 Open `设置` > `快捷键` to tune the desktop input loop:
 
 - `全局快捷键`: starts/stops dictation. Default: `Ctrl + Alt + Space`.
-- `语音输入快捷键行为`: choose press-to-toggle or hold-to-dictate. Electron's built-in global shortcut API does not expose key release events, so hold mode currently falls back to toggle unless a native press/release adapter is added.
+- `语音输入快捷键行为`: choose press-to-toggle or hold-to-dictate. Hold mode uses the native input hook when available; if the native hook cannot load, Local Flow falls back to toggle mode with a warning.
 - `粘贴上一段结果快捷键`: pastes the last successful dictation again. Default: `Ctrl + Alt + V`.
-- Mouse side button: map `Mouse4` or `Mouse5` to the global dictation shortcut in your mouse driver, PowerToys, or device software. This is the recommended safe path until Local Flow ships a reviewed native Windows input hook.
+- Mouse side button: enter `Mouse4` or `Mouse5` directly as the global dictation shortcut. If native input hook loading fails on a machine, map the side button to the keyboard shortcut in your mouse driver, PowerToys, or device software.
 
 ## 中文试用步骤
 
