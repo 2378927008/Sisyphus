@@ -20,6 +20,7 @@ import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
 import { pasteText } from "./paste.js";
+import { insertTextIntoPreviousApp } from "./insert-text.js";
 import { createNativeInputShortcutFromPackage } from "./native-input-shortcut.js";
 import { createShortcutBackend } from "./shortcut-backend.js";
 
@@ -72,6 +73,7 @@ function createWindow({ showOnReady = true } = {}) {
       nodeIntegration: false
     }
   });
+  Menu.setApplicationMenu(null);
 
   mainWindow.once("ready-to-show", () => {
     if (!showOnReady) {
@@ -387,6 +389,17 @@ function wireIpc() {
 
     const status = sanitizeRecordingStatusPayload(payload);
     systemInputController?.handleRendererStatus(status);
+  });
+  ipcMain.handle("dictation:insert-text", async (_event, text) => {
+    if (_event.sender !== mainWindow?.webContents) {
+      return {
+        ok: false,
+        reason: "unauthorized",
+        message: "Paste failed. Text copied."
+      };
+    }
+
+    return insertTextIntoPreviousApp(text, { mainWindow, clipboard });
   });
   ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
   ipcMain.handle("settings:get", () => settingsStore.getSettings());

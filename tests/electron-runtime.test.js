@@ -320,6 +320,39 @@ test("preload exposes latest dictation status safely", async () => {
   assert.deepEqual(invoked, [{ channel: "dictation:status-latest", payload: undefined }]);
 });
 
+test("preload exposes insert text IPC without raw ipcRenderer access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const invoked = [];
+  let exposedApi = null;
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return { ok: true };
+          },
+          on: () => {},
+          send: () => {}
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(await exposedApi.insertText("edited text"), { ok: true });
+  assert.deepEqual(invoked, [{ channel: "dictation:insert-text", payload: "edited text" }]);
+});
+
 test("preload exposes settings open listener without raw IPC event access", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   let exposedApi = null;
@@ -649,6 +682,32 @@ test("main process only accepts recording status from the main renderer", async 
       recordingStatusMatch.groups.body.indexOf("sanitizeRecordingStatusPayload(payload)"),
     "main should reject non-main senders before sanitizing or handling status"
   );
+});
+
+test("main process restricts insert text IPC to the main renderer", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const insertHandlerMatch = mainSource.match(
+    /ipcMain\.handle\("dictation:insert-text", async \(_event, text\) => \{(?<body>[\s\S]*?)\n\s*\}\);/
+  );
+
+  assert.ok(insertHandlerMatch, "insert text IPC handler should be defined");
+  const body = insertHandlerMatch.groups.body;
+  assert.match(mainSource, /import \{ insertTextIntoPreviousApp \} from "\.\/insert-text\.js";/);
+  assert.match(body, /if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return \{\s*ok: false,\s*reason: "unauthorized",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
+  assert.match(body, /return insertTextIntoPreviousApp\(text, \{ mainWindow, clipboard \}\);/);
+  assert.ok(
+    body.indexOf("_event.sender !== mainWindow?.webContents") < body.indexOf("insertTextIntoPreviousApp"),
+    "main should reject non-main senders before handling insert text"
+  );
+});
+
+test("main process removes the default application menu after creating the main window", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const createWindowMatch = mainSource.match(/function createWindow\(\{ showOnReady = true \} = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(createWindowMatch, "createWindow should be defined");
+  assert.match(createWindowMatch.groups.body, /mainWindow = new BrowserWindow\([\s\S]*?\);\s*Menu\.setApplicationMenu\(null\);/);
+  assert.match(mainSource, /Menu\.buildFromTemplate/);
 });
 
 test("main process delegates recording command timeouts to the system input controller", async () => {
