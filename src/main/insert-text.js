@@ -29,7 +29,7 @@ export async function insertTextIntoPreviousApp(text, dependencies = {}) {
   } = dependencies;
 
   try {
-    if (!mainWindow || typeof mainWindow.hide !== "function" || mainWindow.isDestroyed?.()) {
+    if (!isUsableMainWindow(mainWindow)) {
       return windowUnavailableResult();
     }
 
@@ -38,7 +38,19 @@ export async function insertTextIntoPreviousApp(text, dependencies = {}) {
     return windowUnavailableResult();
   }
 
-  await wait(140);
+  try {
+    await wait(140);
+  } catch {
+    return pasteFailureResult();
+  }
+
+  try {
+    if (!isUsableMainWindow(mainWindow)) {
+      return windowUnavailableResult();
+    }
+  } catch {
+    return windowUnavailableResult();
+  }
 
   try {
     await paste(normalizedText, { clipboard });
@@ -62,6 +74,18 @@ function windowUnavailableResult() {
     reason: "window_unavailable",
     message: pasteFailureMessage
   };
+}
+
+function pasteFailureResult() {
+  return {
+    ok: false,
+    reason: "paste_failed",
+    message: pasteFailureMessage
+  };
+}
+
+function isUsableMainWindow(mainWindow) {
+  return Boolean(mainWindow && typeof mainWindow.hide === "function" && !mainWindow.isDestroyed?.());
 }
 
 function normalizePasteFailureReason(reason) {

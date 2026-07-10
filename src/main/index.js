@@ -399,7 +399,15 @@ function wireIpc() {
       };
     }
 
-    return insertTextIntoPreviousApp(text, { mainWindow, clipboard });
+    try {
+      return await insertTextIntoPreviousApp(text, { mainWindow, clipboard });
+    } catch {
+      return {
+        ok: false,
+        reason: "paste_failed",
+        message: "Paste failed. Text copied."
+      };
+    }
   });
   ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
   ipcMain.handle("settings:get", () => settingsStore.getSettings());

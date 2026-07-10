@@ -50,6 +50,55 @@ test("insertTextIntoPreviousApp hides, waits, then pastes normalized text", asyn
   ]);
 });
 
+test("insertTextIntoPreviousApp does not paste when the window is destroyed while waiting", async () => {
+  let destroyed = false;
+  let pasteCalls = 0;
+
+  const result = await insertTextIntoPreviousApp("edited text", {
+    mainWindow: {
+      isDestroyed: () => destroyed,
+      hide() {}
+    },
+    wait: async () => {
+      destroyed = true;
+    },
+    paste: async () => {
+      pasteCalls += 1;
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "window_unavailable",
+    message: "Paste failed. Text copied."
+  });
+  assert.equal(pasteCalls, 0);
+});
+
+test("insertTextIntoPreviousApp maps wait failures without exposing diagnostics", async () => {
+  let pasteCalls = 0;
+
+  const result = await insertTextIntoPreviousApp("edited text", {
+    mainWindow: {
+      isDestroyed: () => false,
+      hide() {}
+    },
+    wait: async () => {
+      throw new Error("C:/secret/path timeout stack trace");
+    },
+    paste: async () => {
+      pasteCalls += 1;
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "paste_failed",
+    message: "Paste failed. Text copied."
+  });
+  assert.equal(pasteCalls, 0);
+});
+
 test("insertTextIntoPreviousApp maps clipboard failures without exposing diagnostics", async () => {
   const result = await insertTextIntoPreviousApp("edited text", {
     mainWindow: {

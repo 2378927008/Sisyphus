@@ -4,6 +4,20 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { electronRuntimeSwitches } from "../src/main/electron-runtime.js";
 
+function removeLeadingWhitespaceAndComments(source) {
+  let remainder = source;
+
+  while (true) {
+    remainder = remainder.replace(/^\s+/, "");
+    const comment = remainder.match(/^(?:\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)/);
+    if (!comment) {
+      return remainder;
+    }
+
+    remainder = remainder.slice(comment[0].length);
+  }
+}
+
 test("electronRuntimeSwitches disables sandbox and GPU paths for constrained Windows sessions", () => {
   assert.deepEqual(electronRuntimeSwitches, [
     "no-sandbox",
@@ -693,11 +707,14 @@ test("main process restricts insert text IPC to the main renderer", async () => 
   assert.ok(insertHandlerMatch, "insert text IPC handler should be defined");
   const body = insertHandlerMatch.groups.body;
   assert.match(mainSource, /import \{ insertTextIntoPreviousApp \} from "\.\/insert-text\.js";/);
-  assert.match(body, /if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return \{\s*ok: false,\s*reason: "unauthorized",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
-  assert.match(body, /return insertTextIntoPreviousApp\(text, \{ mainWindow, clipboard \}\);/);
+  const guardMatch = body.match(/if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return \{\s*ok: false,\s*reason: "unauthorized",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
+
+  assert.match(removeLeadingWhitespaceAndComments(body), /^if \(_event\.sender !== mainWindow\?\.webContents\) \{/);
+  assert.ok(guardMatch, "insert text handler should reject unauthorized senders");
+  assert.match(body, /try \{\s*return await insertTextIntoPreviousApp\(text, \{ mainWindow, clipboard \}\);\s*\} catch \{\s*return \{\s*ok: false,\s*reason: "paste_failed",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
   assert.ok(
-    body.indexOf("_event.sender !== mainWindow?.webContents") < body.indexOf("insertTextIntoPreviousApp"),
-    "main should reject non-main senders before handling insert text"
+    body.search(/\btext\b/) > guardMatch.index + guardMatch[0].length,
+    "main should not use text before the unauthorized sender guard has returned"
   );
 });
 
