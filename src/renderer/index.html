@@ -12,191 +12,183 @@
   </head>
   <body>
     <main class="app-shell">
-      <header class="app-header">
-        <div>
-          <p class="eyebrow" data-i18n="app.eyebrow">本地优先语音输入</p>
-          <h1 data-i18n="app.title">Local Flow 本地语音输入</h1>
+      <header id="appHeader" class="app-header">
+        <div class="app-brand">
+          <h1>Local Flow</h1>
+          <p><span aria-hidden="true">●</span> 本地识别已就绪</p>
         </div>
-        <button id="openSettings" class="icon-text-button" type="button" data-i18n="action.settings">设置</button>
+
+        <div id="mainTabs" class="main-tabs" role="tablist" aria-label="主视图">
+          <button
+            id="dictationTab"
+            role="tab"
+            aria-selected="true"
+            aria-controls="dictationPanel"
+            type="button"
+          >
+            <span data-lucide="Mic"></span>
+            语音输入
+          </button>
+          <button
+            id="historyTab"
+            role="tab"
+            aria-selected="false"
+            aria-controls="historyPanel"
+            tabindex="-1"
+            type="button"
+          >
+            <span data-lucide="History"></span>
+            历史
+          </button>
+        </div>
+
+        <button
+          id="openSettings"
+          class="ghost"
+          type="button"
+          title="设置"
+          aria-label="设置"
+          data-i18n-title="action.settings"
+          data-i18n-aria-label="action.settings"
+        >
+          <span data-lucide="Settings"></span>
+        </button>
       </header>
 
-      <section class="dictation-stage">
-        <div class="language-strip">
+      <section
+        id="dictationPanel"
+        class="dictation-stage"
+        role="tabpanel"
+        aria-labelledby="dictationTab"
+      >
+        <div id="languageControls" class="language-strip">
           <label>
             <span data-i18n="label.recognitionLanguage">语音识别语言</span>
             <select id="whisperLanguage" name="whisperLanguage" form="settingsForm"></select>
           </label>
+          <span aria-hidden="true">→</span>
           <label>
             <span data-i18n="label.outputLanguage">输出语言</span>
             <select id="outputLanguage" name="outputLanguage" form="settingsForm"></select>
           </label>
+          <div class="shortcut-hint">
+            <span data-lucide="Keyboard"></span>
+            <span>快捷键</span>
+          </div>
         </div>
 
-        <section id="setupChecklist" class="setup-checklist" aria-live="polite">
-          <div class="setup-row" data-setup-type="whisper">
-            <div>
-              <strong data-i18n="setup.whisper.title">Whisper 语音模型</strong>
-              <p id="whisperSetupStatus" data-i18n="setup.whisper.missing">录音前需要安装。</p>
-            </div>
-            <button id="installWhisper" class="secondary" type="button" data-i18n="setup.installWhisper">安装 Whisper</button>
-          </div>
-          <div class="setup-row" data-setup-type="llm">
-            <div>
-              <strong data-i18n="setup.llm.title">Qwen 本地文本模型</strong>
-              <p id="llmSetupStatus" data-i18n="setup.llm.missing">用于高级整理和目标语言输出，可选安装。</p>
-            </div>
-            <button id="installLlm" class="secondary" type="button" data-i18n="setup.installLlm">安装 Qwen</button>
-          </div>
-          <button id="refreshSetupStatus" class="ghost" type="button" data-i18n="setup.refresh">刷新安装状态</button>
-          <button id="cancelSetup" class="ghost danger-action" type="button" data-i18n="setup.cancel" hidden>取消安装</button>
-          <pre id="setupOutput" class="setup-output" aria-live="polite" hidden></pre>
+        <section id="voiceCommandBar" class="status-line" aria-label="录音控制">
+          <button id="recordButton" class="primary" type="button" aria-live="polite">
+            <span data-lucide="Mic"></span>
+            <span id="recordLabel" data-i18n="record.start">开始录音</span>
+          </button>
+          <p id="statusText">就绪。快捷键：Ctrl + Alt + Space</p>
+          <span class="provider-status">空闲中</span>
         </section>
 
-        <button id="recordButton" class="record-orb" type="button" aria-live="polite">
-          <span class="record-ring"></span>
-          <span class="record-dot"></span>
-          <span id="recordLabel" data-i18n="record.start">开始录音</span>
-        </button>
-
-        <div id="recordRecovery" class="record-recovery" hidden>
-          <p id="recordRecoveryText"></p>
-          <button id="recordRecoveryAction" class="secondary" type="button"></button>
+        <div id="recordRecovery" class="record-recovery" role="status" hidden>
+          <span data-lucide="AlertTriangle"></span>
+          <p id="recordRecoveryText">录音暂不可用，请检查设置。</p>
+          <button id="recordRecoveryAction" class="secondary" type="button">打开设置</button>
         </div>
 
-        <div class="status-line">
-          <span data-i18n="label.status">状态</span>
-          <p id="statusText">就绪。快捷键：Ctrl + Alt + Space</p>
-          <p id="providerStatusText" class="provider-status"></p>
-        </div>
+        <section id="resultWorkspace" class="result-surface" aria-labelledby="resultHeading">
+          <div class="section-title">
+            <h2 id="resultHeading" data-i18n="label.latestResult">最新结果</h2>
+            <div class="button-row" aria-label="结果操作">
+              <button id="restoreResult" type="button" class="ghost">
+                <span data-lucide="Undo2"></span>
+                撤销
+              </button>
+              <button id="copyResult" type="button" class="ghost" data-i18n="action.copy">
+                <span data-lucide="Copy"></span>
+                复制
+              </button>
+              <button id="insertResult" type="button" class="ghost">
+                <span data-lucide="CornerDownLeft"></span>
+                插入到光标
+              </button>
+            </div>
+          </div>
+          <div id="resultEditor" class="result-editor">
+            <p
+              id="resultText"
+              class="result-text"
+              contenteditable="true"
+              role="textbox"
+              aria-multiline="true"
+              data-empty-result="true"
+              data-i18n="empty.result"
+            >还没有转写结果。</p>
+          </div>
+        </section>
+
+        <section id="recentHistorySection" class="history-surface" aria-labelledby="recentHistoryHeading">
+          <div class="section-title">
+            <h2 id="recentHistoryHeading" data-i18n="section.recent">最近输入</h2>
+            <button id="refreshHistory" type="button" class="ghost">
+              查看全部
+              <span data-lucide="ChevronRight"></span>
+            </button>
+          </div>
+          <div id="recentHistoryList" class="history-list">
+            <p class="empty">暂无最近记录。</p>
+          </div>
+        </section>
+
+        <footer id="footerHealth" class="status-line" aria-label="本地服务状态">
+          <span data-lucide="CheckCircle2"></span>
+          <span>本地 Whisper 已就绪</span>
+          <span>自动输出保持原语言</span>
+        </footer>
       </section>
 
-      <section class="workspace-grid">
-        <section class="result-surface">
-          <div class="section-title">
-            <div>
-              <p class="eyebrow" data-i18n="label.latestResult">最新结果</p>
-              <h2 data-i18n="section.result">可编辑结果</h2>
-            </div>
-            <button id="copyResult" type="button" class="ghost" data-i18n="action.copy">复制</button>
-          </div>
-          <p id="resultText" class="result-text" contenteditable="true" data-empty-result="true" data-i18n="empty.result">还没有转写结果。</p>
-        </section>
-
-        <section class="history-surface">
-          <div class="section-title">
-            <div>
-              <p class="eyebrow" data-i18n="section.history">历史记录</p>
-              <h2 data-i18n="section.recent">最近输入</h2>
-            </div>
-            <button id="refreshHistory" type="button" class="ghost" data-i18n="action.refresh">刷新</button>
-          </div>
+      <section
+        id="historyPanel"
+        class="history-surface"
+        role="tabpanel"
+        aria-labelledby="historyTab"
+        hidden
+      >
+        <div class="section-title">
+          <h2 data-i18n="section.history">历史记录</h2>
+        </div>
+        <div id="fullHistoryList">
           <div id="historyList" class="history-list"></div>
-        </section>
+        </div>
       </section>
     </main>
 
     <aside id="settingsDrawer" class="settings-drawer" aria-hidden="true">
       <div class="drawer-backdrop" data-close-settings="true"></div>
-      <section class="drawer-panel" aria-label="Settings">
+      <section class="drawer-panel" aria-label="语音输入设置">
         <header class="drawer-header">
           <div>
             <p class="eyebrow" data-i18n="action.settings">设置</p>
             <h2 data-i18n="section.settings">语音输入设置</h2>
           </div>
-          <button id="closeSettings" class="ghost" type="button" data-i18n="action.close">关闭</button>
+          <button
+            id="closeSettings"
+            class="ghost"
+            type="button"
+            title="关闭"
+            aria-label="关闭"
+            data-i18n-title="action.close"
+            data-i18n-aria-label="action.close"
+          >
+            <span data-lucide="X"></span>
+          </button>
         </header>
 
         <form id="settingsForm" class="settings-form">
-          <section class="drawer-section">
-            <h3 data-i18n="section.language">语言</h3>
+          <section id="settingsGeneral" class="drawer-section">
+            <button type="button" class="drawer-section-button" aria-expanded="true">
+              常规
+            </button>
             <label>
               <span data-i18n="label.interfaceLanguage">界面语言</span>
               <select id="interfaceLanguage" name="interfaceLanguage"></select>
             </label>
-          </section>
-
-          <section class="drawer-section">
-            <h3 data-i18n="section.builtInModel">内置本地语言模型</h3>
-            <div id="localModelStatus" class="model-status"></div>
-            <label>
-              <span data-i18n="label.llmProvider">文本模型提供方</span>
-              <select id="llmProvider" name="llmProvider">
-                <option value="mymemory" data-i18n="model.provider.mymemory">MyMemory Free</option>
-                <option value="embedded" data-i18n="model.provider.embedded">内置 Qwen3</option>
-                <option value="ollama" data-i18n="model.provider.ollama">Ollama</option>
-              </select>
-            </label>
-            <button id="checkTextProvider" class="secondary" type="button" data-i18n="action.checkTextProvider">检查文本输出</button>
-            <div id="textDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
-            <label>
-              <span data-i18n="label.embeddedLlmCliPath">llama.cpp 可执行文件</span>
-              <input id="embeddedLlmCliPath" name="embeddedLlmCliPath" placeholder="vendor\llm\bin\llama-cli.exe" />
-            </label>
-            <label>
-              <span data-i18n="label.embeddedLlmModelPath">Qwen3 GGUF 模型文件</span>
-              <input id="embeddedLlmModelPath" name="embeddedLlmModelPath" placeholder="vendor\llm\models\Qwen3-4B-Q4_K_M.gguf" />
-            </label>
-            <button id="setupLocalModel" class="secondary" type="button" data-i18n="action.setupLocalModel">显示安装命令</button>
-            <pre id="localModelInstallCommand" class="install-command" hidden></pre>
-          </section>
-
-          <section class="drawer-section">
-            <h3 data-i18n="section.localModel">Whisper 语音识别</h3>
-            <label>
-              <span data-i18n="label.whisperCliPath">whisper.cpp 可执行文件</span>
-              <input id="whisperCliPath" name="whisperCliPath" placeholder="C:\tools\whisper.cpp\build\bin\Release\whisper-cli.exe" />
-            </label>
-            <label>
-              <span data-i18n="label.whisperModelPath">Whisper 模型文件</span>
-              <input id="whisperModelPath" name="whisperModelPath" placeholder="C:\models\ggml-base.bin" />
-            </label>
-            <div class="button-row">
-              <button id="checkMicrophone" class="secondary" type="button" data-i18n="action.checkMicrophone">检查麦克风</button>
-              <button id="checkWhisper" class="secondary" type="button" data-i18n="action.checkWhisper">检查本地 Whisper</button>
-            </div>
-            <div id="microphoneDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
-            <div id="diagnosticsList" class="diagnostics-list" aria-live="polite"></div>
-          </section>
-
-          <section class="drawer-section">
-            <h3 data-i18n="section.downloadSources">模型下载源</h3>
-            <p class="drawer-hint" data-i18n="hint.downloadSources">留空使用默认官方源；多个备用地址可用分号或换行分隔。</p>
-            <label>
-              <span data-i18n="label.whisperRuntimeUrl">Whisper 运行时主下载地址</span>
-              <input id="whisperRuntimeUrl" name="whisperRuntimeUrl" placeholder="https://github.com/.../whisper-bin-x64.zip" />
-            </label>
-            <label>
-              <span data-i18n="label.whisperRuntimeMirrorUrls">Whisper 运行时备用镜像地址</span>
-              <textarea id="whisperRuntimeMirrorUrls" name="whisperRuntimeMirrorUrls" rows="2"></textarea>
-            </label>
-            <label>
-              <span data-i18n="label.whisperModelUrl">Whisper 模型主下载地址</span>
-              <input id="whisperModelUrl" name="whisperModelUrl" placeholder="https://huggingface.co/.../ggml-base.bin" />
-            </label>
-            <label>
-              <span data-i18n="label.whisperModelMirrorUrls">Whisper 模型备用镜像地址</span>
-              <textarea id="whisperModelMirrorUrls" name="whisperModelMirrorUrls" rows="2"></textarea>
-            </label>
-            <label>
-              <span data-i18n="label.llamaRuntimeUrl">llama.cpp 运行时主下载地址</span>
-              <input id="llamaRuntimeUrl" name="llamaRuntimeUrl" placeholder="https://github.com/.../llama-...zip" />
-            </label>
-            <label>
-              <span data-i18n="label.llamaRuntimeMirrorUrls">llama.cpp 运行时备用镜像地址</span>
-              <textarea id="llamaRuntimeMirrorUrls" name="llamaRuntimeMirrorUrls" rows="2"></textarea>
-            </label>
-            <label>
-              <span data-i18n="label.qwenModelUrl">Qwen 模型主下载地址</span>
-              <input id="qwenModelUrl" name="qwenModelUrl" placeholder="https://huggingface.co/.../Qwen3-4B-Q4_K_M.gguf" />
-            </label>
-            <label>
-              <span data-i18n="label.qwenModelMirrorUrls">Qwen 模型备用镜像地址</span>
-              <textarea id="qwenModelMirrorUrls" name="qwenModelMirrorUrls" rows="2"></textarea>
-            </label>
-          </section>
-
-          <section class="drawer-section">
-            <h3 data-i18n="section.localCleanup">文本整理</h3>
             <label>
               <span data-i18n="label.polishMode">处理模式</span>
               <select id="polishMode" name="polishMode">
@@ -209,26 +201,22 @@
               <input id="pasteAfterTranscribe" name="pasteAfterTranscribe" type="checkbox" />
               <span data-i18n="label.pasteAfterTranscribe">转写后粘贴到当前应用</span>
             </label>
-            <label class="checkbox-label">
-              <input id="ollamaEnabled" name="ollamaEnabled" type="checkbox" />
-              <span data-i18n="label.ollamaEnabled">使用 Ollama 作为高级备用</span>
-            </label>
-            <label>
-              <span data-i18n="label.ollamaBaseUrl">Ollama 地址</span>
-              <input id="ollamaBaseUrl" name="ollamaBaseUrl" placeholder="http://localhost:11434" />
-            </label>
-            <label>
-              <span data-i18n="label.ollamaModel">Ollama 模型</span>
-              <input id="ollamaModel" name="ollamaModel" placeholder="qwen3:4b" />
-            </label>
             <label>
               <span data-i18n="label.dictionary">个人词典</span>
-              <textarea id="dictionary" name="dictionary" rows="5" data-i18n-placeholder="placeholder.dictionary" placeholder="每行一个人名、产品名或术语"></textarea>
+              <textarea
+                id="dictionary"
+                name="dictionary"
+                rows="5"
+                data-i18n-placeholder="placeholder.dictionary"
+                placeholder="每行一个人名、产品名或术语"
+              ></textarea>
             </label>
           </section>
 
-          <section class="drawer-section">
-            <h3 data-i18n="section.shortcuts">快捷键</h3>
+          <section id="settingsShortcuts" class="drawer-section">
+            <button type="button" class="drawer-section-button" aria-expanded="true">
+              快捷键
+            </button>
             <div class="shortcut-setting">
               <label for="hotkey" data-i18n="label.hotkey">全局快捷键</label>
               <div class="shortcut-capture-row">
@@ -279,11 +267,134 @@
             </label>
           </section>
 
+          <section id="settingsModels" class="drawer-section">
+            <button type="button" class="drawer-section-button" aria-expanded="true">
+              模型
+            </button>
+            <div id="localModelStatus" class="model-status"></div>
+            <p id="providerStatusText" class="provider-status"></p>
+            <label>
+              <span data-i18n="label.llmProvider">文本模型提供方</span>
+              <select id="llmProvider" name="llmProvider">
+                <option value="mymemory" data-i18n="model.provider.mymemory">MyMemory Free</option>
+                <option value="embedded" data-i18n="model.provider.embedded">内置 Qwen3</option>
+                <option value="ollama" data-i18n="model.provider.ollama">Ollama</option>
+              </select>
+            </label>
+            <section id="setupChecklist" class="setup-checklist" aria-live="polite">
+              <div class="setup-row" data-setup-type="whisper">
+                <div>
+                  <strong data-i18n="setup.whisper.title">Whisper 语音模型</strong>
+                  <p id="whisperSetupStatus" data-i18n="setup.whisper.missing">录音前需要安装。</p>
+                </div>
+                <button id="installWhisper" class="secondary" type="button" data-i18n="setup.installWhisper">安装 Whisper</button>
+              </div>
+              <div class="setup-row" data-setup-type="llm">
+                <div>
+                  <strong data-i18n="setup.llm.title">Qwen 本地文本模型</strong>
+                  <p id="llmSetupStatus" data-i18n="setup.llm.missing">用于高级整理和目标语言输出，可选安装。</p>
+                </div>
+                <button id="installLlm" class="secondary" type="button" data-i18n="setup.installLlm">安装 Qwen</button>
+              </div>
+              <button id="refreshSetupStatus" class="ghost" type="button" data-i18n="setup.refresh">刷新安装状态</button>
+              <button id="cancelSetup" class="ghost danger-action" type="button" data-i18n="setup.cancel" hidden>取消安装</button>
+              <pre id="setupOutput" class="setup-output" aria-live="polite" hidden></pre>
+            </section>
+          </section>
+
+          <section id="settingsAdvanced" class="drawer-section">
+            <button type="button" class="drawer-section-button" aria-expanded="true">
+              高级
+            </button>
+
+            <h3 data-i18n="section.builtInModel">内置本地语言模型</h3>
+            <label>
+              <span data-i18n="label.embeddedLlmCliPath">llama.cpp 可执行文件</span>
+              <input id="embeddedLlmCliPath" name="embeddedLlmCliPath" placeholder="vendor\llm\bin\llama-cli.exe" />
+            </label>
+            <label>
+              <span data-i18n="label.embeddedLlmModelPath">Qwen3 GGUF 模型文件</span>
+              <input id="embeddedLlmModelPath" name="embeddedLlmModelPath" placeholder="vendor\llm\models\Qwen3-4B-Q4_K_M.gguf" />
+            </label>
+            <div class="button-row">
+              <button id="checkTextProvider" class="secondary" type="button" data-i18n="action.checkTextProvider">检查文本输出</button>
+              <button id="setupLocalModel" class="secondary" type="button" data-i18n="action.setupLocalModel">显示安装命令</button>
+            </div>
+            <div id="textDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
+            <pre id="localModelInstallCommand" class="install-command" hidden></pre>
+
+            <h3 data-i18n="section.localModel">Whisper 语音识别</h3>
+            <label>
+              <span data-i18n="label.whisperCliPath">whisper.cpp 可执行文件</span>
+              <input id="whisperCliPath" name="whisperCliPath" placeholder="C:\tools\whisper.cpp\build\bin\Release\whisper-cli.exe" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelPath">Whisper 模型文件</span>
+              <input id="whisperModelPath" name="whisperModelPath" placeholder="C:\models\ggml-base.bin" />
+            </label>
+            <div class="button-row">
+              <button id="checkMicrophone" class="secondary" type="button" data-i18n="action.checkMicrophone">检查麦克风</button>
+              <button id="checkWhisper" class="secondary" type="button" data-i18n="action.checkWhisper">检查本地 Whisper</button>
+            </div>
+            <div id="microphoneDiagnosticsList" class="diagnostics-list" aria-live="polite"></div>
+            <div id="diagnosticsList" class="diagnostics-list" aria-live="polite"></div>
+
+            <h3 data-i18n="section.downloadSources">模型下载源</h3>
+            <p class="drawer-hint" data-i18n="hint.downloadSources">留空使用默认官方源；多个备用地址可用分号或换行分隔。</p>
+            <label>
+              <span data-i18n="label.whisperRuntimeUrl">Whisper 运行时主下载地址</span>
+              <input id="whisperRuntimeUrl" name="whisperRuntimeUrl" placeholder="https://github.com/.../whisper-bin-x64.zip" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperRuntimeMirrorUrls">Whisper 运行时备用镜像地址</span>
+              <textarea id="whisperRuntimeMirrorUrls" name="whisperRuntimeMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelUrl">Whisper 模型主下载地址</span>
+              <input id="whisperModelUrl" name="whisperModelUrl" placeholder="https://huggingface.co/.../ggml-base.bin" />
+            </label>
+            <label>
+              <span data-i18n="label.whisperModelMirrorUrls">Whisper 模型备用镜像地址</span>
+              <textarea id="whisperModelMirrorUrls" name="whisperModelMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.llamaRuntimeUrl">llama.cpp 运行时主下载地址</span>
+              <input id="llamaRuntimeUrl" name="llamaRuntimeUrl" placeholder="https://github.com/.../llama-...zip" />
+            </label>
+            <label>
+              <span data-i18n="label.llamaRuntimeMirrorUrls">llama.cpp 运行时备用镜像地址</span>
+              <textarea id="llamaRuntimeMirrorUrls" name="llamaRuntimeMirrorUrls" rows="2"></textarea>
+            </label>
+            <label>
+              <span data-i18n="label.qwenModelUrl">Qwen 模型主下载地址</span>
+              <input id="qwenModelUrl" name="qwenModelUrl" placeholder="https://huggingface.co/.../Qwen3-4B-Q4_K_M.gguf" />
+            </label>
+            <label>
+              <span data-i18n="label.qwenModelMirrorUrls">Qwen 模型备用镜像地址</span>
+              <textarea id="qwenModelMirrorUrls" name="qwenModelMirrorUrls" rows="2"></textarea>
+            </label>
+
+            <h3 data-i18n="section.localCleanup">文本整理</h3>
+            <label class="checkbox-label">
+              <input id="ollamaEnabled" name="ollamaEnabled" type="checkbox" />
+              <span data-i18n="label.ollamaEnabled">使用 Ollama 作为高级备用</span>
+            </label>
+            <label>
+              <span data-i18n="label.ollamaBaseUrl">Ollama 地址</span>
+              <input id="ollamaBaseUrl" name="ollamaBaseUrl" placeholder="http://localhost:11434" />
+            </label>
+            <label>
+              <span data-i18n="label.ollamaModel">Ollama 模型</span>
+              <input id="ollamaModel" name="ollamaModel" placeholder="qwen3:4b" />
+            </label>
+          </section>
+
           <button class="primary" type="submit" data-i18n="action.save">保存设置</button>
         </form>
       </section>
     </aside>
 
+    <script type="module" src="./icons.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
