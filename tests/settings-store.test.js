@@ -187,6 +187,35 @@ test("getSettings repairs missing persisted local model paths from detected vend
   }
 });
 
+test("getSettings clears missing persisted local model paths when no detected default exists", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
+
+  try {
+    const settingsPath = path.join(userDataPath, "settings.json");
+    await writeFile(settingsPath, `${JSON.stringify({
+      outputLanguage: "en",
+      llmProvider: "embedded",
+      embeddedLlmCliPath: path.join(userDataPath, "missing", "old-llama-cli.exe"),
+      embeddedLlmModelPath: path.join(userDataPath, "missing", "old-qwen.gguf"),
+      cloudApiKeyEncrypted: "preserve-encrypted-secret"
+    }, null, 2)}\n`, "utf8");
+
+    const store = createSettingsStore(userDataPath, defaultSettings);
+    const settings = await store.getSettings();
+    const persisted = JSON.parse(await readFile(settingsPath, "utf8"));
+
+    assert.equal(settings.embeddedLlmCliPath, "");
+    assert.equal(settings.embeddedLlmModelPath, "");
+    assert.equal(settings.providerStatus.text.configured, false);
+    assert.equal(settings.providerStatus.text.blockedReason, "embedded_llm_not_configured");
+    assert.equal(persisted.embeddedLlmCliPath, "");
+    assert.equal(persisted.embeddedLlmModelPath, "");
+    assert.equal(persisted.cloudApiKeyEncrypted, "preserve-encrypted-secret");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("getSettings keeps existing custom local model paths", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
   const vendorPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-vendor-"));

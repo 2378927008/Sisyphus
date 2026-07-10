@@ -184,7 +184,30 @@ function normalizeShortcutMode(value) {
 async function loadSettings(settingsPath, baseSettings, secretCodec) {
   const persisted = await loadJson(settingsPath, baseSettings);
   const settings = mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
-  return repairMissingLocalAssetPaths(settings, baseSettings);
+  const repaired = await repairMissingLocalAssetPaths(settings, baseSettings);
+  const changedKeys = localAssetPathKeys.filter((key) => settings[key] !== repaired[key]);
+
+  if (changedKeys.length) {
+    await persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys);
+  }
+
+  return repaired;
+}
+
+async function persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys) {
+  const next = persisted && typeof persisted === "object" && !Array.isArray(persisted)
+    ? { ...persisted }
+    : {};
+
+  for (const key of changedKeys) {
+    next[key] = repaired[key];
+  }
+
+  try {
+    await writeJson(settingsPath, next);
+  } catch {
+    // Keep the repaired in-memory settings usable if migration cannot be persisted.
+  }
 }
 
 async function repairMissingLocalAssetPaths(settings, baseSettings) {
@@ -195,16 +218,20 @@ async function repairMissingLocalAssetPaths(settings, baseSettings) {
     const currentPath = String(next[key] || "").trim();
     const detectedPath = String(baseSettings[key] || "").trim();
 
-    if (!detectedPath || currentPath === detectedPath) {
-      continue;
-    }
-
     if (currentPath && await isFile(currentPath)) {
       continue;
     }
 
-    if (await isFile(detectedPath)) {
-      next[key] = detectedPath;
+    if (detectedPath && await isFile(detectedPath)) {
+      if (currentPath !== detectedPath) {
+        next[key] = detectedPath;
+        changed = true;
+      }
+      continue;
+    }
+
+    if (currentPath) {
+      next[key] = "";
       changed = true;
     }
   }
