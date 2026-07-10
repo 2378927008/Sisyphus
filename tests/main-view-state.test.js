@@ -68,6 +68,26 @@ test("projects the two most recent usable history entries in input order", () =>
   ]);
 });
 
+test("projects exactly the first three usable history entries without mutating input", () => {
+  const entries = [
+    { createdAt: "2026-07-11T04:00:00.000Z", status: "complete", text: "四" },
+    { createdAt: "2026-07-11T03:00:00.000Z", status: "complete", text: "三" },
+    { createdAt: "2026-07-11T02:00:00.000Z", status: "failed", text: "无效" },
+    { createdAt: "2026-07-11T01:00:00.000Z", status: "complete", text: "二" },
+    { createdAt: "2026-07-11T00:00:00.000Z", status: "complete", text: "一" }
+  ];
+  const originalEntries = structuredClone(entries);
+
+  const projected = projectHistory(entries, 3);
+
+  assert.equal(projected.length, 3);
+  assert.deepEqual(projected.map((entry) => entry.text), ["四", "三", "二"]);
+  assert.deepEqual(entries, originalEntries);
+  for (const [projectedIndex, sourceIndex] of [0, 1, 3].entries()) {
+    assert.notStrictEqual(projected[projectedIndex], entries[sourceIndex]);
+  }
+});
+
 test("filters unusable history entries and preserves supplied non-empty ids", () => {
   const entries = [
     { id: "kept", createdAt: "today", status: "complete", text: "文本" },
