@@ -11,3 +11,4 @@ ios/LocalFlowiOS/*.xcodeproj/
 npm-debug.log*
 local-flow-dictation-*.tgz
 .worktrees/
+.superpowers/
