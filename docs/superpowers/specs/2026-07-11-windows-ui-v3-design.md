@@ -1,199 +1,199 @@
-# Local Flow Windows UI V3 Design
+# Local Flow Windows UI V3 设计规格
 
-## Goal
+## 目标
 
-Turn the working Windows build into a focused daily dictation product. The normal path must be visible without scrolling: confirm language behavior, start dictation, review the latest text, copy or insert it, and reuse a recent result.
+把当前已经能够运行的 Windows 版本升级为一款专注于日常语音输入的产品。正常使用路径必须在无需滚动的情况下完整可见：确认语言行为、开始语音输入、检查最新文本、复制或插入文本，以及复用最近结果。
 
-This phase changes the Windows main window and settings experience. It preserves the existing Electron, local Whisper, MyMemory, Qwen/Ollama, global shortcut, native input hook, tray, HUD, history, and packaging architecture.
+本阶段重构 Windows 主窗口和设置体验，同时保留现有的 Electron、本地 Whisper、MyMemory、Qwen/Ollama、全局快捷键、原生输入钩子、托盘、HUD、历史记录和打包架构。
 
-## Approved Visual Target
+## 已确认的视觉目标
 
-The user approved a synthesis of the first and third visual directions:
+用户已经确认采用方案 1 与方案 3 的融合方向：
 
-![Approved Local Flow Windows UI V3 target](../../design/local-flow-windows-ui-v3-target.png)
+![已确认的 Local Flow Windows UI V3 视觉目标](../../design/local-flow-windows-ui-v3-target.png)
 
-The image is a hierarchy and interaction target, not a bitmap to embed in the product. All production labels remain localized HTML controls.
+这张图片用于确定信息层级和交互方向，不会作为位图直接嵌入产品。正式界面中的全部文字仍使用可本地化的 HTML 控件。
 
-## Product Principles
+## 产品原则
 
-- The app is an input utility, not a model control panel.
-- Dictation is the single primary action.
-- The first viewport must show readiness, language behavior, record control, latest result, and recent history.
-- Provider and model details stay out of the main workflow unless attention is required.
-- The global shortcut and HUD remain the fastest daily path; the main window is for review, reuse, and configuration.
-- Automatic output continues to preserve the recognized language.
+- 这是一款输入工具，而不是模型控制面板。
+- 语音输入是唯一的主要操作。
+- 首屏必须显示就绪状态、语言行为、录音控制、最新结果和最近历史。
+- 除非需要用户处理，否则提供方和模型细节不进入主流程。
+- 全局快捷键和 HUD 仍然是最快的日常入口；主窗口主要用于检查、复用和配置。
+- 自动输出继续保持识别出的原始语言。
 
-## Main Window
+## 主窗口
 
-### Native Header
+### 原生标题栏
 
-Use a compact 64 px header with:
+使用高度约 64 px 的紧凑标题栏，包含：
 
-- Local Flow icon and product name;
-- a small readiness dot and short localized health label;
-- renderer-owned `Dictation` and `History` tabs;
-- icon-only Settings and History shortcuts with tooltips and accessible labels;
-- standard Windows minimize, maximize, and close controls.
+- Local Flow 图标和产品名称；
+- 小型就绪状态圆点和简短的本地化健康状态；
+- 由渲染进程管理的“语音输入”和“历史”标签页；
+- 仅使用图标的设置与历史按钮，并提供工具提示和无障碍名称；
+- 标准 Windows 最小化、最大化和关闭控件。
 
-Remove the default Electron application menu from the product window. Tray menus remain unchanged.
+移除产品窗口中的 Electron 默认应用菜单，但保持托盘菜单不变。
 
-### Dictation Tab
+### 语音输入标签页
 
-The dictation tab is a single vertical work surface.
+语音输入标签页采用单一纵向工作区。
 
-1. **Language row**
-   - Recognition and output language selects appear on one row.
-   - Changing either select saves immediately.
-   - `Auto` output is described as same-language output, never as implicit English translation.
+1. **语言控制行**
+   - 识别语言和输出语言位于同一行。
+   - 任一选项发生变化后立即保存。
+   - “自动”输出必须说明为保持原语言，不能暗示会默认翻译为英文。
 
-2. **Voice command strip**
-   - Replace the oversized record orb with a compact microphone button.
-   - Show the active shortcut beside the button.
-   - Show waveform-style activity feedback and a short state label.
-   - Map existing phases to visible states: idle, starting, recording, stopping, transcribing, pasting, done, warning, and error.
-   - Keep the existing recovery action directly below the strip only when intervention is required.
+2. **语音命令条**
+   - 使用紧凑的麦克风按钮替代超大圆形录音按钮。
+   - 在按钮旁显示当前快捷键。
+   - 显示类似波形的活动反馈和简短状态文字。
+   - 将现有阶段映射为可见状态：空闲、正在启动、正在录音、正在停止、正在转写、正在粘贴、已完成、警告和错误。
+   - 只有需要用户介入时，才在命令条下方显示现有恢复操作。
 
-3. **Latest result editor**
-   - Keep the latest result editable.
-   - Show character count and actions for restore, copy, and insert at cursor.
-   - Restore returns the editor to the most recently produced or selected history text after local edits.
-   - Copy uses the existing clipboard fallback.
-   - Insert hides the main window, returns focus to the previous application, and pastes the edited text through the existing Windows paste pipeline.
-   - Edited text is ephemeral; this phase does not rewrite stored history entries.
+3. **最新结果编辑器**
+   - 最新结果保持可编辑。
+   - 显示字符数，以及恢复、复制和插入到光标位置操作。
+   - 用户在本地编辑后，“恢复”会还原到最近一次生成或从历史记录中选中的文本。
+   - “复制”继续使用现有剪贴板降级机制。
+   - “插入到光标位置”会隐藏主窗口、把焦点还给之前的应用，再通过现有 Windows 粘贴链路插入编辑后的文本。
+   - 编辑后的文本只在当前界面中生效；本阶段不会反向修改已保存的历史记录。
 
-4. **Recent history**
-   - Show the three newest usable entries as one grouped list with row separators.
-   - A row exposes timestamp, a single-line preview, character count, and a disclosure icon.
-   - Selecting a row loads its text into the latest result editor without changing persistent history.
-   - `View all` switches to the History tab.
+4. **最近历史**
+   - 将最近三个可用结果显示为一个带行分隔线的列表。
+   - 每行显示时间、单行文本预览、字符数和展开图标。
+   - 选择某一行后，把该文本载入最新结果编辑器，但不修改持久化历史。
+   - “查看全部”切换到“历史”标签页。
 
-5. **Footer health line**
-   - Show one concise provider summary such as `Local Whisper ready - Auto output keeps the source language`.
-   - Never show executable paths, model paths, download URLs, raw process errors, or stack traces here.
+5. **底部健康状态**
+   - 只显示一条简短的提供方摘要，例如“本地 Whisper 已就绪 - 自动输出保持原语言”。
+   - 此处绝不能显示可执行文件路径、模型路径、下载地址、原始进程错误或堆栈信息。
 
-### History Tab
+### 历史标签页
 
-The History tab uses the same window rather than opening another page.
+历史标签页复用同一窗口，不打开新的页面或窗口。
 
-- Show all retained history entries as a compact list.
-- Selecting an entry loads it into the result editor and returns to Dictation.
-- Each entry supports copy and insert actions.
-- Empty and failed-result states use localized explanatory copy.
-- History deletion, search, tags, and cloud sync are outside this phase.
+- 以紧凑列表显示保留的全部历史记录。
+- 选择一条记录后，将其载入结果编辑器并返回“语音输入”标签页。
+- 每条记录支持复制和插入操作。
+- 空状态和失败结果使用经过本地化的解释性文字。
+- 历史删除、搜索、标签和云同步不属于本阶段范围。
 
-## Settings Information Architecture
+## 设置信息架构
 
-Keep the existing settings drawer, but restructure it into four sections with a sticky header and sticky save footer:
+保留现有设置抽屉，但重新组织为四个分区，并使用固定标题栏和固定保存栏：
 
-1. **General**
-   - interface language;
-   - processing mode;
-   - automatic paste;
-   - personal dictionary;
-   - startup and tray behavior.
+1. **常规**
+   - 界面语言；
+   - 文本处理模式；
+   - 自动粘贴；
+   - 个人词典；
+   - 开机启动和托盘行为。
 
-2. **Shortcuts**
-   - dictation shortcut recorder;
-   - toggle versus hold mode;
-   - paste-last shortcut recorder;
-   - pause global shortcuts.
+2. **快捷键**
+   - 语音输入快捷键录制；
+   - 切换模式或按住说话模式；
+   - 粘贴上一段结果快捷键录制；
+   - 暂停全局快捷键。
 
-3. **Models and privacy**
-   - microphone, Whisper, and text-provider health summaries;
-   - install, retry, cancel, and diagnostic actions only when relevant;
-   - clear local/cloud processing disclosure;
-   - Qwen remains optional when MyMemory is selected.
+3. **模型与隐私**
+   - 麦克风、Whisper 和文本提供方健康摘要；
+   - 只在需要时显示安装、重试、取消和诊断操作；
+   - 清楚说明本地处理或云端处理方式；
+   - 选择 MyMemory 时，Qwen 必须保持可选，不能成为阻塞项。
 
-4. **Advanced**
-   - local executable and model paths;
-   - Ollama endpoint and model;
-   - download and mirror URLs;
-   - raw setup output.
+4. **高级**
+   - 本地可执行文件和模型路径；
+   - Ollama 地址和模型；
+   - 下载地址和镜像地址；
+   - 原始安装输出。
 
-Advanced content is collapsed by default. It must not appear in the normal setup path.
+高级内容默认折叠，不得出现在普通安装和使用流程中。
 
-The drawer is `min(560px, 100vw)`, traps focus while open, closes with Escape or the backdrop, restores focus to the Settings button, and never introduces page-level horizontal scrolling.
+设置抽屉宽度使用 `min(560px, 100vw)`。打开时限制焦点范围，支持按 Escape 或点击背景关闭，关闭后把焦点还给设置按钮，并且不能产生页面级横向滚动。
 
-## Interaction And Data Flow
+## 交互与数据流
 
-- `currentSettings`, provider status, setup status, history, and dictation status remain the renderer sources of truth.
-- Home language changes call the existing settings IPC with a partial patch and refresh provider readiness.
-- Renderer tabs are local UI state; they do not add routes or windows.
-- The latest result editor keeps `baselineText` and `currentText` so restore and dirty state are deterministic.
-- Add a narrow main-process IPC for inserting renderer-provided text. It accepts only a bounded string from the main renderer, hides the main window, waits briefly for Windows focus restoration, then calls the existing `pasteText` function.
-- Paste failure preserves the text in the clipboard and reports a mapped warning without exposing diagnostics.
-- Existing global shortcut, hold-to-dictate, Mouse4/Mouse5, tray, HUD, auto-paste, and paste-last behavior must not regress.
+- `currentSettings`、提供方状态、安装状态、历史记录和听写状态继续作为渲染进程的数据来源。
+- 首页语言发生变化时，通过现有设置 IPC 发送局部更新，并刷新提供方就绪状态。
+- 标签页只属于渲染进程本地界面状态，不新增路由或窗口。
+- 最新结果编辑器维护 `baselineText` 和 `currentText`，使恢复操作和未保存编辑状态保持确定性。
+- 新增一个范围受限的主进程 IPC，用于插入渲染进程提供的文本。它只接受来自主渲染窗口、长度受限的字符串；主进程隐藏窗口，短暂等待 Windows 恢复焦点，然后调用现有 `pasteText` 函数。
+- 粘贴失败时保留剪贴板文本，并显示经过映射的警告，不能暴露底层诊断信息。
+- 现有全局快捷键、按住说话、Mouse4/Mouse5、托盘、HUD、自动粘贴和粘贴上一段结果行为不能回归。
 
-## Visual System
+## 视觉系统
 
-- Typography: Segoe UI and system fallbacks; 14-16 px body baseline.
-- Page background: cool neutral `#F6F8F7`.
-- Main surface: `#FFFFFF`.
-- Primary text: `#17211E`.
-- Muted text: `#66716D`.
-- Divider: `#DCE3E0`.
-- Ready/accent: `#078A68`.
-- Recording only: `#D64B3C`.
-- Warning: `#A96F16`.
-- Error: `#B83A3A`.
-- Border radius: 6 px for controls and 8 px maximum for framed surfaces.
-- No gradients, decorative blobs, nested cards, oversized type, or giant circular controls.
-- Use a locally packaged Lucide icon library for familiar actions. Do not hand-draw SVG icons. Every icon-only button has a tooltip and accessible name.
+- 字体：Segoe UI 与系统后备字体；正文基准为 14-16 px。
+- 页面背景：冷调中性色 `#F6F8F7`。
+- 主表面：`#FFFFFF`。
+- 主要文字：`#17211E`。
+- 次要文字：`#66716D`。
+- 分隔线：`#DCE3E0`。
+- 就绪状态与主要强调色：`#078A68`。
+- 仅录音状态使用：`#D64B3C`。
+- 警告：`#A96F16`。
+- 错误：`#B83A3A`。
+- 控件圆角为 6 px，框架表面最大圆角为 8 px。
+- 禁止渐变、装饰性光斑、嵌套卡片、超大字号和巨大圆形控件。
+- 熟悉操作使用随应用本地打包的 Lucide 图标库，不手绘 SVG。每个纯图标按钮都必须提供工具提示和无障碍名称。
 
-## Responsive Behavior
+## 响应式行为
 
-- At the normal 980 x 720 window, the complete daily workflow fits without horizontal scrolling and without hiding the record control below the fold.
-- At widths from 760 to 919 px, language controls wrap, waveform width contracts, and secondary action labels become icon-only with tooltips.
-- At heights below 650 px, the editor becomes shorter and recent history shows two rows; controlled vertical scrolling is allowed inside the content area.
-- The settings drawer occupies the full width at narrow sizes.
-- Dynamic and localized text must wrap or truncate intentionally; controls keep stable dimensions during state changes.
+- 在正常的 980 x 720 窗口中，完整日常流程必须显示在首屏内，不能出现横向滚动，也不能把录音控制藏到首屏下方。
+- 在 760-919 px 宽度下，语言控件允许换行，波形区域缩短，次要操作只显示图标并提供工具提示。
+- 高度低于 650 px 时，编辑器高度缩小，最近历史只显示两行；允许内容区域进行受控的纵向滚动。
+- 窄尺寸下设置抽屉占据全部可用宽度。
+- 动态文字和本地化文字必须按设计换行或截断；状态变化不能改变控件的稳定尺寸。
 
-## Accessibility
+## 无障碍要求
 
-- Use semantic buttons, tabs, lists, labels, status regions, and editable text.
-- Tabs support arrow-key navigation and expose selected state.
-- All actions are keyboard reachable and show a visible focus ring.
-- State is communicated by text and icon as well as color.
-- Live status announcements are concise and do not repeatedly announce waveform animation.
-- Icon-only controls include localized `aria-label` text and hover/focus tooltips.
-- The design must remain usable at 200% browser zoom within the supported minimum window.
+- 使用语义化按钮、标签页、列表、标签、状态区域和可编辑文本。
+- 标签页支持方向键导航，并暴露当前选中状态。
+- 所有操作都能通过键盘访问，并显示清晰的焦点环。
+- 状态必须同时通过文字、图标和颜色表达，不能只依赖颜色。
+- 实时状态播报保持简短，不能反复播报波形动画。
+- 纯图标控件包含经过本地化的 `aria-label` 和鼠标悬停或键盘聚焦工具提示。
+- 在受支持的最小窗口中，浏览器缩放到 200% 后仍必须可用。
 
-## Error Handling
+## 错误处理
 
-- Missing Whisper blocks recording with one recovery action, not a setup dashboard.
-- Missing optional Qwen does not block same-language dictation or MyMemory target output.
-- Target-language provider failures preserve the raw transcript and expose a safe retry or Auto-output recovery action.
-- Paste failures preserve clipboard text and keep the editable result visible.
-- Raw paths, spawn errors, setup commands, and provider diagnostics appear only in Advanced diagnostics.
+- 缺少 Whisper 时，通过一个恢复操作阻止录音，不能展示整块安装控制面板。
+- 缺少可选 Qwen 时，不能阻止同语言听写或 MyMemory 目标语言输出。
+- 目标语言提供方失败时，保留原始转写，并提供安全的重试或切换回自动输出操作。
+- 粘贴失败时，保留剪贴板文本，并继续显示可编辑结果。
+- 原始路径、spawn 错误、安装命令和提供方诊断信息只能出现在“高级”诊断区域。
 
-## Non-Goals
+## 不在本阶段处理的内容
 
-- Real-time streaming transcription.
-- New ASR or text providers.
-- Qwen runtime stabilization beyond presenting its current setup state safely.
-- iPhone UI changes.
-- Dark mode.
-- History deletion, search, tags, or cloud sync.
-- Changes to native shortcut registration semantics.
+- 实时流式转写。
+- 新增 ASR 或文本提供方。
+- 除安全展示现有安装状态以外的 Qwen 运行时稳定性工作。
+- iPhone 界面调整。
+- 深色模式。
+- 历史删除、搜索、标签或云同步。
+- 修改原生快捷键注册语义。
 
-## Test And Acceptance Strategy
+## 测试与验收策略
 
-- Add focused renderer view-model tests for tabs, recent-history projection, editor dirty/restore state, phase labels, and responsive action labels.
-- Add markup and localization tests for the new hierarchy, settings sections, tooltips, and supported languages.
-- Add preload/main-process tests for bounded insert-at-cursor IPC and paste-failure recovery.
-- Extend the Electron app smoke test to cover tab switching, language autosave, result restore, history selection, settings section switching, and drawer focus behavior.
-- Run the full unit suite, app smoke, microphone smoke, Windows package build, packaged smoke, product readiness, and release verification.
-- Capture the implemented 980 x 720 Dictation view, History view, Settings General view, and Settings Advanced view.
-- Compare the Dictation screenshot against the approved visual target at the same viewport and fix hierarchy, spacing, overflow, typography, and state-control mismatches before release.
+- 为标签页、最近历史投影、编辑器修改与恢复状态、阶段文字和响应式操作标签增加渲染层视图模型测试。
+- 为新层级、设置分区、工具提示和全部受支持语言增加标记与本地化测试。
+- 为长度受限的“插入到光标位置”IPC 和粘贴失败恢复增加 preload 与主进程测试。
+- 扩展 Electron 应用冒烟测试，覆盖标签切换、语言自动保存、结果恢复、历史选择、设置分区切换和抽屉焦点行为。
+- 运行完整单元测试、应用冒烟测试、麦克风冒烟测试、Windows 打包、打包后启动测试、产品就绪检查和发布验证。
+- 分别截取实现后的 980 x 720 语音输入页、历史页、设置常规页和设置高级页。
+- 在相同视口下，把语音输入页与已确认视觉目标进行对比；修复层级、间距、溢出、字体和状态控件差异后才能发布。
 
-## Acceptance Criteria
+## 验收标准
 
-- Recording is visible and actionable in the first viewport.
-- No horizontal scrollbar appears at 980 x 720 or 760 x 560.
-- The main screen contains no model paths, download URLs, install logs, or provider diagnostics.
-- Auto output visibly promises same-language behavior.
-- Latest text can be edited, restored, copied, and inserted.
-- Recent history can be reused without opening settings.
-- Advanced settings are hidden by default.
-- Every visible control works in the core flow.
-- Existing Windows shortcut, microphone, provider, history, tray, HUD, and installer tests remain green.
+- 首屏可以看到并操作录音入口。
+- 980 x 720 和 760 x 560 下都不能出现横向滚动条。
+- 主界面不能包含模型路径、下载地址、安装日志或提供方诊断信息。
+- 自动输出必须明确说明会保持原语言。
+- 最新文本可以编辑、恢复、复制和插入。
+- 无需打开设置即可复用最近历史。
+- 高级设置默认隐藏。
+- 核心流程中的每个可见控件都能正常工作。
+- 现有 Windows 快捷键、麦克风、提供方、历史、托盘、HUD 和安装包测试必须继续通过。
