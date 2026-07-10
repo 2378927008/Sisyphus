@@ -216,6 +216,7 @@ app.whenReady().then(async () => {
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&
         state.hasSettingsDrawer &&
+        state.hasShortcutRecorder &&
         state.hasLocalModelStatus &&
         state.hasSetupChecklist &&
         state.setupChecklistText.includes("Whisper") &&
@@ -243,6 +244,52 @@ app.whenReady().then(async () => {
     }
     window.webContents.send("settings:open");
     await waitForState(window, (state) => state.settingsDrawerOpen === true, 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#recordHotkey').click();
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'k',
+          code: 'KeyK',
+          ctrlKey: true,
+          altKey: true,
+          bubbles: true,
+          cancelable: true
+        }));
+      })()
+    `);
+    const keyboardShortcutRecorderState = await waitForState(
+      window,
+      (state) => (
+        state.hotkeyValue === "CommandOrControl+Alt+K" &&
+        state.recordHotkeyPressed === false
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#recordPasteLastHotkey').click();
+        window.dispatchEvent(new MouseEvent('mousedown', {
+          button: 3,
+          bubbles: true,
+          cancelable: true
+        }));
+      })()
+    `);
+    const mouseShortcutRecorderState = await waitForState(
+      window,
+      (state) => (
+        state.pasteLastHotkeyValue === "Mouse4" &&
+        state.recordPasteLastHotkeyPressed === false &&
+        state.recordHotkeyDisabled === false
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#hotkey').value = 'CommandOrControl+Alt+Space';
+        document.querySelector('#pasteLastHotkey').value = 'CommandOrControl+Alt+V';
+      })()
+    `);
     await window.webContents.executeJavaScript("document.querySelector('#closeSettings').click()");
     await waitForState(window, (state) => state.settingsDrawerOpen === false, 5000);
     await window.webContents.executeJavaScript(`
@@ -576,6 +623,8 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({
       ok: true,
       initialState,
+      keyboardShortcutRecorderState,
+      mouseShortcutRecorderState,
       englishLanguageState,
       myMemoryTargetPreviewState,
       myMemoryProviderState,
@@ -646,6 +695,14 @@ function readRendererState(window) {
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
+      hotkeyValue: document.querySelector('#hotkey')?.value || '',
+      pasteLastHotkeyValue: document.querySelector('#pasteLastHotkey')?.value || '',
+      hasShortcutRecorder: Boolean(
+        document.querySelector('#recordHotkey') && document.querySelector('#recordPasteLastHotkey')
+      ),
+      recordHotkeyPressed: document.querySelector('#recordHotkey')?.getAttribute('aria-pressed') === 'true',
+      recordPasteLastHotkeyPressed: document.querySelector('#recordPasteLastHotkey')?.getAttribute('aria-pressed') === 'true',
+      recordHotkeyDisabled: Boolean(document.querySelector('#recordHotkey')?.disabled),
       launchAtLogin: document.querySelector('#launchAtLogin')?.checked ?? null,
       startMinimizedToTray: document.querySelector('#startMinimizedToTray')?.checked ?? null,
       globalShortcutPaused: document.querySelector('#globalShortcutPaused')?.checked ?? null,

@@ -42,6 +42,21 @@ export function createNativeInputShortcut({
     mouseup: (event) => handleRelease("mouse", event)
   };
 
+  function register(hotkey, callback) {
+    const parsed = parseNativeShortcut(hotkey, { keyCodes });
+    if (
+      !["Mouse4", "Mouse5"].includes(parsed?.mouseButton)
+      || typeof callback !== "function"
+    ) {
+      return false;
+    }
+
+    return registerPressAndRelease(hotkey, {
+      onPress: callback,
+      onRelease: () => {}
+    });
+  }
+
   function registerPressAndRelease(hotkey, handlers = {}) {
     const parsed = parseNativeShortcut(hotkey, { keyCodes });
     if (!parsed) {
@@ -136,6 +151,7 @@ export function createNativeInputShortcut({
   }
 
   return {
+    register,
     registerPressAndRelease,
     unregister,
     unregisterAll,

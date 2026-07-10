@@ -1,6 +1,7 @@
 import { describeMicrophoneError } from "../shared/media-errors.js";
 import { getRecordReadiness } from "./record-readiness.js";
 import { getRecordRecoveryAction } from "./record-recovery-action.js";
+import { createShortcutRecorder } from "./shortcut-recorder.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -45,6 +46,7 @@ const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
 const cancelSetup = document.querySelector("#cancelSetup");
 const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
+const shortcutCaptureButtons = [...document.querySelectorAll("[data-shortcut-target]")];
 
 let recorder = null;
 let isRecording = false;
@@ -57,6 +59,13 @@ let currentRecordRecoveryAction = null;
 let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
+const shortcutRecorder = createShortcutRecorder({
+  eventTarget: window,
+  buttons: shortcutCaptureButtons,
+  resolveField: (name) => form.elements[name],
+  translate: (key, replacements) => t(key, replacements),
+  onStatus: setStatus
+});
 
 init();
 
@@ -85,6 +94,9 @@ async function init() {
   form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
   form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
+  for (const button of shortcutCaptureButtons) {
+    button.addEventListener("click", () => shortcutRecorder.start(button));
+  }
   window.localFlow.onShortcutToggle(toggleRecording);
   window.localFlow.onRecordingStart(startRecording);
   window.localFlow.onRecordingStop(stopRecording);
@@ -679,6 +691,9 @@ function copyTextWithTextarea(text) {
 }
 
 function setSettingsDrawer(open) {
+  if (!open) {
+    shortcutRecorder.cancel();
+  }
   settingsDrawer.classList.toggle("open", open);
   settingsDrawer.setAttribute("aria-hidden", open ? "false" : "true");
 }
@@ -807,6 +822,7 @@ function renderDictationResult(entry) {
 
 async function saveSettings(event) {
   event.preventDefault();
+  shortcutRecorder.stop();
   await saveSettingsFromCurrentForm();
 }
 
@@ -904,6 +920,7 @@ function applyInterfaceLanguage(language) {
   renderProviderStatus();
   renderSetupChecklist();
   updateRecordLabel();
+  shortcutRecorder.refreshLabels();
 
   if (resultText.dataset.emptyResult === "true") {
     resultText.textContent = t("empty.result");

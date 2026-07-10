@@ -571,6 +571,17 @@ test("app smoke covers settings open IPC behavior", async () => {
   assert.match(smokeSource, /state\.settingsDrawerOpen === false/);
 });
 
+test("app smoke covers keyboard and mouse shortcut recording", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /document\.querySelector\('#recordHotkey'\)\.click\(\)/);
+  assert.match(smokeSource, /new KeyboardEvent\('keydown'/);
+  assert.match(smokeSource, /document\.querySelector\('#recordPasteLastHotkey'\)\.click\(\)/);
+  assert.match(smokeSource, /new MouseEvent\('mousedown'/);
+  assert.match(smokeSource, /hotkeyValue:\s*document\.querySelector\('#hotkey'\)\?\.value/);
+  assert.match(smokeSource, /pasteLastHotkeyValue:\s*document\.querySelector\('#pasteLastHotkey'\)\?\.value/);
+});
+
 test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);

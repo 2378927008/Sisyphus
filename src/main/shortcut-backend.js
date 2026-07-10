@@ -5,7 +5,15 @@ export function createShortcutBackend({
   return {
     register(hotkey, callback) {
       try {
-        return Boolean(globalShortcut?.register?.(hotkey, callback));
+        if (globalShortcut?.register?.(hotkey, callback)) {
+          return true;
+        }
+      } catch {
+        // Mouse4 and Mouse5 are not valid Electron accelerators.
+      }
+
+      try {
+        return Boolean(nativeShortcut?.register?.(hotkey, callback));
       } catch {
         return false;
       }

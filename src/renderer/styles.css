@@ -394,10 +394,45 @@ textarea {
 }
 
 .drawer-section label + label,
+.drawer-section label + .shortcut-setting,
+.drawer-section .shortcut-setting + label,
+.drawer-section .shortcut-setting + .shortcut-setting,
 .drawer-section .button-row,
 .drawer-section .model-status,
 .drawer-section .install-command {
   margin-top: 12px;
+}
+
+.shortcut-setting {
+  display: grid;
+  gap: 7px;
+}
+
+.shortcut-setting + .drawer-hint {
+  margin-top: 10px;
+}
+
+.shortcut-capture-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.shortcut-capture-row input {
+  min-width: 0;
+}
+
+.shortcut-record-button {
+  min-width: 104px;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
+.shortcut-record-button.is-listening {
+  border-color: var(--warning);
+  background: #fff4d8;
+  color: #6f4700;
 }
 
 .checkbox-label {

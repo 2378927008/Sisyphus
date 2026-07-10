@@ -25,6 +25,31 @@ test("shortcut backend delegates toggle shortcuts to Electron globalShortcut", (
   ]);
 });
 
+test("shortcut backend falls back to native registration for mouse side buttons", () => {
+  const calls = [];
+  const callback = () => {};
+  const backend = createShortcutBackend({
+    globalShortcut: {
+      register: (hotkey) => {
+        calls.push(["electron-register", hotkey]);
+        return false;
+      }
+    },
+    nativeShortcut: {
+      register: (hotkey, handler) => {
+        calls.push(["native-register", hotkey, handler]);
+        return hotkey === "Mouse4";
+      }
+    }
+  });
+
+  assert.equal(backend.register("Mouse4", callback), true);
+  assert.deepEqual(calls, [
+    ["electron-register", "Mouse4"],
+    ["native-register", "Mouse4", callback]
+  ]);
+});
+
 test("shortcut backend delegates press and release shortcuts to native backend", () => {
   const calls = [];
   const backend = createShortcutBackend({

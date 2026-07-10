@@ -229,10 +229,20 @@
 
           <section class="drawer-section">
             <h3 data-i18n="section.shortcuts">快捷键</h3>
-            <label>
-              <span data-i18n="label.hotkey">全局快捷键</span>
-              <input id="hotkey" name="hotkey" />
-            </label>
+            <div class="shortcut-setting">
+              <label for="hotkey" data-i18n="label.hotkey">全局快捷键</label>
+              <div class="shortcut-capture-row">
+                <input id="hotkey" name="hotkey" aria-describedby="shortcutCaptureHint" />
+                <button
+                  id="recordHotkey"
+                  class="secondary shortcut-record-button"
+                  type="button"
+                  data-i18n="action.recordShortcut"
+                  data-shortcut-target="hotkey"
+                  aria-pressed="false"
+                >录制</button>
+              </div>
+            </div>
             <label>
               <span data-i18n="label.shortcutMode">语音输入快捷键行为</span>
               <select id="shortcutMode" name="shortcutMode">
@@ -240,11 +250,21 @@
                 <option value="hold" data-i18n="shortcut.mode.hold">按住说话</option>
               </select>
             </label>
-            <label>
-              <span data-i18n="label.pasteLastHotkey">粘贴上一段结果快捷键</span>
-              <input id="pasteLastHotkey" name="pasteLastHotkey" />
-            </label>
-            <p class="drawer-hint" data-i18n="hint.mouseShortcut">鼠标侧键可直接填写 Mouse4 或 Mouse5。如果某台机器无法启用原生 hook，再把侧键通过鼠标驱动、PowerToys 或设备软件映射到语音输入快捷键。</p>
+            <div class="shortcut-setting">
+              <label for="pasteLastHotkey" data-i18n="label.pasteLastHotkey">粘贴上一段结果快捷键</label>
+              <div class="shortcut-capture-row">
+                <input id="pasteLastHotkey" name="pasteLastHotkey" aria-describedby="shortcutCaptureHint" />
+                <button
+                  id="recordPasteLastHotkey"
+                  class="secondary shortcut-record-button"
+                  type="button"
+                  data-i18n="action.recordShortcut"
+                  data-shortcut-target="pasteLastHotkey"
+                  aria-pressed="false"
+                >录制</button>
+              </div>
+            </div>
+            <p id="shortcutCaptureHint" class="drawer-hint" data-i18n="hint.mouseShortcut">鼠标侧键可直接填写 Mouse4 或 Mouse5。如果某台机器无法启用原生 hook，再把侧键通过鼠标驱动、PowerToys 或设备软件映射到语音输入快捷键。</p>
             <label class="checkbox-label">
               <input id="globalShortcutPaused" name="globalShortcutPaused" type="checkbox" />
               <span data-i18n="label.globalShortcutPaused">暂停全局快捷键</span>

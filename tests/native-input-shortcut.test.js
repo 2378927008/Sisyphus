@@ -79,6 +79,33 @@ test("native shortcut adapter emits mouse side button press and release", () => 
   assert.deepEqual(calls, ["press", "release"]);
 });
 
+test("native shortcut adapter registers mouse side buttons as press-only shortcuts", () => {
+  const uIOhook = createFakeUiohook();
+  const shortcut = createNativeInputShortcut({ uIOhook, keyCodes });
+  const calls = [];
+
+  assert.equal(shortcut.register("Mouse4", () => calls.push("toggle")), true);
+
+  uIOhook.emit("mousedown", { button: 4 });
+  uIOhook.emit("mousedown", { button: 4 });
+  uIOhook.emit("mouseup", { button: 4 });
+  uIOhook.emit("mousedown", { button: 4 });
+
+  assert.deepEqual(calls, ["toggle", "toggle"]);
+});
+
+test("native press-only registration rejects keyboard and primary mouse accelerators", () => {
+  const shortcut = createNativeInputShortcut({
+    uIOhook: createFakeUiohook(),
+    keyCodes
+  });
+
+  assert.equal(shortcut.register("CommandOrControl+Alt+Space", () => {}), false);
+  assert.equal(shortcut.register("Mouse1", () => {}), false);
+  assert.equal(shortcut.register("Mouse2", () => {}), false);
+  assert.equal(shortcut.register("Mouse3", () => {}), false);
+});
+
 test("native shortcut adapter unregisters and stops when idle", () => {
   const uIOhook = createFakeUiohook();
   const shortcut = createNativeInputShortcut({ uIOhook, keyCodes });

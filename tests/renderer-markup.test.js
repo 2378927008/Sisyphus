@@ -36,6 +36,25 @@ test("settings expose Windows productization controls", async () => {
   assert.match(html, /data-i18n="hint.mouseShortcut"/);
 });
 
+test("settings expose shortcut recorder controls", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="recordHotkey"/);
+  assert.match(html, /data-shortcut-target="hotkey"/);
+  assert.match(html, /id="recordPasteLastHotkey"/);
+  assert.match(html, /data-shortcut-target="pasteLastHotkey"/);
+  assert.match(html, /data-i18n="action.recordShortcut"/);
+  assert.match(appSource, /createShortcutRecorder/);
+  assert.match(appSource, /shortcutRecorder\.start/);
+});
+
+test("shortcut recorder layout separates its help text from the controls", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.shortcut-setting \+ \.drawer-hint\s*\{[^}]*margin-top:\s*10px/s);
+});
+
 test("home screen exposes a contextual recovery action when recording is blocked", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");

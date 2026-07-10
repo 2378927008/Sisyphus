@@ -88,6 +88,17 @@ test("getUiText returns Windows productization labels", () => {
   assert.match(getUiText("zh-Hans", "hint.mouseShortcut"), /Mouse4/);
 });
 
+test("getUiText returns localized shortcut recorder copy", () => {
+  assert.equal(getUiText("en", "action.recordShortcut"), "Record");
+  assert.equal(getUiText("en", "action.listeningShortcut"), "Listening...");
+  assert.match(getUiText("en", "status.shortcutCaptureListening"), /Esc/);
+  assert.match(getUiText("en", "status.shortcutCaptured", { hotkey: "Mouse4" }), /Mouse4/);
+  assert.equal(getUiText("zh-Hans", "action.recordShortcut"), "录制");
+  assert.equal(getUiText("zh-Hans", "action.listeningShortcut"), "正在监听...");
+  assert.match(getUiText("zh-Hans", "status.shortcutCaptureListening"), /鼠标侧键/);
+  assert.match(getUiText("zh-Hans", "status.shortcutCaptured", { hotkey: "Mouse4" }), /Mouse4/);
+});
+
 test("getUiText returns localized record recovery actions", () => {
   assert.equal(getUiText("en", "record.recovery.useAutoOutput"), "Use Auto output");
   assert.equal(getUiText("zh-Hans", "record.recovery.useAutoOutput"), "使用自动输出");
