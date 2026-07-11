@@ -75,6 +75,35 @@ test("insertTextIntoPreviousApp does not paste when the window is destroyed whil
   assert.equal(pasteCalls, 0);
 });
 
+test("insertTextIntoPreviousApp does not paste when the main window becomes visible while waiting", async () => {
+  let visible = false;
+  let pasteCalls = 0;
+
+  const result = await insertTextIntoPreviousApp("edited text", {
+    mainWindow: {
+      isDestroyed: () => false,
+      isVisible: () => visible,
+      isFocused: () => visible,
+      hide() {
+        visible = false;
+      }
+    },
+    wait: async () => {
+      visible = true;
+    },
+    paste: async () => {
+      pasteCalls += 1;
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "window_unavailable",
+    message: "Paste failed. Text copied."
+  });
+  assert.equal(pasteCalls, 0);
+});
+
 test("insertTextIntoPreviousApp maps wait failures without exposing diagnostics", async () => {
   let pasteCalls = 0;
 

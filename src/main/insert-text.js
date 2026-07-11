@@ -45,7 +45,7 @@ export async function insertTextIntoPreviousApp(text, dependencies = {}) {
   }
 
   try {
-    if (!isUsableMainWindow(mainWindow)) {
+    if (!isUsableMainWindow(mainWindow) || !isMainWindowStillHidden(mainWindow)) {
       return windowUnavailableResult();
     }
   } catch {
@@ -86,6 +86,10 @@ function pasteFailureResult() {
 
 function isUsableMainWindow(mainWindow) {
   return Boolean(mainWindow && typeof mainWindow.hide === "function" && !mainWindow.isDestroyed?.());
+}
+
+function isMainWindowStillHidden(mainWindow) {
+  return mainWindow.isVisible?.() !== true && mainWindow.isFocused?.() !== true;
 }
 
 function normalizePasteFailureReason(reason) {

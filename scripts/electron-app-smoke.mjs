@@ -112,6 +112,8 @@ let whisperDiagnosticsResult = {
     { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
   ]
 };
+let whisperDiagnosticsError = "";
+let textDiagnosticsError = "";
 let providerStatusOverride = null;
 
 const missingSetupStatus = {
@@ -172,13 +174,19 @@ function wireIpc() {
     insertTextCalls.push(text);
     return insertTextResult;
   });
-  registerSmokeIpcHandler("diagnostics:whisper", () => whisperDiagnosticsResult);
-  registerSmokeIpcHandler("diagnostics:text", () => ({
-    ready: true,
-    checks: [
-      { label: "MyMemory Free", status: "pass", message: "Text provider diagnostics stubbed." }
-    ]
-  }));
+  registerSmokeIpcHandler("diagnostics:whisper", () => {
+    if (whisperDiagnosticsError) throw new Error(whisperDiagnosticsError);
+    return whisperDiagnosticsResult;
+  });
+  registerSmokeIpcHandler("diagnostics:text", () => {
+    if (textDiagnosticsError) throw new Error(textDiagnosticsError);
+    return {
+      ready: true,
+      checks: [
+        { label: "MyMemory Free", status: "pass", message: "Text provider diagnostics stubbed." }
+      ]
+    };
+  });
   registerSmokeIpcHandler("providers:status", () => providerStatusOverride || getProcessingProviderStatus(settings));
   registerSmokeIpcHandler("llm:status", () => ({
     ready: false,
@@ -336,6 +344,10 @@ app.whenReady().then(async () => {
         state.hasResultText &&
         state.hasRecentHistoryList &&
         state.hasFooterHealthText &&
+        state.headerHealthText === state.footerHealthText &&
+        state.headerHealthText.includes("Whisper") &&
+        state.footerHealthReady &&
+        state.recordReadinessReady &&
         state.hasRecordButton &&
         state.hasSettingsDrawer &&
         state.hasShortcutRecorder &&
@@ -397,6 +409,8 @@ app.whenReady().then(async () => {
     if (visibleMainTextLeak) {
       throw new Error(`Main page leaked implementation text: ${visibleMainTextLeak[0]}`);
     }
+    assertNoDiagnosticLeak(initialState.headerHealthText, "Initial header health");
+    assertNoDiagnosticLeak(initialState.footerHealthText, "Initial footer health");
     whisperDiagnosticsResult = {
       ready: false,
       checks: [
@@ -437,10 +451,16 @@ app.whenReady().then(async () => {
         state.visibleRecordRecoveryCount === 1 &&
         state.recordRecoveryActionText.includes("Whisper") &&
         state.whisperDiagnosticsText.includes("Whisper runtime and model are missing.") &&
+        state.headerHealthText === state.footerHealthText &&
+        state.headerHealthText.includes("Whisper") &&
+        !state.footerHealthReady &&
+        !state.recordReadinessReady &&
         state.mainSetupControlCount === 0
       ),
       5000
     );
+    assertNoDiagnosticLeak(missingWhisperRecoveryState.headerHealthText, "Missing Whisper header health");
+    assertNoDiagnosticLeak(missingWhisperRecoveryState.footerHealthText, "Missing Whisper footer health");
     const recoveryWhisperStarts = setupIpcCalls.start.filter((type) => type === "whisper").length;
     await window.webContents.executeJavaScript("document.querySelector('#recordRecoveryAction').click()");
     await waitForState(
@@ -1029,6 +1049,10 @@ app.whenReady().then(async () => {
         state.footerHealthAriaLabel === "Local service status" &&
         state.settingsSectionsAriaLabel === "Settings sections" &&
         state.shortcutHintText === "Shortcut: Ctrl + Alt + Space" &&
+        state.headerHealthText === "Local Whisper ready" &&
+        state.footerHealthText === "Local Whisper ready" &&
+        state.footerHealthReady &&
+        state.recordReadinessReady &&
         state.visibleCharacterCount === "8 characters" &&
         state.llmSetupTitle === "MyMemory Free (cloud)" &&
         state.installLlmHidden &&
@@ -1036,6 +1060,58 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    assertNoDiagnosticLeak(englishLanguageState.headerHealthText, "English header health");
+    assertNoDiagnosticLeak(englishLanguageState.footerHealthText, "English footer health");
+    const unsafeDiagnostic = "3221225477 spawn C:\\private\\provider-helper.exe ENOENT stderr";
+    whisperDiagnosticsError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#checkWhisper').click()");
+    const failedWhisperDiagnosticState = await waitForState(
+      window,
+      (state) => state.statusText === "Whisper check failed.",
+      5000
+    );
+    assertNoDiagnosticLeak(failedWhisperDiagnosticState.statusText, "Whisper failure status");
+    whisperDiagnosticsError = "";
+    textDiagnosticsError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
+    const failedTextDiagnosticState = await waitForState(
+      window,
+      (state) => state.statusText === "Text output check failed.",
+      5000
+    );
+    assertNoDiagnosticLeak(failedTextDiagnosticState.statusText, "Text provider failure status");
+    textDiagnosticsError = "";
+    settingsSaveError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'embedded';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const failedProviderPreviewState = await waitForState(
+      window,
+      (state) => state.statusText === "Settings could not be saved.",
+      5000
+    );
+    assertNoDiagnosticLeak(failedProviderPreviewState.statusText, "Provider preview failure status");
+    settingsSaveError = "";
+    const providerRecoverySaveIndex = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const provider = document.querySelector('#llmProvider');
+        provider.value = 'mymemory';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      () => settingsSaveCalls.length > providerRecoverySaveIndex && activeSettingsSaveCalls === 0,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#interfaceLanguage').dispatchEvent(new Event('change', { bubbles: true }))
+    `);
     const languageQueueStart = settingsSaveCalls.length;
     maxConcurrentSettingsSaveCalls = 0;
     deferProcessingLanguageSaves = true;
@@ -1259,12 +1335,16 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitForState(window, () => activeSettingsSaveCalls === 0, 5000);
     const recordingLanguageSaveIndex = settingsSaveCalls.length;
     deferProcessingLanguageSaves = true;
     await window.webContents.executeJavaScript(`
       (() => {
         const outputLanguage = document.querySelector('#outputLanguage');
-        outputLanguage.value = 'zh-Hans';
+        outputLanguage.value = 'es';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+        outputLanguage.value = 'fr';
         outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
       })()
     `);
@@ -1277,10 +1357,29 @@ app.whenReady().then(async () => {
       5000
     );
     assertPartialSettingsSave(settingsSaveCalls[recordingLanguageSaveIndex], {
-      outputLanguage: "zh-Hans"
+      outputLanguage: "es"
     });
     window.webContents.send("recording:start");
     window.webContents.send("recording:start");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const blockedRecordingState = await readRendererState(window);
+    if (blockedRecordingState.isRecording) {
+      throw new Error("Recording started before the latest language save completed.");
+    }
+    deferredSettingsSaveResolvers.shift()?.();
+    await waitForState(
+      window,
+      () => settingsSaveCalls.length === recordingLanguageSaveIndex + 2 && activeSettingsSaveCalls === 1,
+      5000
+    );
+    assertPartialSettingsSave(settingsSaveCalls[recordingLanguageSaveIndex + 1], {
+      outputLanguage: "fr"
+    });
+    const stillBlockedRecordingState = await readRendererState(window);
+    if (stillBlockedRecordingState.isRecording) {
+      throw new Error("Recording started before the newest language value was saved.");
+    }
+    deferredSettingsSaveResolvers.shift()?.();
     await waitForState(
       window,
       (state) => (
@@ -1291,12 +1390,11 @@ app.whenReady().then(async () => {
       ),
       10000
     );
-    deferredSettingsSaveResolvers.shift()?.();
     await waitForState(
       window,
       (state) => (
         activeSettingsSaveCalls === 0 &&
-        settings.outputLanguage === "zh-Hans" &&
+        settings.outputLanguage === "fr" &&
         state.isRecording
       ),
       5000
@@ -1356,7 +1454,7 @@ app.whenReady().then(async () => {
       status: "failed",
       text: "",
       transcript: "hello world",
-      processingError: "Local language model exited with code 3221225477."
+      processingError: "3221225477 spawn C:\\private\\target-helper.exe ENOENT stderr"
     };
     await window.webContents.executeJavaScript(`
       (() => {
@@ -1376,10 +1474,11 @@ app.whenReady().then(async () => {
         state.resultText === "" &&
         state.resultEmpty &&
         state.resultAriaPlaceholder.includes("Target language output failed") &&
-        state.statusText.includes("Local language model exited with code 3221225477")
+        state.statusText === "Target language output failed."
       ),
       10000
     );
+    assertNoDiagnosticLeak(failedTargetOutputState.statusText, "Target output failure status");
     await window.webContents.executeJavaScript(`
       (() => {
         window.__copyAttempts = [];
@@ -1388,7 +1487,7 @@ app.whenReady().then(async () => {
     `);
     await waitForState(window, (state) => state.copyAttempts === 0, 5000);
 
-    if (settingsAtDictation?.outputLanguage !== "zh-Hans") {
+    if (settingsAtDictation?.outputLanguage !== "fr") {
       throw new Error(`Output language was not applied before dictation. Saw ${settingsAtDictation?.outputLanguage || "unset"}.`);
     }
     if (settingsAtDictation?.llmProvider !== "mymemory") {
@@ -1479,6 +1578,10 @@ function readRendererState(window) {
       isRecording: document.body.classList.contains('recording'),
       recordLabel: document.querySelector('#recordLabel')?.textContent || '',
       statusText: document.querySelector('#statusText')?.textContent || '',
+      headerHealthText: document.querySelector('#headerHealthText')?.textContent || '',
+      footerHealthText: document.querySelector('#footerHealthText')?.textContent || '',
+      footerHealthReady: document.querySelector('#footerHealth')?.dataset.ready === 'true',
+      recordReadinessReady: !document.querySelector('#recordButton')?.disabled,
       resultText: document.querySelector('#resultText')?.textContent || '',
       resultEmpty: document.querySelector('#resultText')?.dataset.emptyResult === 'true',
       resultAriaPlaceholder: document.querySelector('#resultText')?.getAttribute('aria-placeholder') || '',
@@ -1617,5 +1720,12 @@ function assertPartialSettingsSave(actual, expected) {
     expectedKeys.some((key) => actual[key] !== expected[key])
   ) {
     throw new Error(`Expected partial settings save ${JSON.stringify(expected)}, saw ${JSON.stringify(actual)}.`);
+  }
+}
+
+function assertNoDiagnosticLeak(value, label) {
+  const leak = /3221225477|spawn|ENOENT|stderr|[A-Za-z]:[\\/]/i.exec(String(value || ""));
+  if (leak) {
+    throw new Error(`${label} leaked diagnostics: ${leak[0]}`);
   }
 }

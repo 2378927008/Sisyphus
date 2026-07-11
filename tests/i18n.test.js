@@ -38,6 +38,13 @@ const windowsUiV3Keys = [
   "phase.error"
 ];
 
+const safeStatusKeys = [
+  "status.settingsSaveFailed",
+  "status.outputFailed",
+  "status.whisperFailed",
+  "status.textProviderFailed"
+];
+
 test("Windows UI v3 keys are explicit in every supported dictionary", () => {
   assert.deepEqual(Object.keys(uiTranslations), [
     "en",
@@ -54,6 +61,21 @@ test("Windows UI v3 keys are explicit in every supported dictionary", () => {
     for (const key of windowsUiV3Keys) {
       assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
       assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
+    }
+  }
+});
+
+test("safe failure statuses are explicit in every language and ignore diagnostic replacements", () => {
+  const diagnostics = "3221225477 spawn C:\\private\\helper.exe ENOENT stderr";
+
+  for (const [language, dictionary] of Object.entries(uiTranslations)) {
+    for (const key of safeStatusKeys) {
+      assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
+      const message = getUiText(language, key, { message: diagnostics });
+      assert.doesNotMatch(message, /3221225477|spawn|ENOENT|stderr|[A-Za-z]:[\\/]/i, `${language}.${key}`);
+      if (language !== "en") {
+        assert.notEqual(message, getUiText("en", key), `${language}.${key}`);
+      }
     }
   }
 });

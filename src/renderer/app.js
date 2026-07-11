@@ -96,14 +96,14 @@ let editorState = createEditorState();
 let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
 let recentHistoryCompact = window.innerHeight < 650;
-let processingLanguageSaveQueue = Promise.resolve();
+let settingsSaveQueue = Promise.resolve();
 let processingLanguageErrorOwner = null;
 const processingLanguageRequestVersions = {
   whisperLanguage: 0,
   outputLanguage: 0
 };
 const mainTabs = [dictationTab, historyTab];
-const SETTINGS_SAVE_FAILED_MESSAGE = "Settings could not be saved.";
+const SETTINGS_SAVE_FAILED_KEY = "status.settingsSaveFailed";
 const ACTIVE_LANGUAGE_STATUS_PHASES = new Set([
   "starting",
   "recording",
@@ -270,9 +270,15 @@ function changeProcessingLanguage(event) {
   const requestVersion = processingLanguageRequestVersions[settingName] + 1;
   processingLanguageRequestVersions[settingName] = requestVersion;
 
-  processingLanguageSaveQueue = processingLanguageSaveQueue.then(() => (
+  enqueueSettingsOperation(() => (
     saveProcessingLanguage(field, settingName, requestedValue, requestVersion)
   ));
+}
+
+function enqueueSettingsOperation(operation) {
+  const pending = settingsSaveQueue.then(operation);
+  settingsSaveQueue = pending.catch(() => {});
+  return pending;
 }
 
 async function saveProcessingLanguage(field, settingName, requestedValue, requestVersion) {
@@ -294,7 +300,7 @@ async function saveProcessingLanguage(field, settingName, requestedValue, reques
       field: settingName,
       version: requestVersion
     };
-    setStatus(SETTINGS_SAVE_FAILED_MESSAGE);
+    setStatus(t(SETTINGS_SAVE_FAILED_KEY));
     renderProviderStatus();
     renderSetupChecklist();
     renderFooterHealth();
@@ -310,7 +316,7 @@ function clearOwnedLanguageSaveFailure(settingName, requestVersion) {
   if (!owner || owner.field !== settingName || requestVersion <= owner.version) return;
 
   processingLanguageErrorOwner = null;
-  if (statusText.textContent !== SETTINGS_SAVE_FAILED_MESSAGE) return;
+  if (statusText.textContent !== t(SETTINGS_SAVE_FAILED_KEY)) return;
   if (ACTIVE_LANGUAGE_STATUS_PHASES.has(document.body.dataset.phase)) return;
   setReadyStatus();
 }
@@ -318,8 +324,8 @@ function clearOwnedLanguageSaveFailure(settingName, requestVersion) {
 async function refreshProcessingProviderPreview() {
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t(SETTINGS_SAVE_FAILED_KEY));
   }
 }
 
@@ -350,8 +356,8 @@ async function runWhisperDiagnostics() {
     const result = await window.localFlow.checkWhisper();
     diagnosticsList.innerHTML = renderChecks(result.checks);
     setStatus(result.ready ? t("status.whisperReady") : t("status.whisperNeedsAttention"));
-  } catch (error) {
-    setStatus(t("status.whisperFailed", { message: error.message }));
+  } catch {
+    setStatus(t("status.whisperFailed"));
   }
 }
 
@@ -427,7 +433,7 @@ async function runTextProviderDiagnostics() {
         message: error.message
       }
     ]);
-    setStatus(t("status.textProviderFailed", { message: error.message }));
+    setStatus(t("status.textProviderFailed"));
   }
 }
 
@@ -713,8 +719,10 @@ async function saveDetectedSetupPaths() {
   if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
 
   if (Object.keys(next).length) {
-    currentSettings = await window.localFlow.saveSettings(next);
-    fillSettings(currentSettings);
+    await enqueueSettingsOperation(async () => {
+      currentSettings = await window.localFlow.saveSettings(next);
+      fillSettings(currentSettings);
+    });
   }
 }
 
@@ -1171,9 +1179,7 @@ async function stopRecording() {
 function renderDictationResult(entry) {
   if (entry?.status === "failed") {
     replaceEditorBaseline("", "result.outputFailed");
-    setStatus(t("status.outputFailed", {
-      message: entry.processingError || "Unknown text model error."
-    }));
+    setStatus(t("status.outputFailed"));
     return;
   }
 
@@ -1219,15 +1225,18 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     dictionary: data.get("dictionary")
   };
 
-  currentSettings = await window.localFlow.saveSettings(next);
-  currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
-  applyInterfaceLanguage(currentLanguage);
-  fillSettings(currentSettings);
-  if (updateStatus) {
-    setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
-  }
-  await refreshProviderStatus();
-  await renderLocalModelStatus();
+  return enqueueSettingsOperation(async () => {
+    currentSettings = await window.localFlow.saveSettings(next);
+    currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
+    applyInterfaceLanguage(currentLanguage);
+    fillSettings(currentSettings);
+    if (updateStatus) {
+      setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
+    }
+    await refreshProviderStatus();
+    await renderLocalModelStatus();
+    return currentSettings;
+  });
 }
 
 function fillSettings(settings) {
