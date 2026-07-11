@@ -13,6 +13,7 @@ import {
   whisperLanguages
 } from "../shared/languages.js";
 import { getUiText } from "./i18n.js";
+import { renderIcons } from "./icons.js";
 import {
   createEditorState,
   normalizeViewPhase,
@@ -39,8 +40,11 @@ const dictationPanel = document.querySelector("#dictationPanel");
 const historyPanel = document.querySelector("#historyPanel");
 const openHistory = document.querySelector("#openHistory");
 const viewAllHistory = document.querySelector("#viewAllHistory");
+viewAllHistory.querySelector(".button-label").dataset.i18n = "action.viewAll";
 const voiceCommandBar = document.querySelector("#voiceCommandBar");
+const phaseStatus = voiceCommandBar.querySelector(".provider-status");
 const footerHealth = document.querySelector("#footerHealth");
+const footerCopyNodes = [...footerHealth.querySelectorAll("span:not([data-lucide])")];
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
 const checkTextProvider = document.querySelector("#checkTextProvider");
@@ -69,6 +73,7 @@ const copyResult = document.querySelector("#copyResult");
 const insertResult = document.querySelector("#insertResult");
 const restoreResult = document.querySelector("#restoreResult");
 const shortcutCaptureButtons = [...document.querySelectorAll("[data-shortcut-target]")];
+const WAVEFORM_BAR_COUNT = 24;
 
 let recorder = null;
 let isRecording = false;
@@ -112,7 +117,60 @@ const settingsFocusTrap = createFocusTrap({
   onEscape: closeSettingsDrawer
 });
 
+prepareWindowsUiV3Markup();
 init();
+
+function prepareWindowsUiV3Markup() {
+  attachTranslationToIconLabel(dictationTab, "tab.dictation");
+  attachTranslationToIconLabel(historyTab, "tab.history");
+  attachTranslationToIconLabel(restoreResult, "action.restore");
+  attachTranslationToIconLabel(copyResult, "action.copy");
+  attachTranslationToIconLabel(insertResult, "action.insert");
+  attachTranslationToIconLabel(viewAllHistory, "action.viewAll");
+
+  recordButton.removeAttribute("aria-live");
+  phaseStatus.setAttribute("role", "status");
+  phaseStatus.setAttribute("aria-live", "polite");
+  phaseStatus.setAttribute("aria-atomic", "true");
+
+  document.querySelector("#settingsSectionGeneral").dataset.i18n = "settings.general";
+  document.querySelector("#settingsSectionShortcuts").dataset.i18n = "settings.shortcuts";
+  document.querySelector("#settingsSectionModels").dataset.i18n = "settings.modelsPrivacy";
+  document.querySelector("#settingsSectionAdvanced").dataset.i18n = "settings.advanced";
+  footerCopyNodes[1].dataset.i18n = "hint.autoKeepsLanguage";
+
+  const waveform = document.createElement("div");
+  waveform.className = "waveform";
+  waveform.setAttribute("aria-hidden", "true");
+  waveform.replaceChildren(...Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
+    const bar = document.createElement("span");
+    bar.style.setProperty("--bar-index", String(index));
+    return bar;
+  }));
+  voiceCommandBar.insertBefore(waveform, phaseStatus);
+}
+
+function attachTranslationToIconLabel(button, key) {
+  button.dataset.i18nTitle = key;
+  button.dataset.i18nAriaLabel = key;
+
+  const existingLabel = button.querySelector(".button-label");
+  if (existingLabel) {
+    existingLabel.dataset.i18n = key;
+    return;
+  }
+
+  const textNode = [...button.childNodes].find((node) => (
+    node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ""
+  ));
+  if (!textNode) return;
+
+  const label = document.createElement("span");
+  label.className = "button-label";
+  label.dataset.i18n = key;
+  label.textContent = textNode.textContent.trim();
+  textNode.replaceWith(label);
+}
 
 async function init() {
   currentSettings = await window.localFlow.getSettings();
@@ -401,11 +459,11 @@ function renderFooterHealth() {
   if (!footerHealth) return;
 
   const readiness = getCurrentRecordReadiness();
-  const statusNode = footerHealth.querySelectorAll("span")[1];
+  const statusNode = footerCopyNodes[0];
   footerHealth.dataset.ready = String(readiness.ready);
   if (statusNode) {
     statusNode.textContent = readiness.ready
-      ? t("status.whisperReady")
+      ? t("status.localReady")
       : getRecordDisabledMessage(readiness);
   }
 }
@@ -1193,6 +1251,7 @@ function renderRecentHistory() {
   recentHistoryList.innerHTML = recent.length
     ? recent.map((item) => renderHistoryItem(item, { recent: true })).join("")
     : `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+  renderIcons(recentHistoryList);
 }
 
 function handleRecentHistoryResize() {
@@ -1207,6 +1266,7 @@ function renderFullHistory() {
   historyList.innerHTML = allHistory
     .map((item, index) => renderHistoryItem(item, { index }))
     .join("");
+  renderIcons(historyList);
 }
 
 function renderHistoryItem(item, { index = -1, recent = false } = {}) {
@@ -1234,7 +1294,7 @@ function renderHistoryItem(item, { index = -1, recent = false } = {}) {
       >
         <time>${escapeHtml(formatHistoryTime(item?.createdAt))}</time>
         <p>${escapeHtml(preview)}</p>
-        <span data-history-character-count>${count}</span>
+        <span data-history-character-count>${escapeHtml(t("label.characterCount", { count }))}</span>
         <span data-lucide="ChevronRight" aria-hidden="true"></span>
       </button>
       ${recent ? "" : `
@@ -1343,14 +1403,8 @@ function applyInterfaceLanguage(language) {
   const selectedValues = readLanguageSelections();
   populateLanguageSelects(selectedValues);
 
-  for (const element of document.querySelectorAll("[data-i18n]")) {
-    if (element === resultText) continue;
-    element.textContent = t(element.dataset.i18n);
-  }
-
-  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
-    element.placeholder = t(element.dataset.i18nPlaceholder);
-  }
+  applyTranslations();
+  renderIcons();
 
   renderProviderStatus();
   renderSetupChecklist();
@@ -1358,6 +1412,25 @@ function applyInterfaceLanguage(language) {
   shortcutRecorder.refreshLabels();
 
   renderEditorState();
+}
+
+function applyTranslations(root = document) {
+  for (const element of root.querySelectorAll("[data-i18n]")) {
+    if (element === resultText) continue;
+    element.textContent = t(element.dataset.i18n);
+  }
+
+  for (const element of root.querySelectorAll("[data-i18n-placeholder]")) {
+    element.placeholder = t(element.dataset.i18nPlaceholder);
+  }
+
+  for (const element of root.querySelectorAll("[data-i18n-title]")) {
+    element.title = t(element.dataset.i18nTitle);
+  }
+
+  for (const element of root.querySelectorAll("[data-i18n-aria-label]")) {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+  }
 }
 
 function readLanguageSelections() {
@@ -1476,6 +1549,7 @@ function setViewPhase(phase) {
   const normalizedPhase = normalizeViewPhase(phase);
   document.body.dataset.phase = normalizedPhase;
   voiceCommandBar.dataset.phase = normalizedPhase;
+  phaseStatus.textContent = t(`phase.${normalizedPhase}`);
 }
 
 function t(key, replacements = {}) {

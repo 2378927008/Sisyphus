@@ -4,6 +4,77 @@ import { getUiText, uiTranslations } from "../src/renderer/i18n.js";
 
 const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|Fran莽ais|D茅|Arr锚|袧邪|褋|携蟹|贸|谩|Espa帽ol|銉|鞚|氇|瑾|閷|鞁/;
 
+const windowsUiV3Keys = [
+  "tab.dictation",
+  "tab.history",
+  "status.localReady",
+  "hint.autoKeepsLanguage",
+  "action.restore",
+  "action.insert",
+  "action.viewAll",
+  "action.backToDictation",
+  "label.characterCount",
+  "settings.general",
+  "settings.shortcuts",
+  "settings.modelsPrivacy",
+  "settings.advanced",
+  "status.inserted",
+  "status.insertFailed",
+  "phase.idle",
+  "phase.starting",
+  "phase.recording",
+  "phase.stopping",
+  "phase.transcribing",
+  "phase.pasting",
+  "phase.done",
+  "phase.warning",
+  "phase.error"
+];
+
+test("Windows UI v3 keys are explicit in every supported dictionary", () => {
+  assert.deepEqual(Object.keys(uiTranslations), [
+    "en",
+    "zh-Hans",
+    "ja",
+    "ko",
+    "zh-Hant",
+    "fr",
+    "ru",
+    "es"
+  ]);
+
+  for (const [language, dictionary] of Object.entries(uiTranslations)) {
+    for (const key of windowsUiV3Keys) {
+      assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
+      assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
+    }
+  }
+});
+
+test("Windows UI v3 uses the approved Simplified Chinese core copy", () => {
+  const expected = {
+    "tab.dictation": "语音输入",
+    "tab.history": "历史",
+    "hint.autoKeepsLanguage": "自动输出保持原语言",
+    "action.restore": "恢复",
+    "action.insert": "插入到光标处",
+    "action.viewAll": "查看全部",
+    "action.backToDictation": "返回语音输入",
+    "label.characterCount": "{count} 个字符",
+    "settings.general": "常规",
+    "settings.shortcuts": "快捷键",
+    "settings.modelsPrivacy": "模型与隐私",
+    "settings.advanced": "高级",
+    "status.inserted": "已插入到光标处",
+    "status.insertFailed": "插入失败，文本已保留在剪贴板"
+  };
+
+  for (const [key, value] of Object.entries(expected)) {
+    assert.equal(getUiText("zh-Hans", key), value, key);
+  }
+  assert.equal(getUiText("zh-Hans", "label.characterCount", { count: 218 }), "218 个字符");
+});
+
 test("getUiText returns localized record labels for supported interface languages", () => {
   assert.equal(getUiText("en", "record.start"), "Start recording");
   assert.equal(getUiText("zh-Hans", "record.start"), "开始录音");

@@ -106,13 +106,17 @@ test("main window separates recent history from the full history list", async ()
 
 test("history refresh and view-all commands keep separate semantics", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const recentHistory = getElementMarkup(html, "section", "recentHistorySection");
   const fullHistory = getElementMarkup(html, "section", "historyPanel");
   const viewAllButton = getElementMarkup(recentHistory, "button", "viewAllHistory");
   const refreshButton = getElementMarkup(fullHistory, "button", "refreshHistory");
 
-  assert.doesNotMatch(viewAllButton, /action\.viewAll/);
   assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
+  assert.match(
+    appSource,
+    /viewAllHistory\.querySelector\("\.button-label"\)\.dataset\.i18n\s*=\s*"action\.viewAll"/
+  );
   assert.match(refreshButton, /data-i18n="action\.refresh"/);
   assert.match(refreshButton, />[\s\S]*刷新[\s\S]*<\/button>/);
   assert.doesNotMatch(recentHistory, /id="refreshHistory"/);
@@ -236,7 +240,97 @@ test("localized icon controls preserve icons by translating only child labels", 
   const viewAllButton = getElementMarkup(html, "button", "viewAllHistory");
   assert.match(viewAllButton, /data-lucide="ChevronRight"/);
   assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
-  assert.doesNotMatch(viewAllButton, /action\.viewAll/);
+  assert.doesNotMatch(viewAllButton.match(/^<button\b[^>]*>/)?.[0] ?? "", /\sdata-i18n=/);
+});
+
+test("interface translation updates text and accessible attributes before refreshing icons", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /import\s*\{\s*renderIcons\s*\}\s*from\s*"\.\/icons\.js"/);
+  assert.match(appSource, /function applyTranslations\(root = document\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-placeholder\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-title\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-aria-label\]"\)/);
+  assert.match(appSource, /element\.placeholder\s*=\s*t\(element\.dataset\.i18nPlaceholder\)/);
+  assert.match(appSource, /element\.title\s*=\s*t\(element\.dataset\.i18nTitle\)/);
+  assert.match(appSource, /element\.setAttribute\("aria-label",\s*t\(element\.dataset\.i18nAriaLabel\)\)/);
+  assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderIcons\(\);/);
+});
+
+test("localized Windows UI v3 structure preserves icon controls and dynamic content", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  for (const [control, key] of [
+    ["dictationTab", "tab.dictation"],
+    ["historyTab", "tab.history"],
+    ["restoreResult", "action.restore"],
+    ["copyResult", "action.copy"],
+    ["insertResult", "action.insert"]
+  ]) {
+    assert.match(
+      appSource,
+      new RegExp(`attachTranslationToIconLabel\\(${control}, \\"${key.replace(".", "\\.")}\\"\\)`),
+      control
+    );
+  }
+
+  for (const key of [
+    "settings.general",
+    "settings.shortcuts",
+    "settings.modelsPrivacy",
+    "settings.advanced",
+    "hint.autoKeepsLanguage"
+  ]) {
+    assert.match(appSource, new RegExp(`dataset\\.i18n = \\"${key.replace(".", "\\.")}\\"`), key);
+  }
+
+  assert.match(appSource, /const WAVEFORM_BAR_COUNT = 24/);
+  assert.match(appSource, /attachTranslationToIconLabel\(viewAllHistory, "action\.viewAll"\)/);
+  assert.match(appSource, /button\.dataset\.i18nTitle = key/);
+  assert.match(appSource, /button\.dataset\.i18nAriaLabel = key/);
+  assert.match(appSource, /recordButton\.removeAttribute\("aria-live"\)/);
+  assert.match(appSource, /phaseStatus\.setAttribute\("role", "status"\)/);
+  assert.match(appSource, /phaseStatus\.setAttribute\("aria-live", "polite"\)/);
+  assert.match(appSource, /className = "waveform"/);
+  assert.match(appSource, /Array\.from\(\{ length: WAVEFORM_BAR_COUNT \}/);
+  assert.match(appSource, /t\("label\.characterCount", \{ count \}\)/);
+  assert.match(appSource, /phaseStatus\.textContent = t\(`phase\.\$\{normalizedPhase\}`\)/);
+});
+
+test("Windows UI v3 styles enforce the approved visual and responsive system", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  for (const token of [
+    ["--background", "#F6F8F7"],
+    ["--surface", "#FFFFFF"],
+    ["--text", "#17211E"],
+    ["--muted", "#66716D"],
+    ["--line", "#DCE3E0"],
+    ["--accent", "#078A68"],
+    ["--recording", "#D64B3C"],
+    ["--warning", "#A96F16"],
+    ["--error", "#B83A3A"]
+  ]) {
+    assert.match(styles, new RegExp(`${token[0]}:\\s*${token[1]}`, "i"), token[0]);
+  }
+
+  assert.match(styles, /font-family:\s*"Segoe UI",\s*"Microsoft YaHei",\s*system-ui/);
+  assert.match(styles, /letter-spacing:\s*0/);
+  assert.match(styles, /body\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /\.app-shell\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /#recordButton\s*\{[^}]*border-radius:\s*6px/s);
+  assert.match(styles, /\.status-line\s*\{[^}]*min-height:\s*\d+px/s);
+  assert.match(styles, /\.drawer-panel\s*\{[^}]*width:\s*min\(560px,\s*100vw\)/s);
+  assert.match(styles, /@media\s*\(max-width:\s*919px\)/);
+  assert.match(styles, /@media\s*\(max-height:\s*649px\)/);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(styles, /:focus-visible\s*\{[^}]*outline:\s*2px/s);
+  assert.match(styles, /@media\s*\(max-width:\s*919px\)[\s\S]*?\.button-label\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /@media\s*\(max-height:\s*649px\)[\s\S]*?\.history-item:nth-child\(3\)\s*\{[^}]*display:\s*none/s);
+  assert.doesNotMatch(styles, /(?:linear|radial)-gradient/i);
+  assert.doesNotMatch(styles, /record-orb/);
+  assert.doesNotMatch(styles, /border-radius:\s*(?:50%|999\w*)[^;]*;[^}]*#recordButton/s);
 });
 
 test("settings expose dictation modes without a legacy translation mode", async () => {
