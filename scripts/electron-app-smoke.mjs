@@ -11,6 +11,7 @@ const projectRoot = path.join(__dirname, "..");
 const htmlPath = path.join(projectRoot, "src", "renderer", "index.html");
 const hudHtmlPath = path.join(projectRoot, "src", "renderer", "hud.html");
 const preloadPath = path.join(projectRoot, "src", "preload.cjs");
+const unsafeDiagnostic = "3221225477 spawn C:\\private\\provider-helper.exe ENOENT stderr";
 
 applyElectronRuntimeSwitches(app);
 
@@ -72,6 +73,9 @@ let dictationResult = {
 };
 const settingsSaveCalls = [];
 let settingsSaveError = "";
+let deferNextFullSettingsSave = false;
+let deferredFullSettingsSaveReached = false;
+let releaseDeferredFullSettingsSave = null;
 let deferProcessingLanguageSaves = false;
 let activeSettingsSaveCalls = 0;
 let maxConcurrentSettingsSaveCalls = 0;
@@ -115,6 +119,11 @@ let whisperDiagnosticsResult = {
 let whisperDiagnosticsError = "";
 let textDiagnosticsError = "";
 let providerStatusOverride = null;
+let setupRefreshError = "";
+let setupStartError = "";
+let setupCancelError = "";
+let dictationWavError = "";
+const recordingStatusReports = [];
 
 const missingSetupStatus = {
   assets: {
@@ -131,6 +140,7 @@ const missingSetupStatus = {
     llm: { type: "llm", status: "idle", output: [], error: "" }
   }
 };
+let setupRefreshResult = missingSetupStatus;
 const setupIpcCalls = {
   status: 0,
   refresh: 0,
@@ -154,6 +164,15 @@ function wireIpc() {
         settingKeys.length === 1 &&
         (settingKeys[0] === "whisperLanguage" || settingKeys[0] === "outputLanguage")
       );
+      if (deferNextFullSettingsSave && !isPartialProcessingLanguageSave) {
+        deferNextFullSettingsSave = false;
+        deferredFullSettingsSaveReached = true;
+        await new Promise((resolve) => {
+          releaseDeferredFullSettingsSave = resolve;
+        });
+        deferredFullSettingsSaveReached = false;
+        releaseDeferredFullSettingsSave = null;
+      }
       if (deferProcessingLanguageSaves && isPartialProcessingLanguageSave) {
         const deferredError = await new Promise((resolve) => deferredSettingsSaveResolvers.push(resolve));
         if (deferredError) {
@@ -204,16 +223,18 @@ function wireIpc() {
   registerSmokeIpcHandler("models:setup-status", () => {
     setupIpcCalls.status += 1;
     if (setupIpcCalls.status === 1) {
-      throw new Error("setup status unavailable");
+      throw new Error(unsafeDiagnostic);
     }
     return missingSetupStatus;
   });
   registerSmokeIpcHandler("models:setup-refresh", () => {
     setupIpcCalls.refresh += 1;
-    return missingSetupStatus;
+    if (setupRefreshError) throw new Error(setupRefreshError);
+    return setupRefreshResult;
   });
   registerSmokeIpcHandler("models:setup-start", (_event, type) => {
     setupIpcCalls.start.push(type);
+    if (setupStartError) throw new Error(setupStartError);
     return new Promise((resolve) => {
       setupStartResolvers.set(type, (result) => resolve(result || {
         type,
@@ -226,6 +247,7 @@ function wireIpc() {
   });
   registerSmokeIpcHandler("models:setup-cancel", (_event, type) => {
     setupIpcCalls.cancel.push(type);
+    if (setupCancelError) throw new Error(setupCancelError);
     return {
       type,
       status: "cancelled",
@@ -236,8 +258,12 @@ function wireIpc() {
   });
   registerSmokeIpcHandler("dictation:status-latest", () => null);
   registerSmokeIpcHandler("dictation:wav", () => {
+    if (dictationWavError) throw new Error(dictationWavError);
     settingsAtDictation = { ...settings };
     return dictationResult;
+  });
+  ipcMain.on("recording:status", (_event, payload) => {
+    recordingStatusReports.push(payload);
   });
 }
 
@@ -411,6 +437,7 @@ app.whenReady().then(async () => {
     }
     assertNoDiagnosticLeak(initialState.headerHealthText, "Initial header health");
     assertNoDiagnosticLeak(initialState.footerHealthText, "Initial footer health");
+    assertNoDiagnosticLeak(initialState.setupChecklistText, "Initial setup checklist");
     whisperDiagnosticsResult = {
       ready: false,
       checks: [
@@ -986,7 +1013,7 @@ app.whenReady().then(async () => {
         "Primary Hugging Face download failed. Trying mirror...",
         "Model: C:\\partial\\Qwen3-4B-Q4_K_M.gguf"
       ],
-      error: "Qwen setup finished but required assets were not found.",
+      error: unsafeDiagnostic,
       assets: {
         whisper: {},
         llm: {
@@ -997,10 +1024,10 @@ app.whenReady().then(async () => {
         }
       }
     });
-    await waitForState(
+    const failedSetupResultState = await waitForState(
       window,
       (state) => (
-        state.statusText.includes("Qwen setup finished but required assets were not found.") &&
+        state.statusText === "Qwen 安装失败，请检查设置后重试。" &&
         state.setupOutputText.includes("Downloading Qwen runtime...") &&
         state.setupOutputText.includes("Primary Hugging Face download failed. Trying mirror...") &&
         !state.setupOutputText.includes("C:\\partial")
@@ -1017,6 +1044,19 @@ app.whenReady().then(async () => {
       throw new Error(`Failed setup persisted partial LLM model path: ${settings.embeddedLlmModelPath}`);
     }
 
+    setupRefreshResult = {
+      ...missingSetupStatus,
+      assets: {
+        ...missingSetupStatus.assets,
+        whisper: {
+          whisperCliPath: "C:\\smoke\\setup-whisper-cli.exe",
+          whisperModelPath: "C:\\smoke\\setup-whisper-model.bin"
+        }
+      }
+    };
+    deferNextFullSettingsSave = true;
+    deferProcessingLanguageSaves = true;
+    const detectedPathSaveIndex = settingsSaveCalls.length;
     await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
     await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
     await waitForState(
@@ -1030,7 +1070,67 @@ app.whenReady().then(async () => {
       5000
     );
     setupStartResolvers.get("whisper")?.();
-    await waitForState(window, (state) => state.statusText === "Whisper 安装完成。", 5000);
+    await waitForState(
+      window,
+      () => (
+        deferredFullSettingsSaveReached &&
+        settingsSaveCalls.length === detectedPathSaveIndex + 1 &&
+        activeSettingsSaveCalls === 1
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'fr';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    releaseDeferredFullSettingsSave?.();
+    await waitForState(
+      window,
+      () => (
+        settingsSaveCalls.length === detectedPathSaveIndex + 2 &&
+        activeSettingsSaveCalls === 1 &&
+        deferredSettingsSaveResolvers.length === 1
+      ),
+      5000
+    );
+    const detectedPathSaveReturnState = await readRendererState(window);
+    if (detectedPathSaveReturnState.outputLanguage !== "fr") {
+      throw new Error(
+        `Detected path save overwrote a newer language with ${detectedPathSaveReturnState.outputLanguage}.`
+      );
+    }
+    deferredSettingsSaveResolvers.shift()?.();
+    deferProcessingLanguageSaves = false;
+    await waitForState(
+      window,
+      (state) => (
+        state.statusText === "Whisper 安装完成。" &&
+        activeSettingsSaveCalls === 0 &&
+        settings.outputLanguage === "fr"
+      ),
+      5000
+    );
+    setupRefreshResult = missingSetupStatus;
+    const resetOutputLanguageSaveIndex = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'auto';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      () => (
+        settingsSaveCalls.length === resetOutputLanguageSaveIndex + 1 &&
+        activeSettingsSaveCalls === 0 &&
+        settings.outputLanguage === "auto"
+      ),
+      5000
+    );
     await window.webContents.executeJavaScript(`
       (() => {
         const interfaceLanguage = document.querySelector('#interfaceLanguage');
@@ -1060,9 +1160,54 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    assertNoDiagnosticLeak(failedSetupResultState.statusText, "Failed setup status");
     assertNoDiagnosticLeak(englishLanguageState.headerHealthText, "English header health");
     assertNoDiagnosticLeak(englishLanguageState.footerHealthText, "English footer health");
-    const unsafeDiagnostic = "3221225477 spawn C:\\private\\provider-helper.exe ENOENT stderr";
+    setupRefreshError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
+    const failedSetupRefreshState = await waitForState(
+      window,
+      (state) => state.statusText === "Setup status could not be refreshed.",
+      5000
+    );
+    assertNoDiagnosticLeak(failedSetupRefreshState.statusText, "Setup refresh failure status");
+    setupRefreshError = "";
+
+    setupStartError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#installLlm').click()");
+    const failedSetupStartState = await waitForState(
+      window,
+      (state) => state.statusText === "Model setup could not be started." && !state.installLlmDisabled,
+      5000
+    );
+    assertNoDiagnosticLeak(failedSetupStartState.statusText, "Setup start failure status");
+    setupStartError = "";
+
+    const setupStartsBeforeCancelFailure = setupIpcCalls.start.length;
+    await window.webContents.executeJavaScript("document.querySelector('#installLlm').click()");
+    await waitForState(
+      window,
+      (state) => setupIpcCalls.start.length === setupStartsBeforeCancelFailure + 1 && !state.cancelSetupHidden,
+      5000
+    );
+    setupCancelError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#cancelSetup').click()");
+    const failedSetupCancelState = await waitForState(
+      window,
+      (state) => state.statusText === "Model setup could not be cancelled.",
+      5000
+    );
+    assertNoDiagnosticLeak(failedSetupCancelState.statusText, "Setup cancel failure status");
+    setupCancelError = "";
+    setupStartResolvers.get("llm")?.({
+      type: "llm",
+      status: "failed",
+      output: [],
+      error: unsafeDiagnostic,
+      assets: missingSetupStatus.assets
+    });
+    await waitForState(window, (state) => state.cancelSetupHidden, 5000);
+
     whisperDiagnosticsError = unsafeDiagnostic;
     await window.webContents.executeJavaScript("document.querySelector('#checkWhisper').click()");
     const failedWhisperDiagnosticState = await waitForState(
@@ -1128,14 +1273,15 @@ app.whenReady().then(async () => {
     await waitForState(
       window,
       (state) => (
-        settingsSaveCalls.length > languageQueueStart &&
+        settingsSaveCalls.length === languageQueueStart + 1 &&
+        activeSettingsSaveCalls === 1 &&
+        deferredSettingsSaveResolvers.length === 1 &&
         state.outputLanguage === "es" &&
         state.interfaceLanguage === "en" &&
         state.hotkeyValue === "CommandOrControl+Shift+U"
       ),
       5000
     );
-    await new Promise((resolve) => setTimeout(resolve, 200));
     if (settingsSaveCalls.length !== languageQueueStart + 1 || activeSettingsSaveCalls !== 1) {
       throw new Error("Processing language saves were not serialized.");
     }
@@ -1225,7 +1371,6 @@ app.whenReady().then(async () => {
     assertPartialSettingsSave(settingsSaveCalls[whisperEnglishSaveIndex], {
       whisperLanguage: "en"
     });
-    await new Promise((resolve) => setTimeout(resolve, 200));
     const differentFieldSuccessState = await readRendererState(window);
     if (differentFieldSuccessState.statusText !== "Settings could not be saved.") {
       throw new Error(`Different language field cleared owned failure: ${differentFieldSuccessState.statusText}`);
@@ -1335,51 +1480,64 @@ app.whenReady().then(async () => {
       ),
       5000
     );
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await waitForState(window, () => activeSettingsSaveCalls === 0, 5000);
-    const recordingLanguageSaveIndex = settingsSaveCalls.length;
+
+    const settingsQueueBarrierIndex = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript("document.querySelector('#settingsForm').requestSubmit()");
+    await waitForState(
+      window,
+      () => settingsSaveCalls.length === settingsQueueBarrierIndex + 1 && activeSettingsSaveCalls === 0,
+      5000
+    );
+
+    const staleFullSaveIndex = settingsSaveCalls.length;
+    deferNextFullSettingsSave = true;
     deferProcessingLanguageSaves = true;
-    await window.webContents.executeJavaScript(`
-      (() => {
-        const outputLanguage = document.querySelector('#outputLanguage');
-        outputLanguage.value = 'es';
-        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-        outputLanguage.value = 'fr';
-        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-      })()
-    `);
+    await window.webContents.executeJavaScript("document.querySelector('#settingsForm').requestSubmit()");
     await waitForState(
       window,
       () => (
-        settingsSaveCalls.length > recordingLanguageSaveIndex &&
+        deferredFullSettingsSaveReached &&
+        settingsSaveCalls.length === staleFullSaveIndex + 1 &&
         activeSettingsSaveCalls === 1
       ),
       5000
     );
-    assertPartialSettingsSave(settingsSaveCalls[recordingLanguageSaveIndex], {
-      outputLanguage: "es"
-    });
-    window.webContents.send("recording:start");
-    window.webContents.send("recording:start");
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const blockedRecordingState = await readRendererState(window);
-    if (blockedRecordingState.isRecording) {
-      throw new Error("Recording started before the latest language save completed.");
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'fr';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const editedDuringFullSaveState = await readRendererState(window);
+    if (editedDuringFullSaveState.outputLanguage !== "fr") {
+      throw new Error(`Language edit was not applied while full save was pending: ${editedDuringFullSaveState.outputLanguage}.`);
     }
-    deferredSettingsSaveResolvers.shift()?.();
+
+    releaseDeferredFullSettingsSave?.();
     await waitForState(
       window,
-      () => settingsSaveCalls.length === recordingLanguageSaveIndex + 2 && activeSettingsSaveCalls === 1,
+      () => (
+        settingsSaveCalls.length === staleFullSaveIndex + 2 &&
+        activeSettingsSaveCalls === 1 &&
+        deferredSettingsSaveResolvers.length === 1
+      ),
       5000
     );
-    assertPartialSettingsSave(settingsSaveCalls[recordingLanguageSaveIndex + 1], {
+    if (settingsSaveCalls[staleFullSaveIndex].outputLanguage !== "zh-Hans") {
+      throw new Error("Delayed full save did not capture language A.");
+    }
+    assertPartialSettingsSave(settingsSaveCalls[staleFullSaveIndex + 1], {
       outputLanguage: "fr"
     });
-    const stillBlockedRecordingState = await readRendererState(window);
-    if (stillBlockedRecordingState.isRecording) {
-      throw new Error("Recording started before the newest language value was saved.");
+    const staleFullSaveReturnState = await readRendererState(window);
+    if (staleFullSaveReturnState.outputLanguage !== "fr") {
+      throw new Error(`Delayed full save overwrote language B with ${staleFullSaveReturnState.outputLanguage}.`);
     }
+
     deferredSettingsSaveResolvers.shift()?.();
+    window.webContents.send("recording:start");
+    window.webContents.send("recording:start");
     await waitForState(
       window,
       (state) => (
@@ -1399,7 +1557,6 @@ app.whenReady().then(async () => {
       ),
       5000
     );
-    await new Promise((resolve) => setTimeout(resolve, 200));
     const recordingState = await readRendererState(window);
     if (
       recordingState.statusText !== "正在录音。再次点击或按快捷键停止。" ||
@@ -1464,6 +1621,45 @@ app.whenReady().then(async () => {
       })()
     `);
     await waitForState(window, (state) => state.interfaceLanguage === "en", 5000);
+
+    const reportsBeforeSettingsStartFailure = recordingStatusReports.length;
+    settingsSaveError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    const failedRecordingSettingsState = await waitForState(
+      window,
+      (state) => (
+        !state.isRecording &&
+        state.bodyPhase === "error" &&
+        state.statusText === "Settings could not be saved." &&
+        recordingStatusReports.length > reportsBeforeSettingsStartFailure &&
+        recordingStatusReports.at(-1)?.phase === "error"
+      ),
+      5000
+    );
+    assertNoDiagnosticLeak(failedRecordingSettingsState.statusText, "Recording settings failure status");
+    assertNoDiagnosticLeak(recordingStatusReports.at(-1)?.message, "Recording settings lifecycle message");
+    settingsSaveError = "";
+
+    const reportsBeforeProcessFailure = recordingStatusReports.length;
+    dictationWavError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    await waitForState(window, (state) => state.isRecording, 10000);
+    await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
+    const failedProcessState = await waitForState(
+      window,
+      (state) => (
+        !state.isRecording &&
+        state.bodyPhase === "error" &&
+        state.statusText === "Dictation processing failed." &&
+        recordingStatusReports.length > reportsBeforeProcessFailure &&
+        recordingStatusReports.at(-1)?.phase === "error"
+      ),
+      10000
+    );
+    assertNoDiagnosticLeak(failedProcessState.statusText, "Dictation processing failure status");
+    assertNoDiagnosticLeak(recordingStatusReports.at(-1)?.message, "Dictation processing lifecycle message");
+    dictationWavError = "";
+
     await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");
     await waitForState(window, (state) => state.isRecording, 10000);
     await window.webContents.executeJavaScript("document.querySelector('#recordButton').click()");

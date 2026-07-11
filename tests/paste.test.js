@@ -9,6 +9,54 @@ test("buildPasteCommand returns a Windows SendKeys command", () => {
   assert.equal(command.file, "powershell.exe");
   assert.ok(command.args.includes("-STA"));
   assert.match(command.args.at(-1), /SendKeys.*\^v/);
+  assert.doesNotMatch(command.args.at(-1), /Start-Sleep/);
+});
+
+test("pasteText aborts during the focus delay without spawning SendKeys", async () => {
+  const controller = new AbortController();
+  let spawnCalls = 0;
+
+  await assert.rejects(
+    pasteText("hello", {
+      clipboard: { writeText() {} },
+      signal: controller.signal,
+      wait: async () => controller.abort(),
+      spawn: () => {
+        spawnCalls += 1;
+        const child = new EventEmitter();
+        process.nextTick(() => child.emit("close", 0));
+        return child;
+      }
+    }),
+    (error) => error.code === "paste_failed"
+  );
+
+  assert.equal(spawnCalls, 0);
+});
+
+test("pasteText kills an active SendKeys process when aborted", async () => {
+  const controller = new AbortController();
+  const child = new EventEmitter();
+  let killCalls = 0;
+  child.kill = () => {
+    killCalls += 1;
+    process.nextTick(() => child.emit("close", 1));
+    return true;
+  };
+
+  const result = pasteText("hello", {
+    clipboard: { writeText() {} },
+    signal: controller.signal,
+    wait: async () => {},
+    spawn: () => {
+      process.nextTick(() => controller.abort());
+      setImmediate(() => child.emit("close", 0));
+      return child;
+    }
+  });
+
+  await assert.rejects(result, (error) => error.code === "paste_failed");
+  assert.equal(killCalls, 1);
 });
 
 test("pasteText rejects with clipboard_unavailable when clipboard is missing", async () => {

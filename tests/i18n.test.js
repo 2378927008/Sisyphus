@@ -42,7 +42,12 @@ const safeStatusKeys = [
   "status.settingsSaveFailed",
   "status.outputFailed",
   "status.whisperFailed",
-  "status.textProviderFailed"
+  "status.textProviderFailed",
+  "status.microphoneFailed",
+  "status.processingFailed",
+  "setup.refreshFailed",
+  "setup.startFailed",
+  "setup.cancelFailed"
 ];
 
 test("Windows UI v3 keys are explicit in every supported dictionary", () => {

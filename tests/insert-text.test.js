@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { insertTextIntoPreviousApp, normalizeInsertText } from "../src/main/insert-text.js";
+import { pasteText } from "../src/main/paste.js";
 
 test("normalizeInsertText rejects non-string values", () => {
   assert.throws(() => normalizeInsertText(null), TypeError);
@@ -43,11 +45,12 @@ test("insertTextIntoPreviousApp hides, waits, then pastes normalized text", asyn
   });
 
   assert.deepEqual(result, { ok: true });
-  assert.deepEqual(calls, [
-    "hide",
-    ["wait", 140],
-    ["paste", text, { clipboard }]
-  ]);
+  assert.deepEqual(calls.slice(0, 2), ["hide", ["wait", 140]]);
+  assert.equal(calls[2][0], "paste");
+  assert.equal(calls[2][1], text);
+  assert.equal(calls[2][2].clipboard, clipboard);
+  assert.equal(calls[2][2].signal instanceof AbortSignal, true);
+  assert.equal(calls[2][2].signal.aborted, false);
 });
 
 test("insertTextIntoPreviousApp does not paste when the window is destroyed while waiting", async () => {
@@ -102,6 +105,88 @@ test("insertTextIntoPreviousApp does not paste when the main window becomes visi
     message: "Paste failed. Text copied."
   });
   assert.equal(pasteCalls, 0);
+});
+
+test("insertTextIntoPreviousApp latches a transient show even when the window hides again", async () => {
+  const mainWindow = new EventEmitter();
+  let visible = false;
+  let pasteCalls = 0;
+  mainWindow.isDestroyed = () => false;
+  mainWindow.isVisible = () => visible;
+  mainWindow.isFocused = () => false;
+  mainWindow.hide = () => {
+    visible = false;
+  };
+
+  const result = await insertTextIntoPreviousApp("edited text", {
+    mainWindow,
+    wait: async () => {
+      visible = true;
+      mainWindow.emit("show");
+      visible = false;
+    },
+    paste: async () => {
+      pasteCalls += 1;
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "window_unavailable",
+    message: "Paste failed. Text copied."
+  });
+  assert.equal(pasteCalls, 0);
+  assert.equal(mainWindow.listenerCount("show"), 0);
+  assert.equal(mainWindow.listenerCount("focus"), 0);
+});
+
+test("insertTextIntoPreviousApp aborts paste when the main window focuses after paste starts", async () => {
+  const mainWindow = new EventEmitter();
+  let focused = false;
+  let receivedSignal = null;
+  let clipboardWrites = 0;
+  let sendKeysCalls = 0;
+  mainWindow.isDestroyed = () => false;
+  mainWindow.isVisible = () => false;
+  mainWindow.isFocused = () => focused;
+  mainWindow.hide = () => {};
+
+  const result = await insertTextIntoPreviousApp("edited text", {
+    mainWindow,
+    clipboard: {
+      writeText() {
+        clipboardWrites += 1;
+      }
+    },
+    wait: async () => {},
+    paste: async (text, { clipboard, signal }) => {
+      receivedSignal = signal;
+      await pasteText(text, {
+        clipboard,
+        signal,
+        wait: async () => {
+          focused = true;
+          mainWindow.emit("focus");
+          focused = false;
+        },
+        spawn: () => {
+          sendKeysCalls += 1;
+          return new EventEmitter();
+        }
+      });
+    }
+  });
+
+  assert.equal(receivedSignal?.aborted, true);
+  assert.equal(clipboardWrites, 1);
+  assert.equal(sendKeysCalls, 0);
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "paste_failed",
+    message: "Paste failed. Text copied."
+  });
+  assert.equal(mainWindow.listenerCount("show"), 0);
+  assert.equal(mainWindow.listenerCount("focus"), 0);
 });
 
 test("insertTextIntoPreviousApp maps wait failures without exposing diagnostics", async () => {

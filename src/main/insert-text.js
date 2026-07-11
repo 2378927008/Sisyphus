@@ -27,40 +27,58 @@ export async function insertTextIntoPreviousApp(text, dependencies = {}) {
     paste = pasteText,
     wait = waitForTimeout
   } = dependencies;
+  const abortController = new AbortController();
+  let unsafeWindowTransition = false;
+  const markWindowUnsafe = () => {
+    unsafeWindowTransition = true;
+    abortController.abort();
+  };
+  const stopWatchingWindow = watchMainWindow(mainWindow, markWindowUnsafe);
 
   try {
     if (!isUsableMainWindow(mainWindow)) {
       return windowUnavailableResult();
     }
 
-    await mainWindow.hide();
-  } catch {
-    return windowUnavailableResult();
-  }
-
-  try {
-    await wait(140);
-  } catch {
-    return pasteFailureResult();
-  }
-
-  try {
-    if (!isUsableMainWindow(mainWindow) || !isMainWindowStillHidden(mainWindow)) {
+    try {
+      await mainWindow.hide();
+    } catch {
       return windowUnavailableResult();
     }
-  } catch {
-    return windowUnavailableResult();
-  }
 
-  try {
-    await paste(normalizedText, { clipboard });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: normalizePasteFailureReason(error?.code),
-      message: pasteFailureMessage
-    };
+    try {
+      await wait(140);
+    } catch {
+      return pasteFailureResult();
+    }
+
+    try {
+      if (
+        unsafeWindowTransition ||
+        !isUsableMainWindow(mainWindow) ||
+        !isMainWindowStillHidden(mainWindow)
+      ) {
+        return windowUnavailableResult();
+      }
+    } catch {
+      return windowUnavailableResult();
+    }
+
+    try {
+      await paste(normalizedText, { clipboard, signal: abortController.signal });
+      if (unsafeWindowTransition) {
+        return pasteFailureResult();
+      }
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: normalizePasteFailureReason(error?.code),
+        message: pasteFailureMessage
+      };
+    }
+  } finally {
+    stopWatchingWindow();
   }
 }
 
@@ -90,6 +108,18 @@ function isUsableMainWindow(mainWindow) {
 
 function isMainWindowStillHidden(mainWindow) {
   return mainWindow.isVisible?.() !== true && mainWindow.isFocused?.() !== true;
+}
+
+function watchMainWindow(mainWindow, onUnsafe) {
+  if (typeof mainWindow?.on !== "function") return () => {};
+
+  mainWindow.on("show", onUnsafe);
+  mainWindow.on("focus", onUnsafe);
+  return () => {
+    const removeListener = mainWindow.off || mainWindow.removeListener;
+    removeListener?.call(mainWindow, "show", onUnsafe);
+    removeListener?.call(mainWindow, "focus", onUnsafe);
+  };
 }
 
 function normalizePasteFailureReason(reason) {

@@ -975,12 +975,14 @@ test("renderer reports recording lifecycle only after start succeeds and before 
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
   const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const failRecordingStartMatch = appSource.match(/function failRecordingStart\([^)]*\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(startRecordingMatch, "startRecording should be defined");
   assert.ok(stopRecordingMatch, "stopRecording should be defined");
+  assert.ok(failRecordingStartMatch, "failRecordingStart should be defined");
   assert.match(appSource, /function reportRecordingLifecycle\(payload\) \{/);
   assert.ok(
-    startRecordingMatch.groups.body.indexOf("await recorder.start()") <
+    startRecordingMatch.groups.body.indexOf("await nextRecorder.start()") <
       startRecordingMatch.groups.body.indexOf('reportRecordingLifecycle({ phase: "recording"'),
     "renderer should report recording only after recorder.start resolves"
   );
@@ -989,7 +991,8 @@ test("renderer reports recording lifecycle only after start succeeds and before 
       stopRecordingMatch.groups.body.indexOf("await activeRecorder.stop()"),
     "renderer should report transcribing before awaiting recorder.stop"
   );
-  assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
+  assert.match(startRecordingMatch.groups.body, /failRecordingStart\(operationToken/);
+  assert.match(failRecordingStartMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
   assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
 });
 

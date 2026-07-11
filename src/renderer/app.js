@@ -414,7 +414,7 @@ async function runMicrophoneDiagnostics() {
         message: describeMicrophoneError(error)
       }
     ]);
-    setStatus(describeMicrophoneError(error));
+    setStatus(t("status.microphoneFailed"));
   }
 }
 
@@ -614,8 +614,8 @@ async function refreshSetupStatusAndSettings() {
     await renderLocalModelStatus();
     await refreshProviderStatus();
     setStatus(t("setup.refreshed"));
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t("setup.refreshFailed"));
   } finally {
     setSetupBusy(false);
   }
@@ -649,9 +649,16 @@ async function runModelSetup(type) {
     await refreshProviderStatus();
     setStatus(result.status === "complete"
       ? t(type === "whisper" ? "setup.whisper.complete" : "setup.llm.complete")
-      : getSetupFailureMessage(result));
-  } catch (error) {
-    setStatus(error.message);
+      : getSetupFailureMessage(result, `setup.${type}.failed`));
+  } catch {
+    currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
+      type,
+      status: "failed",
+      output: [],
+      error: ""
+    });
+    renderSetupChecklist();
+    setStatus(t("setup.startFailed"));
   } finally {
     stopPolling();
     activeSetupType = "";
@@ -668,8 +675,8 @@ async function cancelActiveModelSetup() {
     currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
     renderSetupChecklist();
     setStatus(getSetupFailureMessage(result, "setup.cancelled"));
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t("setup.cancelFailed"));
   }
 }
 
@@ -719,9 +726,10 @@ async function saveDetectedSetupPaths() {
   if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
 
   if (Object.keys(next).length) {
+    const fieldValuesAtSave = captureFormFieldValues();
     await enqueueSettingsOperation(async () => {
       currentSettings = await window.localFlow.saveSettings(next);
-      fillSettings(currentSettings);
+      fillSettings(currentSettings, { fieldValuesAtSave });
     });
   }
 }
@@ -866,7 +874,7 @@ function getSetupFailureMessage(setup, fallbackKey = "setup.failed") {
       return message;
     }
   }
-  return setup?.error || t(fallbackKey);
+  return t(fallbackKey);
 }
 
 async function copyLatestResult() {
@@ -1085,8 +1093,14 @@ async function startRecording() {
 
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
-    if (!isCurrentRecordingOperation(operationToken)) return;
+  } catch {
+    failRecordingStart(operationToken, t(SETTINGS_SAVE_FAILED_KEY), "settings_save_failed");
+    return;
+  }
 
+  if (!isCurrentRecordingOperation(operationToken)) return;
+
+  try {
     if (!ensureRecordReady()) {
       const message = recordButton.title || statusText.textContent || "Recording is not ready.";
       setRecordingLifecyclePhase("idle");
@@ -1113,20 +1127,23 @@ async function startRecording() {
     updateRecordLabel();
     setStatus(t("status.recording"));
     reportRecordingLifecycle({ phase: "recording", message: t("status.recording") });
-  } catch (error) {
-    if (!isCurrentRecordingOperation(operationToken)) return;
-
-    const message = describeMicrophoneError(error);
-    setStatus(message);
-    cleanupRecorder();
-    isRecording = false;
-    setRecordingLifecyclePhase("idle");
-    setViewPhase("error");
-    document.body.classList.remove("recording");
-    updateRecordLabel();
-    applyRecordReadiness();
-    reportRecordingLifecycle({ phase: "error", message });
+  } catch {
+    failRecordingStart(operationToken, t("status.microphoneFailed"), "microphone_start_failed");
   }
+}
+
+function failRecordingStart(operationToken, message, reason) {
+  if (!isCurrentRecordingOperation(operationToken)) return;
+
+  setStatus(message);
+  cleanupRecorder();
+  isRecording = false;
+  setRecordingLifecyclePhase("idle");
+  setViewPhase("error");
+  document.body.classList.remove("recording");
+  updateRecordLabel();
+  applyRecordReadiness();
+  reportRecordingLifecycle({ phase: "error", reason, message });
 }
 
 async function stopRecording() {
@@ -1161,10 +1178,11 @@ async function stopRecording() {
 
     setRecordingLifecyclePhase("idle");
     setViewPhase(entry?.status === "failed" ? "warning" : "done");
-  } catch (error) {
+  } catch {
     if (!isCurrentRecordingOperation(operationToken)) return;
 
-    setStatus(error.message);
+    const message = t("status.processingFailed");
+    setStatus(message);
     cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
@@ -1172,7 +1190,7 @@ async function stopRecording() {
     document.body.classList.remove("recording");
     updateRecordLabel();
     applyRecordReadiness();
-    reportRecordingLifecycle({ phase: "error", message: error.message });
+    reportRecordingLifecycle({ phase: "error", reason: "processing_failed", message });
   }
 }
 
@@ -1224,12 +1242,13 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     qwenModelMirrorUrls: data.get("qwenModelMirrorUrls"),
     dictionary: data.get("dictionary")
   };
+  const fieldValuesAtSave = captureFormFieldValues(Object.keys(next));
 
   return enqueueSettingsOperation(async () => {
     currentSettings = await window.localFlow.saveSettings(next);
-    currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
+    fillSettings(currentSettings, { fieldValuesAtSave });
+    currentLanguage = normalizeInterfaceLanguage(form.interfaceLanguage.value);
     applyInterfaceLanguage(currentLanguage);
-    fillSettings(currentSettings);
     if (updateStatus) {
       setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
     }
@@ -1239,10 +1258,13 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
   });
 }
 
-function fillSettings(settings) {
+function fillSettings(settings, { fieldValuesAtSave } = {}) {
   for (const [key, value] of Object.entries(settings)) {
     const field = form.elements[key];
     if (!field) continue;
+    if (fieldValuesAtSave?.has(key) && readFormFieldValue(field) !== fieldValuesAtSave.get(key)) {
+      continue;
+    }
 
     if (field.type === "checkbox") {
       field.checked = Boolean(value);
@@ -1372,6 +1394,19 @@ async function handleHistoryAction(event) {
   if (actionButton.dataset.historyAction === "insert") {
     await insertText(text);
   }
+}
+
+function captureFormFieldValues(keys = Array.from(form.elements, (field) => field.name).filter(Boolean)) {
+  const values = new Map();
+  for (const key of keys) {
+    const field = form.elements[key];
+    if (field) values.set(key, readFormFieldValue(field));
+  }
+  return values;
+}
+
+function readFormFieldValue(field) {
+  return field.type === "checkbox" ? Boolean(field.checked) : field.value;
 }
 
 function historyEntryId(entry, index) {
