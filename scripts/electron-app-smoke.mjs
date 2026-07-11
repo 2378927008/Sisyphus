@@ -101,7 +101,12 @@ function wireIpc() {
       if (settingsSaveError) {
         throw new Error(settingsSaveError);
       }
-      if (deferProcessingLanguageSaves && ("whisperLanguage" in next || "outputLanguage" in next)) {
+      const settingKeys = Object.keys(next);
+      const isPartialProcessingLanguageSave = (
+        settingKeys.length === 1 &&
+        (settingKeys[0] === "whisperLanguage" || settingKeys[0] === "outputLanguage")
+      );
+      if (deferProcessingLanguageSaves && isPartialProcessingLanguageSave) {
         const deferredError = await new Promise((resolve) => deferredSettingsSaveResolvers.push(resolve));
         if (deferredError) {
           throw new Error(deferredError);
@@ -788,14 +793,21 @@ app.whenReady().then(async () => {
     await waitForState(
       window,
       (state) => (
+        activeSettingsSaveCalls === 0 &&
+        settings.whisperLanguage === "en" &&
         state.whisperLanguage === "en" &&
-        settingsSaveCalls.some((call) => call.whisperLanguage === "en")
+        state.statusText === "Settings could not be saved."
       ),
       5000
     );
     assertPartialSettingsSave(settingsSaveCalls[whisperEnglishSaveIndex], {
       whisperLanguage: "en"
     });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const differentFieldSuccessState = await readRendererState(window);
+    if (differentFieldSuccessState.statusText !== "Settings could not be saved.") {
+      throw new Error(`Different language field cleared owned failure: ${differentFieldSuccessState.statusText}`);
+    }
     const whisperAutoSaveIndex = settingsSaveCalls.length;
     await window.webContents.executeJavaScript(`
       (() => {
@@ -887,15 +899,36 @@ app.whenReady().then(async () => {
     await waitForState(
       window,
       (state) => (
+        activeSettingsSaveCalls === 0 &&
         state.outputLanguage === "zh-Hans" &&
         state.llmProvider === "mymemory" &&
         state.providerStatusText.includes("MyMemory Free")
       ),
       5000
     );
+    const recordingLanguageSaveIndex = settingsSaveCalls.length;
+    deferProcessingLanguageSaves = true;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'zh-Hans';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      () => (
+        settingsSaveCalls.length > recordingLanguageSaveIndex &&
+        activeSettingsSaveCalls === 1
+      ),
+      5000
+    );
+    assertPartialSettingsSave(settingsSaveCalls[recordingLanguageSaveIndex], {
+      outputLanguage: "zh-Hans"
+    });
     window.webContents.send("recording:start");
     window.webContents.send("recording:start");
-    const recordingState = await waitForState(
+    await waitForState(
       window,
       (state) => (
         state.isRecording &&
@@ -905,6 +938,26 @@ app.whenReady().then(async () => {
       ),
       10000
     );
+    deferredSettingsSaveResolvers.shift()?.();
+    await waitForState(
+      window,
+      (state) => (
+        activeSettingsSaveCalls === 0 &&
+        settings.outputLanguage === "zh-Hans" &&
+        state.isRecording
+      ),
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const recordingState = await readRendererState(window);
+    if (
+      recordingState.statusText !== "正在录音。再次点击或按快捷键停止。" ||
+      recordingState.bodyPhase !== "recording" ||
+      recordingState.voiceCommandPhase !== "recording"
+    ) {
+      throw new Error(`Language save overwrote recording status: ${recordingState.statusText}`);
+    }
+    deferProcessingLanguageSaves = false;
 
     window.webContents.send("recording:stop");
     const completedState = await waitForState(

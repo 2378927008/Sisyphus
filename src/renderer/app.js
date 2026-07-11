@@ -82,12 +82,20 @@ let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
 let recentHistoryCompact = window.innerHeight < 650;
 let processingLanguageSaveQueue = Promise.resolve();
+let processingLanguageErrorOwner = null;
 const processingLanguageRequestVersions = {
   whisperLanguage: 0,
   outputLanguage: 0
 };
 const mainTabs = [dictationTab, historyTab];
 const SETTINGS_SAVE_FAILED_MESSAGE = "Settings could not be saved.";
+const ACTIVE_LANGUAGE_STATUS_PHASES = new Set([
+  "starting",
+  "recording",
+  "stopping",
+  "transcribing",
+  "pasting"
+]);
 const shortcutRecorder = createShortcutRecorder({
   eventTarget: window,
   buttons: shortcutCaptureButtons,
@@ -194,15 +202,17 @@ async function saveProcessingLanguage(field, settingName, requestedValue, reques
     await refreshProviderStatus();
     await refreshSetupStatusView({ updateStatus: false });
     renderFooterHealth();
-    if (isLatestProcessingLanguageRequest(settingName, requestVersion)) {
-      setReadyStatus();
-    }
+    clearOwnedLanguageSaveFailure(settingName, requestVersion);
   } catch {
     if (!isLatestProcessingLanguageRequest(settingName, requestVersion)) return;
 
     if (field.value === requestedValue) {
       field.value = currentSettings?.[settingName] ?? "auto";
     }
+    processingLanguageErrorOwner = {
+      field: settingName,
+      version: requestVersion
+    };
     setStatus(SETTINGS_SAVE_FAILED_MESSAGE);
     renderProviderStatus();
     renderSetupChecklist();
@@ -212,6 +222,16 @@ async function saveProcessingLanguage(field, settingName, requestedValue, reques
 
 function isLatestProcessingLanguageRequest(settingName, requestVersion) {
   return processingLanguageRequestVersions[settingName] === requestVersion;
+}
+
+function clearOwnedLanguageSaveFailure(settingName, requestVersion) {
+  const owner = processingLanguageErrorOwner;
+  if (!owner || owner.field !== settingName || requestVersion <= owner.version) return;
+
+  processingLanguageErrorOwner = null;
+  if (statusText.textContent !== SETTINGS_SAVE_FAILED_MESSAGE) return;
+  if (ACTIVE_LANGUAGE_STATUS_PHASES.has(document.body.dataset.phase)) return;
+  setReadyStatus();
 }
 
 async function refreshProcessingProviderPreview() {
