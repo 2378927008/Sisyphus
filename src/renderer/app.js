@@ -34,6 +34,7 @@ const resultText = document.querySelector("#resultText");
 const historyList = document.querySelector("#historyList");
 const recentHistoryList = document.querySelector("#recentHistoryList");
 const refreshHistory = document.querySelector("#refreshHistory");
+const mainTabsRegion = document.querySelector("#mainTabs");
 const dictationTab = document.querySelector("#dictationTab");
 const historyTab = document.querySelector("#historyTab");
 const dictationPanel = document.querySelector("#dictationPanel");
@@ -43,6 +44,8 @@ const viewAllHistory = document.querySelector("#viewAllHistory");
 viewAllHistory.querySelector(".button-label").dataset.i18n = "action.viewAll";
 const voiceCommandBar = document.querySelector("#voiceCommandBar");
 const phaseStatus = voiceCommandBar.querySelector(".provider-status");
+const shortcutHintText = document.querySelector(".shortcut-hint span:last-child");
+const resultActions = document.querySelector("#resultWorkspace .button-row");
 const footerHealth = document.querySelector("#footerHealth");
 const footerCopyNodes = [...footerHealth.querySelectorAll("span:not([data-lucide])")];
 const checkWhisper = document.querySelector("#checkWhisper");
@@ -55,6 +58,7 @@ const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
 const drawerPanel = settingsDrawer.querySelector(".drawer-panel");
+const settingsSectionNav = settingsDrawer.querySelector(".settings-section-tabs");
 const settingsSectionButtons = [...settingsDrawer.querySelectorAll("[data-settings-section]")];
 const settingsPanels = [...settingsDrawer.querySelectorAll("[data-settings-panel]")];
 const localModelStatus = document.querySelector("#localModelStatus");
@@ -138,6 +142,11 @@ function prepareWindowsUiV3Markup() {
   document.querySelector("#settingsSectionModels").dataset.i18n = "settings.modelsPrivacy";
   document.querySelector("#settingsSectionAdvanced").dataset.i18n = "settings.advanced";
   footerCopyNodes[1].dataset.i18n = "hint.autoKeepsLanguage";
+  mainTabsRegion.dataset.i18nAriaLabel = "aria.mainTabs";
+  voiceCommandBar.dataset.i18nAriaLabel = "aria.voiceCommandBar";
+  resultActions.dataset.i18nAriaLabel = "aria.resultActions";
+  footerHealth.dataset.i18nAriaLabel = "aria.localServices";
+  settingsSectionNav.dataset.i18nAriaLabel = "aria.settingsSections";
 
   const waveform = document.createElement("div");
   waveform.className = "waveform";
@@ -1404,6 +1413,7 @@ function applyInterfaceLanguage(language) {
   populateLanguageSelects(selectedValues);
 
   applyTranslations();
+  renderShortcutHint();
   renderIcons();
 
   renderProviderStatus();
@@ -1431,6 +1441,13 @@ function applyTranslations(root = document) {
   for (const element of root.querySelectorAll("[data-i18n-aria-label]")) {
     element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
   }
+}
+
+function renderShortcutHint() {
+  const hotkey = form.hotkey?.value || currentSettings?.hotkey || "CommandOrControl+Alt+Space";
+  shortcutHintText.textContent = t("hint.shortcut", {
+    hotkey: formatHotkey(hotkey)
+  });
 }
 
 function readLanguageSelections() {

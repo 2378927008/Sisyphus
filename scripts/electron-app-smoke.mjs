@@ -771,7 +771,7 @@ app.whenReady().then(async () => {
       (state) => (
         insertTextCalls.at(-1) === "编辑后复制和插入" &&
         state.resultText === "编辑后复制和插入" &&
-        state.statusText === "Text inserted."
+        state.statusText === "已插入到光标处"
       ),
       5000
     );
@@ -786,7 +786,7 @@ app.whenReady().then(async () => {
       (state) => (
         insertTextCalls.length > insertCallsBeforeFailure &&
         state.resultText === "编辑后复制和插入" &&
-        state.statusText === "Text could not be inserted."
+        state.statusText === "插入失败，文本已保留在剪贴板"
       ),
       5000
     );
@@ -867,6 +867,12 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "en" &&
         state.recordLabel === "Start recording" &&
+        state.mainTabsAriaLabel === "Main views" &&
+        state.voiceCommandAriaLabel === "Dictation controls" &&
+        state.resultActionsAriaLabel === "Result actions" &&
+        state.footerHealthAriaLabel === "Local service status" &&
+        state.settingsSectionsAriaLabel === "Settings sections" &&
+        state.shortcutHintText === "Shortcut: Ctrl + Alt + Space" &&
         state.llmSetupTitle === "MyMemory Free (cloud)" &&
         state.installLlmHidden &&
         state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
@@ -1064,6 +1070,12 @@ app.whenReady().then(async () => {
       (state) => (
         state.interfaceLanguage === "zh-Hans" &&
         state.recordLabel === "开始录音" &&
+        state.mainTabsAriaLabel === "主视图" &&
+        state.voiceCommandAriaLabel === "录音控制" &&
+        state.resultActionsAriaLabel === "结果操作" &&
+        state.footerHealthAriaLabel === "本地服务状态" &&
+        state.settingsSectionsAriaLabel === "设置分区" &&
+        state.shortcutHintText === "快捷键：Ctrl + Alt + Space" &&
         state.providerStatusText.includes("Local whisper.cpp")
       ),
       5000
@@ -1322,6 +1334,12 @@ function readRendererState(window) {
       llmSetupTitle: document.querySelector('[data-setup-type="llm"] strong')?.textContent || '',
       llmSetupStatusText: document.querySelector('#llmSetupStatus')?.textContent || '',
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
+      mainTabsAriaLabel: document.querySelector('#mainTabs')?.getAttribute('aria-label') || '',
+      voiceCommandAriaLabel: document.querySelector('#voiceCommandBar')?.getAttribute('aria-label') || '',
+      resultActionsAriaLabel: document.querySelector('#resultWorkspace .button-row')?.getAttribute('aria-label') || '',
+      footerHealthAriaLabel: document.querySelector('#footerHealth')?.getAttribute('aria-label') || '',
+      settingsSectionsAriaLabel: document.querySelector('.settings-section-tabs')?.getAttribute('aria-label') || '',
+      shortcutHintText: document.querySelector('.shortcut-hint span:last-child')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       settingsDrawerOpen: document.querySelector('#settingsDrawer')?.classList.contains('open') || false,
       settingsDrawerAriaHidden: document.querySelector('#settingsDrawer')?.getAttribute('aria-hidden') === 'true',

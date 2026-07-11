@@ -141,7 +141,7 @@ svg {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -287,7 +287,7 @@ svg {
 
 label {
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -351,7 +351,7 @@ textarea {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -552,7 +552,7 @@ textarea {
   border-width: 1px 0 0;
   border-radius: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 #footerHealth svg {
@@ -630,7 +630,7 @@ textarea {
 .eyebrow {
   margin-bottom: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -657,7 +657,7 @@ textarea {
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -701,7 +701,7 @@ textarea {
 .drawer-hint {
   margin-bottom: 10px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -775,7 +775,7 @@ textarea {
 .diagnostic span {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -871,7 +871,7 @@ textarea {
 .hud-shell p {
   margin-top: 3px;
   color: #C4CECA;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .hud-timer {
@@ -1041,7 +1041,7 @@ textarea {
     min-height: 82px;
   }
 
-  .history-item:nth-child(3) {
+  #recentHistoryList .history-item:nth-child(3) {
     display: none;
   }
 

@@ -7,6 +7,12 @@ const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|Fran莽ais|D�
 const windowsUiV3Keys = [
   "tab.dictation",
   "tab.history",
+  "aria.mainTabs",
+  "aria.voiceCommandBar",
+  "aria.resultActions",
+  "aria.localServices",
+  "aria.settingsSections",
+  "hint.shortcut",
   "status.localReady",
   "hint.autoKeepsLanguage",
   "action.restore",
@@ -55,6 +61,12 @@ test("Windows UI v3 uses the approved Simplified Chinese core copy", () => {
   const expected = {
     "tab.dictation": "语音输入",
     "tab.history": "历史",
+    "aria.mainTabs": "主视图",
+    "aria.voiceCommandBar": "录音控制",
+    "aria.resultActions": "结果操作",
+    "aria.localServices": "本地服务状态",
+    "aria.settingsSections": "设置分区",
+    "hint.shortcut": "快捷键：{hotkey}",
     "hint.autoKeepsLanguage": "自动输出保持原语言",
     "action.restore": "恢复",
     "action.insert": "插入到光标处",
@@ -73,6 +85,14 @@ test("Windows UI v3 uses the approved Simplified Chinese core copy", () => {
     assert.equal(getUiText("zh-Hans", key), value, key);
   }
   assert.equal(getUiText("zh-Hans", "label.characterCount", { count: 218 }), "218 个字符");
+  assert.equal(
+    getUiText("zh-Hans", "hint.shortcut", { hotkey: "Ctrl + Alt + Space" }),
+    "快捷键：Ctrl + Alt + Space"
+  );
+  assert.equal(
+    getUiText("en", "hint.shortcut", { hotkey: "Ctrl + Alt + Space" }),
+    "Shortcut: Ctrl + Alt + Space"
+  );
 });
 
 test("getUiText returns localized record labels for supported interface languages", () => {

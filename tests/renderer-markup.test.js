@@ -258,6 +258,29 @@ test("interface translation updates text and accessible attributes before refres
   assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderIcons\(\);/);
 });
 
+test("localization targets cover container names and the dynamic shortcut hint", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  for (const [target, key] of [
+    ["mainTabsRegion", "aria.mainTabs"],
+    ["voiceCommandBar", "aria.voiceCommandBar"],
+    ["resultActions", "aria.resultActions"],
+    ["footerHealth", "aria.localServices"],
+    ["settingsSectionNav", "aria.settingsSections"]
+  ]) {
+    assert.match(
+      appSource,
+      new RegExp(`${target}\\.dataset\\.i18nAriaLabel = \\"${key.replace(".", "\\.")}\\"`),
+      `${target} accessible name`
+    );
+  }
+
+  assert.match(appSource, /function renderShortcutHint\(\)/);
+  assert.match(appSource, /shortcutHintText\.textContent = t\("hint\.shortcut", \{/);
+  assert.match(appSource, /hotkey:\s*formatHotkey\(hotkey\)/);
+  assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderShortcutHint\(\);[\s\S]*?renderIcons\(\);/);
+});
+
 test("localized Windows UI v3 structure preserves icon controls and dynamic content", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
 
@@ -327,10 +350,31 @@ test("Windows UI v3 styles enforce the approved visual and responsive system", a
   assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(styles, /:focus-visible\s*\{[^}]*outline:\s*2px/s);
   assert.match(styles, /@media\s*\(max-width:\s*919px\)[\s\S]*?\.button-label\s*\{[^}]*display:\s*none/s);
-  assert.match(styles, /@media\s*\(max-height:\s*649px\)[\s\S]*?\.history-item:nth-child\(3\)\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /@media\s*\(max-height:\s*649px\)[\s\S]*?#recentHistoryList \.history-item:nth-child\(3\)\s*\{[^}]*display:\s*none/s);
+  assert.doesNotMatch(styles, /^\s*\.history-item:nth-child\(3\)\s*\{/m);
   assert.doesNotMatch(styles, /(?:linear|radial)-gradient/i);
   assert.doesNotMatch(styles, /record-orb/);
   assert.doesNotMatch(styles, /border-radius:\s*(?:50%|999\w*)[^;]*;[^}]*#recordButton/s);
+});
+
+test("explanatory copy stays at body size while only metadata and raw output are smaller", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.drawer-hint\s*\{[^}]*font-size:\s*14px/s);
+  assert.match(
+    styles,
+    /\.setup-row p,\s*\.model-status span,\s*\.diagnostic span\s*\{[^}]*font-size:\s*14px/s
+  );
+
+  const smallTextBlocks = [...styles.matchAll(/([^{}]+)\{[^{}]*font-size:\s*(?:12|13)px[^{}]*\}/g)];
+  assert.ok(smallTextBlocks.length > 0, "metadata and raw output should retain compact text");
+  for (const block of smallTextBlocks) {
+    assert.match(
+      block[1],
+      /history-select time|data-history-character-count|setup-output|install-command|hud-timer/,
+      `small text is limited to metadata or raw output: ${block[1].trim()}`
+    );
+  }
 });
 
 test("settings expose dictation modes without a legacy translation mode", async () => {
