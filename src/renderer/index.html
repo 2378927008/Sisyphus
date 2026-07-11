@@ -15,7 +15,7 @@
       <header id="appHeader" class="app-header">
         <div class="app-brand">
           <h1>Local Flow</h1>
-          <p><span aria-hidden="true">●</span> 本地识别已就绪</p>
+          <p><span aria-hidden="true">○</span> 正在检查本地语音识别状态</p>
         </div>
 
         <div id="mainTabs" class="main-tabs" role="tablist" aria-label="主视图">
@@ -126,7 +126,7 @@
         <section id="recentHistorySection" class="history-surface" aria-labelledby="recentHistoryHeading">
           <div class="section-title">
             <h2 id="recentHistoryHeading" data-i18n="section.recent">最近输入</h2>
-            <button id="refreshHistory" type="button" class="ghost">
+            <button id="viewAllHistory" type="button" class="ghost" data-i18n="action.viewAll">
               查看全部
               <span data-lucide="ChevronRight"></span>
             </button>
@@ -138,7 +138,7 @@
 
         <footer id="footerHealth" class="status-line" aria-label="本地服务状态">
           <span data-lucide="CheckCircle2"></span>
-          <span>本地 Whisper 已就绪</span>
+          <span>正在检查本地语音识别状态</span>
           <span>自动输出保持原语言</span>
         </footer>
       </section>
@@ -152,6 +152,7 @@
       >
         <div class="section-title">
           <h2 data-i18n="section.history">历史记录</h2>
+          <button id="refreshHistory" type="button" class="ghost" data-i18n="action.refresh">刷新</button>
         </div>
         <div id="fullHistoryList">
           <div id="historyList" class="history-list"></div>
@@ -298,7 +299,6 @@
               </div>
               <button id="refreshSetupStatus" class="ghost" type="button" data-i18n="setup.refresh">刷新安装状态</button>
               <button id="cancelSetup" class="ghost danger-action" type="button" data-i18n="setup.cancel" hidden>取消安装</button>
-              <pre id="setupOutput" class="setup-output" aria-live="polite" hidden></pre>
             </section>
           </section>
 
@@ -306,6 +306,7 @@
             <button type="button" class="drawer-section-button" aria-expanded="true">
               高级
             </button>
+            <pre id="setupOutput" class="setup-output" aria-live="polite" hidden></pre>
 
             <h3 data-i18n="section.builtInModel">内置本地语言模型</h3>
             <label>

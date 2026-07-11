@@ -4,6 +4,26 @@ import { readFile } from "node:fs/promises";
 
 const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|銉|鞚|氇|瑾|閷|鞁/;
 
+function getElementMarkup(html, tagName, id) {
+  const openingMatch = new RegExp(`<${tagName}\\b[^>]*\\bid="${id}"[^>]*>`, "i").exec(html);
+  assert.ok(openingMatch, `${tagName}#${id} should exist`);
+
+  const searchStart = openingMatch.index + openingMatch[0].length;
+  const tagPattern = new RegExp(`<\\/?${tagName}\\b[^>]*>`, "gi");
+  let depth = 1;
+
+  for (const match of html.slice(searchStart).matchAll(tagPattern)) {
+    const token = match[0];
+    depth += token.startsWith("</") ? -1 : 1;
+    if (depth === 0) {
+      const endIndex = searchStart + match.index + token.length;
+      return html.slice(openingMatch.index, endIndex);
+    }
+  }
+
+  assert.fail(`${tagName}#${id} should have a closing tag`);
+}
+
 test("renderer uses the exact local Lucide runtime dependency", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8")
@@ -54,6 +74,15 @@ test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
   );
 });
 
+test("renderer markup uses unique element ids", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+
+  assert.ok(ids.length > 0);
+  assert.deepEqual([...new Set(duplicates)], []);
+});
+
 test("latest result remains editable and exposes recovery and insertion actions", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
@@ -73,6 +102,21 @@ test("main window separates recent history from the full history list", async ()
   assert.match(html, /id="recentHistorySection"[\s\S]*id="recentHistoryList"/);
   assert.match(html, /id="historyPanel"[\s\S]*id="fullHistoryList"[\s\S]*id="historyList"/);
   assert.match(html, /id="footerHealth"/);
+});
+
+test("history refresh and view-all commands keep separate semantics", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const recentHistory = getElementMarkup(html, "section", "recentHistorySection");
+  const fullHistory = getElementMarkup(html, "section", "historyPanel");
+  const viewAllButton = getElementMarkup(recentHistory, "button", "viewAllHistory");
+  const refreshButton = getElementMarkup(fullHistory, "button", "refreshHistory");
+
+  assert.match(viewAllButton, /data-i18n="action\.viewAll"/);
+  assert.match(viewAllButton, />[\s\S]*查看全部[\s\S]*<\/button>/);
+  assert.match(refreshButton, /data-i18n="action\.refresh"/);
+  assert.match(refreshButton, />[\s\S]*刷新[\s\S]*<\/button>/);
+  assert.doesNotMatch(recentHistory, /id="refreshHistory"/);
+  assert.doesNotMatch(fullHistory, /id="viewAllHistory"/);
 });
 
 test("settings drawer groups existing controls into four stable sections", async () => {
@@ -96,6 +140,27 @@ test("settings drawer groups existing controls into four stable sections", async
   assert.match(settingsDrawer, /id="installWhisper"/);
   assert.match(settingsDrawer, /id="installLlm"/);
   assert.match(settingsDrawer, /id="setupOutput"/);
+});
+
+test("raw setup output belongs only to the advanced settings section", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const models = getElementMarkup(html, "section", "settingsModels");
+  const advanced = getElementMarkup(html, "section", "settingsAdvanced");
+
+  assert.doesNotMatch(models, /id="setupOutput"/);
+  assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
+});
+
+test("main window fallback does not claim local speech recognition is ready", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const mainEnd = html.indexOf("</main>");
+  const mainMarkup = html.slice(html.indexOf("<main"), mainEnd + "</main>".length);
+  const header = getElementMarkup(html, "header", "appHeader");
+  const footer = getElementMarkup(html, "footer", "footerHealth");
+
+  assert.match(header, /正在检查本地语音识别状态/);
+  assert.match(footer, /正在检查本地语音识别状态/);
+  assert.doesNotMatch(mainMarkup, /已就绪/);
 });
 
 test("renderer loads only local Lucide placeholders and no hand-drawn icons", async () => {
