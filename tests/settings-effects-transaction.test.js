@@ -36,6 +36,7 @@ test("settings effects transaction compensates save, apply, hotkey, and tray fai
       assert.ok(harness.events.includes("apply:initial"));
       assert.ok(harness.events.includes("hotkey:initial"));
       assert.ok(harness.events.includes("tray:initial"));
+      assertPublicSettings(harness.visibleSettings);
       assert.equal(harness.reports.length, 1);
       assert.equal(harness.reports[0].error, primaryError);
       assert.equal(harness.reports[0].reason, "settings_update_failed");
@@ -49,7 +50,7 @@ test("rollback errors do not replace or mutate a frozen primary error", async ()
   const harness = createTransactionHarness({
     failedPhase: "apply",
     primaryError,
-    rollbackFailures: new Set(["save", "apply", "hotkey", "tray"])
+    rollbackFailures: new Set(["apply", "hotkey", "tray"])
   });
 
   const error = await getRejection(harness.save({ hotkey: "A" }));
@@ -58,7 +59,6 @@ test("rollback errors do not replace or mutate a frozen primary error", async ()
   assert.deepEqual(
     harness.reports[0].rollbackErrors.map((rollbackError) => rollbackError.message),
     [
-      "rollback save failed",
       "rollback apply failed",
       "rollback hotkey failed",
       "rollback tray failed"
@@ -68,6 +68,72 @@ test("rollback errors do not replace or mutate a frozen primary error", async ()
   assert.equal(harness.reports[0].error, primaryError);
   assert.equal(harness.reports[0].reason, "settings_update_failed");
   assert.equal(harness.events.at(-1), "tray:initial");
+  assertPublicSettings(harness.visibleSettings);
+});
+
+test("rollback save failure synchronizes from the actual public disk state", async () => {
+  const primaryError = new Error("apply failed");
+  const harness = createTransactionHarness({
+    failedPhase: "apply",
+    primaryError,
+    rollbackFailures: new Set(["save"])
+  });
+
+  const error = await getRejection(harness.save({
+    hotkey: "A",
+    launchAtLogin: true,
+    cloudApiKey: "new-secret"
+  }));
+
+  assert.equal(error, primaryError);
+  assert.deepEqual(harness.getOptions, [
+    { includeSecrets: true },
+    {}
+  ]);
+  assert.equal(harness.currentSettings.hotkey, "A");
+  assert.equal(harness.currentSettings.launchAtLogin, true);
+  assert.deepEqual(
+    harness.reports[0].rollbackErrors.map((rollbackError) => rollbackError.message),
+    ["rollback save failed"]
+  );
+  assert.deepEqual(harness.events, [
+    "set:A",
+    "apply:A",
+    "set:A",
+    "apply:A",
+    "hotkey:A",
+    "tray:A"
+  ]);
+  assertPublicSettings(harness.visibleSettings);
+});
+
+test("rollback save and read failures preserve the current public state", async () => {
+  const primaryError = new Error("apply failed");
+  const harness = createTransactionHarness({
+    failedPhase: "apply",
+    primaryError,
+    rollbackFailures: new Set(["save", "read"])
+  });
+
+  const error = await getRejection(harness.save({
+    hotkey: "A",
+    launchAtLogin: true,
+    cloudApiKey: "new-secret"
+  }));
+
+  assert.equal(error, primaryError);
+  assert.deepEqual(harness.getOptions, [
+    { includeSecrets: true },
+    {}
+  ]);
+  assert.equal(harness.currentSettings.hotkey, "A");
+  assert.equal(harness.currentSettings.launchAtLogin, true);
+  assert.deepEqual(harness.events, ["set:A", "apply:A"]);
+  assert.deepEqual(
+    harness.reports[0].rollbackErrors.map((rollbackError) => rollbackError.message),
+    ["rollback save failed", "rollback read failed"]
+  );
+  assertPublicSettings(harness.visibleSettings);
 });
 
 test("settings effects FIFO waits for every compensation before the next transaction", async () => {
@@ -82,6 +148,7 @@ test("settings effects FIFO waits for every compensation before the next transac
   const writes = [];
   const getOptions = [];
   const reports = [];
+  const visibleSettings = [];
   let persisted = { ...initialSettings };
   let currentSettings = { ...initialSettings, cloudApiKey: "" };
 
@@ -90,7 +157,7 @@ test("settings effects FIFO waits for every compensation before the next transac
       async getSettings(options = {}) {
         getOptions.push({ ...options });
         events.push(`get:${persisted.hotkey}`);
-        return { ...persisted };
+        return options.includeSecrets ? { ...persisted } : redactResult(persisted);
       },
       async saveSettings(patch, options = {}) {
         events.push(`save:${patch.hotkey}`);
@@ -102,9 +169,11 @@ test("settings effects FIFO waits for every compensation before the next transac
     getCurrentSettings: () => currentSettings,
     setCurrentSettings(settings) {
       currentSettings = { ...settings };
+      visibleSettings.push({ phase: "set", settings: { ...settings } });
     },
     async applyStartupSettings(settings) {
       events.push(`apply:${settings.hotkey}`);
+      visibleSettings.push({ phase: "apply", settings: { ...settings } });
       if (settings.hotkey === "A") {
         startupEntered.resolve();
         await releaseStartup.promise;
@@ -113,12 +182,14 @@ test("settings effects FIFO waits for every compensation before the next transac
     },
     async registerHotkey(settings) {
       events.push(`hotkey:${settings.hotkey}`);
+      visibleSettings.push({ phase: "hotkey", settings: { ...settings } });
       if (settings.hotkey === "initial" && writes.length === 2) {
         throw rollbackHotkeyError;
       }
     },
     async refreshTrayMenu() {
       events.push(`tray:${currentSettings.hotkey}`);
+      visibleSettings.push({ phase: "tray", settings: { ...currentSettings } });
       if (currentSettings.hotkey === "initial" && writes.length === 2) {
         rollbackTrayEntered.resolve();
         await releaseRollbackTray.promise;
@@ -188,6 +259,7 @@ test("settings effects FIFO waits for every compensation before the next transac
   assert.equal(reports[0].error, primaryError);
   assert.ok(events.indexOf("report:settings_update_failed") < events.lastIndexOf("get:initial"));
   assert.ok(events.indexOf("tray:initial") < events.indexOf("save:B"));
+  assertPublicSettings(visibleSettings);
 });
 
 function createTransactionHarness({ failedPhase, primaryError, rollbackFailures = new Set() }) {
@@ -195,14 +267,19 @@ function createTransactionHarness({ failedPhase, primaryError, rollbackFailures 
   const writes = [];
   const getOptions = [];
   const reports = [];
+  const visibleSettings = [];
   let persisted = { ...initialSettings };
   let currentSettings = { ...initialSettings, cloudApiKey: "" };
+  let primaryFailureThrown = false;
 
   const save = createSettingsEffectsTransaction({
     settingsStore: {
       async getSettings(options = {}) {
         getOptions.push({ ...options });
-        return { ...persisted };
+        if (!options.includeSecrets && rollbackFailures.has("read")) {
+          throw new Error("rollback read failed");
+        }
+        return options.includeSecrets ? { ...persisted } : redactResult(persisted);
       },
       async saveSettings(patch, options = {}) {
         writes.push({ ...patch });
@@ -217,24 +294,38 @@ function createTransactionHarness({ failedPhase, primaryError, rollbackFailures 
     getCurrentSettings: () => currentSettings,
     setCurrentSettings(settings) {
       currentSettings = { ...settings };
+      events.push(`set:${settings.hotkey}`);
+      visibleSettings.push({ phase: "set", settings: { ...settings } });
     },
     async applyStartupSettings(settings) {
       events.push(`apply:${settings.hotkey}`);
-      if (settings.hotkey === "A" && failedPhase === "apply") throw primaryError;
+      visibleSettings.push({ phase: "apply", settings: { ...settings } });
+      if (settings.hotkey === "A" && failedPhase === "apply" && !primaryFailureThrown) {
+        primaryFailureThrown = true;
+        throw primaryError;
+      }
       if (settings.hotkey === "initial" && rollbackFailures.has("apply")) {
         throw new Error("rollback apply failed");
       }
     },
     async registerHotkey(settings) {
       events.push(`hotkey:${settings.hotkey}`);
-      if (settings.hotkey === "A" && failedPhase === "hotkey") throw primaryError;
+      visibleSettings.push({ phase: "hotkey", settings: { ...settings } });
+      if (settings.hotkey === "A" && failedPhase === "hotkey" && !primaryFailureThrown) {
+        primaryFailureThrown = true;
+        throw primaryError;
+      }
       if (settings.hotkey === "initial" && rollbackFailures.has("hotkey")) {
         throw new Error("rollback hotkey failed");
       }
     },
     async refreshTrayMenu() {
       events.push(`tray:${currentSettings.hotkey}`);
-      if (currentSettings.hotkey === "A" && failedPhase === "tray") throw primaryError;
+      visibleSettings.push({ phase: "tray", settings: { ...currentSettings } });
+      if (currentSettings.hotkey === "A" && failedPhase === "tray" && !primaryFailureThrown) {
+        primaryFailureThrown = true;
+        throw primaryError;
+      }
       if (currentSettings.hotkey === "initial" && rollbackFailures.has("tray")) {
         throw new Error("rollback tray failed");
       }
@@ -250,10 +341,21 @@ function createTransactionHarness({ failedPhase, primaryError, rollbackFailures 
     writes,
     getOptions,
     reports,
+    visibleSettings,
+    get currentSettings() {
+      return currentSettings;
+    },
     get persisted() {
       return persisted;
     }
   };
+}
+
+function assertPublicSettings(visibleSettings) {
+  assert.ok(visibleSettings.length > 0);
+  for (const { phase, settings } of visibleSettings) {
+    assert.equal(settings.cloudApiKey, "", `${phase} must receive redacted settings`);
+  }
 }
 
 function redactResult(settings, options = {}) {

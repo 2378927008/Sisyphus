@@ -23,17 +23,27 @@ export function createSettingsEffectsTransaction({
       const rollbackErrors = [];
       const attemptRollback = async (operation) => {
         try {
-          await operation();
+          return { ok: true, value: await operation() };
         } catch (rollbackError) {
           rollbackErrors.push(normalizeTransactionError(rollbackError));
+          return { ok: false };
         }
       };
 
-      await attemptRollback(() => settingsStore.saveSettings(previousSettings));
-      await attemptRollback(() => setCurrentSettings(previousSettings));
-      await attemptRollback(() => applyStartupSettings(previousSettings));
-      await attemptRollback(() => registerHotkey(previousSettings));
-      await attemptRollback(() => refreshTrayMenu());
+      let publicSettingsResult = await attemptRollback(
+        () => settingsStore.saveSettings(previousSettings)
+      );
+      if (!publicSettingsResult.ok) {
+        publicSettingsResult = await attemptRollback(() => settingsStore.getSettings());
+      }
+
+      if (publicSettingsResult.ok) {
+        const restoredPublic = publicSettingsResult.value;
+        await attemptRollback(() => setCurrentSettings(restoredPublic));
+        await attemptRollback(() => applyStartupSettings(restoredPublic));
+        await attemptRollback(() => registerHotkey(restoredPublic));
+        await attemptRollback(() => refreshTrayMenu());
+      }
 
       try {
         reportSystemError(primaryError, "settings_update_failed", rollbackErrors);
