@@ -305,6 +305,7 @@ app.whenReady().then(async () => {
         state.historyPanelHidden &&
         state.bodyPhase === "idle" &&
         state.voiceCommandPhase === "idle" &&
+        state.settingsDrawerInert &&
         state.hasCheckTextProviderButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
         state.providerStatusText.includes("MyMemory Free")
@@ -351,8 +352,136 @@ app.whenReady().then(async () => {
     ) {
       throw new Error(`Phase status leaked diagnostics: ${safePhaseState.statusText}`);
     }
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const trigger = document.querySelector('#openSettings');
+        trigger.focus();
+        trigger.click();
+      })()
+    `);
+    const drawerGeneralState = await waitForState(
+      window,
+      (state) => (
+        state.settingsDrawerOpen === true &&
+        !state.settingsDrawerAriaHidden &&
+        !state.settingsDrawerInert &&
+        state.settingsSectionCount === 4 &&
+        state.activeSettingsSection === "general" &&
+        !state.settingsGeneralHidden &&
+        state.settingsShortcutsHidden &&
+        state.settingsModelsHidden &&
+        state.settingsAdvancedHidden &&
+        state.activeElementId === "closeSettings"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-settings-section="general"]').dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowRight',
+        bubbles: true,
+        cancelable: true
+      }))
+    `);
+    const drawerShortcutsState = await waitForState(
+      window,
+      (state) => (
+        state.activeSettingsSection === "shortcuts" &&
+        !state.settingsShortcutsHidden &&
+        state.activeElementId === "settingsSectionShortcuts"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-settings-section=\"models\"]').click()"
+    );
+    const drawerModelsState = await waitForState(
+      window,
+      (state) => state.activeSettingsSection === "models" && !state.settingsModelsHidden,
+      5000
+    );
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-settings-section=\"advanced\"]').click()"
+    );
+    const drawerAdvancedState = await waitForState(
+      window,
+      (state) => state.activeSettingsSection === "advanced" && !state.settingsAdvancedHidden,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('[data-settings-section="general"]').click();
+        const last = document.querySelector('#saveSettings');
+        last.focus();
+        const event = new KeyboardEvent('keydown', {
+          key: 'Tab',
+          bubbles: true,
+          cancelable: true
+        });
+        window.__drawerTabPrevented = !last.dispatchEvent(event);
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.activeSettingsSection === "general" &&
+        state.drawerTabPrevented &&
+        state.activeElementId === "closeSettings"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#closeSettings').dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true
+      }))
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        !state.settingsDrawerOpen &&
+        state.settingsDrawerAriaHidden &&
+        state.settingsDrawerInert &&
+        state.activeElementId === "openSettings"
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#openSettings').click();
+        document.querySelector('.drawer-backdrop').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => !state.settingsDrawerOpen && state.activeElementId === "openSettings",
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#openSettings').click();
+        document.querySelector('#closeSettings').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => !state.settingsDrawerOpen && state.activeElementId === "openSettings",
+      5000
+    );
     window.webContents.send("settings:open");
-    await waitForState(window, (state) => state.settingsDrawerOpen === true, 5000);
+    await waitForState(
+      window,
+      (state) => state.settingsDrawerOpen && state.activeSettingsSection === "general",
+      5000
+    );
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-settings-section=\"shortcuts\"]').click()"
+    );
+    await waitForState(
+      window,
+      (state) => state.activeSettingsSection === "shortcuts" && !state.settingsShortcutsHidden,
+      5000
+    );
     await window.webContents.executeJavaScript(`
       (() => {
         document.querySelector('#recordHotkey').click();
@@ -1141,6 +1270,15 @@ function readRendererState(window) {
       providerStatusText: document.querySelector('#providerStatusText')?.textContent || '',
       hasSettingsDrawer: Boolean(document.querySelector('#settingsDrawer')),
       settingsDrawerOpen: document.querySelector('#settingsDrawer')?.classList.contains('open') || false,
+      settingsDrawerAriaHidden: document.querySelector('#settingsDrawer')?.getAttribute('aria-hidden') === 'true',
+      settingsDrawerInert: Boolean(document.querySelector('#settingsDrawer')?.inert),
+      settingsSectionCount: document.querySelectorAll('[data-settings-section]').length,
+      activeSettingsSection: document.querySelector('[data-settings-section][aria-selected="true"]')?.dataset.settingsSection || '',
+      settingsGeneralHidden: Boolean(document.querySelector('#settingsGeneral')?.hidden),
+      settingsShortcutsHidden: Boolean(document.querySelector('#settingsShortcuts')?.hidden),
+      settingsModelsHidden: Boolean(document.querySelector('#settingsModels')?.hidden),
+      settingsAdvancedHidden: Boolean(document.querySelector('#settingsAdvanced')?.hidden),
+      drawerTabPrevented: Boolean(window.__drawerTabPrevented),
       hasLocalModelStatus: Boolean(document.querySelector('#localModelStatus')?.textContent?.trim()),
       hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',

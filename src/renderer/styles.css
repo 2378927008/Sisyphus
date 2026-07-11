@@ -355,8 +355,9 @@ textarea {
   right: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(520px, 100%);
+  width: min(560px, 100vw);
   height: 100%;
+  overflow: hidden;
   background: var(--surface);
   box-shadow: var(--shadow);
   transform: translateX(24px);
@@ -377,13 +378,64 @@ textarea {
 }
 
 .settings-form {
-  overflow: auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-section-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.settings-section-tab {
+  min-width: 0;
+  padding: 9px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.settings-section-tab[aria-selected="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.drawer-scroll-region {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 18px 22px 24px;
 }
 
 .drawer-section {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 2px 0 18px;
+}
+
+.drawer-section[hidden] {
+  display: none;
+}
+
+.drawer-footer {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.drawer-footer .primary {
+  min-width: 132px;
 }
 
 .drawer-hint {
@@ -560,6 +612,18 @@ textarea {
   .app-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .drawer-header,
+  .settings-section-tabs,
+  .drawer-scroll-region,
+  .drawer-footer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .settings-section-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

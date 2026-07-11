@@ -2,6 +2,7 @@ import { describeMicrophoneError } from "../shared/media-errors.js";
 import { getRecordReadiness } from "./record-readiness.js";
 import { getRecordRecoveryAction } from "./record-recovery-action.js";
 import { createShortcutRecorder } from "./shortcut-recorder.js";
+import { createFocusTrap } from "./focus-trap.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -49,6 +50,9 @@ const textDiagnosticsList = document.querySelector("#textDiagnosticsList");
 const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
+const drawerPanel = settingsDrawer.querySelector(".drawer-panel");
+const settingsSectionButtons = [...settingsDrawer.querySelectorAll("[data-settings-section]")];
+const settingsPanels = [...settingsDrawer.querySelectorAll("[data-settings-panel]")];
 const localModelStatus = document.querySelector("#localModelStatus");
 const setupLocalModel = document.querySelector("#setupLocalModel");
 const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
@@ -103,6 +107,10 @@ const shortcutRecorder = createShortcutRecorder({
   translate: (key, replacements) => t(key, replacements),
   onStatus: setStatus
 });
+const settingsFocusTrap = createFocusTrap({
+  container: drawerPanel,
+  onEscape: closeSettingsDrawer
+});
 
 init();
 
@@ -117,9 +125,13 @@ async function init() {
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
   recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
-  openSettings.addEventListener("click", () => setSettingsDrawer(true));
-  closeSettings.addEventListener("click", () => setSettingsDrawer(false));
+  openSettings.addEventListener("click", () => openSettingsDrawer());
+  closeSettings.addEventListener("click", closeSettingsDrawer);
   settingsDrawer.addEventListener("click", closeSettingsFromBackdrop);
+  for (const button of settingsSectionButtons) {
+    button.addEventListener("click", () => activateSettingsSection(button.dataset.settingsSection));
+    button.addEventListener("keydown", handleSettingsSectionKeydown);
+  }
   refreshHistory.addEventListener("click", renderHistory);
   viewAllHistory.addEventListener("click", () => activateTab(historyTab));
   openHistory?.addEventListener("click", () => activateTab(historyTab));
@@ -489,7 +501,7 @@ async function applyRecordRecoveryAction() {
     return;
   }
 
-  setSettingsDrawer(true);
+  openSettingsDrawer();
 }
 
 function showLocalModelInstallCommand() {
@@ -873,17 +885,73 @@ function copyTextWithTextarea(text) {
   return copied;
 }
 
-function setSettingsDrawer(open) {
-  if (!open) {
-    shortcutRecorder.cancel();
+function openSettingsDrawer(section = "general") {
+  const wasOpen = settingsDrawer.classList.contains("open");
+  settingsDrawer.inert = false;
+  settingsDrawer.classList.add("open");
+  settingsDrawer.setAttribute("aria-hidden", "false");
+  activateSettingsSection(section);
+  if (!wasOpen) settingsFocusTrap.activate();
+}
+
+function setSettingsDrawer(open, section = "general") {
+  if (open) openSettingsDrawer(section);
+  else closeSettingsDrawer();
+}
+
+function closeSettingsDrawer() {
+  if (!settingsDrawer.classList.contains("open")) return;
+
+  const returnFocus = settingsFocusTrap.getReturnFocus();
+  settingsFocusTrap.deactivate();
+  shortcutRecorder.cancel();
+  settingsDrawer.classList.remove("open");
+  settingsDrawer.setAttribute("aria-hidden", "true");
+  settingsDrawer.inert = true;
+  returnFocus?.focus?.();
+}
+
+function activateSettingsSection(section) {
+  const activeSection = settingsSectionButtons.some((button) => button.dataset.settingsSection === section)
+    ? section
+    : "general";
+
+  for (const button of settingsSectionButtons) {
+    const selected = button.dataset.settingsSection === activeSection;
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
   }
-  settingsDrawer.classList.toggle("open", open);
-  settingsDrawer.setAttribute("aria-hidden", open ? "false" : "true");
+
+  for (const panel of settingsPanels) {
+    panel.hidden = panel.dataset.settingsPanel !== activeSection;
+  }
+}
+
+function handleSettingsSectionKeydown(event) {
+  const currentIndex = settingsSectionButtons.indexOf(event.currentTarget);
+  if (currentIndex < 0) return;
+
+  let nextIndex = null;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (currentIndex + 1) % settingsSectionButtons.length;
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (currentIndex - 1 + settingsSectionButtons.length) % settingsSectionButtons.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = settingsSectionButtons.length - 1;
+  }
+
+  if (nextIndex === null) return;
+  event.preventDefault();
+  const nextButton = settingsSectionButtons[nextIndex];
+  activateSettingsSection(nextButton.dataset.settingsSection);
+  nextButton.focus();
 }
 
 function closeSettingsFromBackdrop(event) {
   if (event.target?.dataset?.closeSettings === "true") {
-    setSettingsDrawer(false);
+    closeSettingsDrawer();
   }
 }
 
