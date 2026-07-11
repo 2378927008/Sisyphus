@@ -47,8 +47,10 @@ test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
     "voiceCommandBar",
     "recordRecovery",
     "resultWorkspace",
+    "resultCharacterCount",
     "recentHistorySection",
     "historyPanel",
+    "headerHealthText",
     "footerHealth",
     "footerHealthText",
     "settingsDrawer"
@@ -75,6 +77,16 @@ test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
   );
 });
 
+test("header renders the existing Local Flow icon as decorative brand artwork", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  assert.match(
+    html,
+    /<img\b(?=[^>]*class="app-brand-icon")(?=[^>]*src="\.\.\/\.\.\/assets\/local-flow-icon\.svg")(?=[^>]*alt="")(?=[^>]*aria-hidden="true")[^>]*>/
+  );
+  assert.match(html, /<h1>Local Flow<\/h1>/);
+});
+
 test("renderer markup uses unique element ids", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
@@ -95,6 +107,27 @@ test("latest result remains editable and exposes recovery and insertion actions"
   assert.match(html, /id="restoreResult"/);
   assert.match(html, /id="insertResult"/);
   assert.match(html, /id="copyResult"/);
+});
+
+test("latest result exposes a visible localized character count", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(html, /id="resultCharacterCount"[^>]*class="result-character-count"[^>]*>0 个字符<\/span>/);
+  assert.match(appSource, /const resultCharacterCount = document\.querySelector\("#resultCharacterCount"\)/);
+  assert.match(
+    appSource,
+    /resultCharacterCount\.textContent = t\("label\.characterCount", \{\s*count: editorState\.characterCount\s*\}\)/s
+  );
+  assert.match(
+    styles,
+    /\.result-character-count\s*\{[^}]*flex:\s*0 0 auto[^}]*color:\s*var\(--muted\)[^}]*font-size:\s*12px[^}]*white-space:\s*nowrap/s
+  );
+  assert.match(smokeSource, /visibleCharacterCount:\s*document\.querySelector\('#resultCharacterCount'\)/);
+  assert.match(smokeSource, /state\.visibleCharacterCount === "0 个字符"/);
+  assert.match(smokeSource, /state\.visibleCharacterCount === "8 characters"/);
 });
 
 test("main window separates recent history from the full history list", async () => {
@@ -190,15 +223,15 @@ test("advanced setup controls stay isolated and history remains read-only across
   assert.match(smokeSource, /history:list/);
 });
 
-test("main window fallback does not claim local speech recognition is ready", async () => {
+test("main window fallback uses the short safe local setup status", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const mainEnd = html.indexOf("</main>");
   const mainMarkup = html.slice(html.indexOf("<main"), mainEnd + "</main>".length);
   const header = getElementMarkup(html, "header", "appHeader");
   const footer = getElementMarkup(html, "footer", "footerHealth");
 
-  assert.match(header, /正在检查本地语音识别状态/);
-  assert.match(footer, /正在检查本地语音识别状态/);
+  assert.match(header, /本地 Whisper 待配置/);
+  assert.match(footer, /本地 Whisper 待配置/);
   assert.doesNotMatch(mainMarkup, /已就绪/);
 });
 
@@ -354,6 +387,13 @@ test("localized Windows UI v3 structure preserves icon controls and dynamic cont
   assert.match(appSource, /Array\.from\(\{ length: WAVEFORM_BAR_COUNT \}/);
   assert.match(appSource, /t\("label\.characterCount", \{ count \}\)/);
   assert.match(appSource, /phaseStatus\.textContent = t\(`phase\.\$\{normalizedPhase\}`\)/);
+  assert.match(appSource, /const headerHealthText = document\.querySelector\("#headerHealthText"\)/);
+  assert.match(
+    appSource,
+    /const healthMessage = readiness\.ready\s*\? t\("status\.localReady"\)\s*:\s*t\("status\.localNeedsSetup"\)/s
+  );
+  assert.match(appSource, /headerHealthText\.textContent = healthMessage/);
+  assert.match(appSource, /statusNode\.textContent = healthMessage/);
 });
 
 test("Windows UI v3 styles enforce the approved visual and responsive system", async () => {
@@ -392,6 +432,62 @@ test("Windows UI v3 styles enforce the approved visual and responsive system", a
   assert.doesNotMatch(styles, /border-radius:\s*(?:50%|999\w*)[^;]*;[^}]*#recordButton/s);
 });
 
+test("minimum window keeps a compact waveform and two recent history rows", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const narrowStart = styles.indexOf("@media (max-width: 760px)");
+  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
+  const reducedMotionStart = styles.indexOf("@media (prefers-reduced-motion: reduce)");
+  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
+  const lowHeightStyles = styles.slice(lowHeightStart, reducedMotionStart);
+
+  assert.ok(narrowStart >= 0 && lowHeightStart > narrowStart);
+  assert.match(
+    narrowStyles,
+    /#voiceCommandBar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) minmax\(72px,\s*96px\) auto/s
+  );
+  assert.match(
+    narrowStyles,
+    /\.waveform\s*\{[^}]*min-width:\s*72px[^}]*max-width:\s*96px/s
+  );
+  assert.doesNotMatch(narrowStyles, /\.waveform\s*\{[^}]*display:\s*none/s);
+  assert.match(
+    lowHeightStyles,
+    /#recentHistorySection\s*\{[^}]*max-height:\s*148px[^}]*overflow-y:\s*auto[^}]*padding:\s*6px 10px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#recentHistorySection \.section-title\s*\{[^}]*margin-bottom:\s*2px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#viewAllHistory\s*\{[^}]*min-height:\s*28px[^}]*padding:\s*3px 6px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#recentHistoryList \.history-select\s*\{[^}]*padding:\s*4px 6px/s
+  );
+});
+
+test("full history aligns selection and actions on one desktop row", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const narrowStart = styles.indexOf("@media (max-width: 760px)");
+  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
+  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
+
+  assert.match(
+    styles,
+    /#historyList \.history-item\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto[^}]*align-items:\s*center/s
+  );
+  assert.match(
+    styles,
+    /#historyList \.history-item > \.button-row\s*\{[^}]*flex-wrap:\s*nowrap[^}]*padding:\s*0 10px 0 0/s
+  );
+  assert.match(
+    narrowStyles,
+    /#historyList \.history-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s
+  );
+});
+
 test("explanatory copy stays at body size while only metadata and raw output are smaller", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
 
@@ -406,7 +502,7 @@ test("explanatory copy stays at body size while only metadata and raw output are
   for (const block of smallTextBlocks) {
     assert.match(
       block[1],
-      /history-select time|data-history-character-count|setup-output|install-command|hud-timer/,
+      /history-select time|data-history-character-count|result-character-count|setup-output|install-command|hud-timer/,
       `small text is limited to metadata or raw output: ${block[1].trim()}`
     );
   }

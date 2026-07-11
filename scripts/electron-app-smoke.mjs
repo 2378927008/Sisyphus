@@ -358,6 +358,7 @@ app.whenReady().then(async () => {
         state.resultEmpty &&
         state.resultAriaPlaceholder.length > 0 &&
         state.editorCharacterCount === 0 &&
+        state.visibleCharacterCount === "0 个字符" &&
         state.recentHistoryCount === 3 &&
         state.dictationTabSelected &&
         !state.historyTabSelected &&
@@ -870,6 +871,7 @@ app.whenReady().then(async () => {
         state.dictationTabSelected &&
         state.resultText === "中文历史记录" &&
         state.editorCharacterCount === Array.from("中文历史记录").length &&
+        state.visibleCharacterCount === "6 个字符" &&
         state.restoreResultDisabled
       ),
       5000
@@ -1027,6 +1029,7 @@ app.whenReady().then(async () => {
         state.footerHealthAriaLabel === "Local service status" &&
         state.settingsSectionsAriaLabel === "Settings sections" &&
         state.shortcutHintText === "Shortcut: Ctrl + Alt + Space" &&
+        state.visibleCharacterCount === "8 characters" &&
         state.llmSetupTitle === "MyMemory Free (cloud)" &&
         state.installLlmHidden &&
         state.providerStatusText === "Local mode · Local whisper.cpp + MyMemory Free"
@@ -1316,6 +1319,7 @@ app.whenReady().then(async () => {
         !state.isRecording &&
         state.recordLabel === "开始录音" &&
         state.resultText === "smoke transcript" &&
+        state.visibleCharacterCount === "16 个字符" &&
         state.bodyPhase === "done" &&
         state.voiceCommandPhase === "done"
       ),
@@ -1479,6 +1483,7 @@ function readRendererState(window) {
       resultEmpty: document.querySelector('#resultText')?.dataset.emptyResult === 'true',
       resultAriaPlaceholder: document.querySelector('#resultText')?.getAttribute('aria-placeholder') || '',
       editorCharacterCount: Number(document.querySelector('#resultText')?.dataset.characterCount || 0),
+      visibleCharacterCount: document.querySelector('#resultCharacterCount')?.textContent || '',
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       interfaceLanguageOptions: [...(document.querySelector('#interfaceLanguage')?.options || [])]
         .map((option) => option.value),

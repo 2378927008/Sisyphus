@@ -31,6 +31,7 @@ const recordRecoveryAction = document.querySelector("#recordRecoveryAction");
 const statusText = document.querySelector("#statusText");
 const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
+const resultCharacterCount = document.querySelector("#resultCharacterCount");
 const historyList = document.querySelector("#historyList");
 const recentHistoryList = document.querySelector("#recentHistoryList");
 const refreshHistory = document.querySelector("#refreshHistory");
@@ -46,6 +47,7 @@ const voiceCommandBar = document.querySelector("#voiceCommandBar");
 const phaseStatus = voiceCommandBar.querySelector(".provider-status");
 const shortcutHintText = document.querySelector(".shortcut-hint span:last-child");
 const resultActions = document.querySelector("#resultWorkspace .button-row");
+const headerHealthText = document.querySelector("#headerHealthText");
 const footerHealth = document.querySelector("#footerHealth");
 const footerCopyNodes = [...footerHealth.querySelectorAll("span:not([data-lucide])")];
 const checkWhisper = document.querySelector("#checkWhisper");
@@ -461,19 +463,19 @@ async function refreshProviderStatus() {
   renderProviderStatus();
   renderSetupChecklist();
   applyRecordReadiness();
-  renderFooterHealth();
 }
 
-function renderFooterHealth() {
+function renderFooterHealth(readiness = getCurrentRecordReadiness()) {
   if (!footerHealth) return;
 
-  const readiness = getCurrentRecordReadiness();
+  const healthMessage = readiness.ready
+    ? t("status.localReady")
+    : t("status.localNeedsSetup");
   const statusNode = footerCopyNodes[0];
   footerHealth.dataset.ready = String(readiness.ready);
+  headerHealthText.textContent = healthMessage;
   if (statusNode) {
-    statusNode.textContent = readiness.ready
-      ? t("status.localReady")
-      : getRecordDisabledMessage(readiness);
+    statusNode.textContent = healthMessage;
   }
 }
 
@@ -497,6 +499,7 @@ function getCurrentRecordReadiness() {
 function applyRecordReadiness() {
   const readiness = getCurrentRecordReadiness();
   renderRecordReadiness(readiness);
+  renderFooterHealth(readiness);
 
   if (!readiness.ready && !isRecording) {
     showRecordReadinessReason(readiness);
@@ -920,6 +923,9 @@ function renderEditorState({ syncText = true } = {}) {
   }
   resultText.dataset.emptyResult = String(editorState.empty);
   resultText.dataset.characterCount = String(editorState.characterCount);
+  resultCharacterCount.textContent = t("label.characterCount", {
+    count: editorState.characterCount
+  });
   restoreResult.disabled = !editorState.dirty || editorState.empty;
   copyResult.disabled = editorState.empty;
   insertResult.disabled = editorState.empty;

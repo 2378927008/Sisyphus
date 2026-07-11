@@ -14,8 +14,17 @@
     <main class="app-shell">
       <header id="appHeader" class="app-header">
         <div class="app-brand">
+          <img
+            class="app-brand-icon"
+            src="../../assets/local-flow-icon.svg"
+            alt=""
+            aria-hidden="true"
+          />
           <h1>Local Flow</h1>
-          <p><span aria-hidden="true">○</span> 正在检查本地语音识别状态</p>
+          <p>
+            <span aria-hidden="true">○</span>
+            <span id="headerHealthText">本地 Whisper 待配置</span>
+          </p>
         </div>
 
         <div id="mainTabs" class="main-tabs" role="tablist" aria-label="主视图">
@@ -96,6 +105,7 @@
           <div class="section-title">
             <h2 id="resultHeading" data-i18n="label.latestResult">最新结果</h2>
             <div class="button-row" aria-label="结果操作">
+              <span id="resultCharacterCount" class="result-character-count">0 个字符</span>
               <button id="restoreResult" type="button" class="ghost">
                 <span data-lucide="Undo2"></span>
                 撤销
@@ -138,7 +148,7 @@
 
         <footer id="footerHealth" class="status-line" aria-label="本地服务状态">
           <span data-lucide="CheckCircle2"></span>
-          <span id="footerHealthText">正在检查本地语音识别状态</span>
+          <span id="footerHealthText">本地 Whisper 待配置</span>
           <span>自动输出保持原语言</span>
         </footer>
       </section>
