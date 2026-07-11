@@ -902,13 +902,46 @@ function setSettingsDrawer(open, section = "general") {
 function closeSettingsDrawer() {
   if (!settingsDrawer.classList.contains("open")) return;
 
-  const returnFocus = settingsFocusTrap.getReturnFocus();
   settingsFocusTrap.deactivate();
+  const returnFocus = settingsFocusTrap.getReturnFocus();
   shortcutRecorder.cancel();
+  let focusedReturnTarget = focusSettingsReturnTarget(returnFocus);
+  if (settingsDrawer.contains(document.activeElement)) {
+    document.activeElement.blur?.();
+  }
+
   settingsDrawer.classList.remove("open");
   settingsDrawer.setAttribute("aria-hidden", "true");
   settingsDrawer.inert = true;
-  returnFocus?.focus?.();
+
+  if (document.activeElement !== focusedReturnTarget) {
+    focusedReturnTarget = focusSettingsReturnTarget(focusedReturnTarget);
+  }
+  if (!focusedReturnTarget && settingsDrawer.contains(document.activeElement)) {
+    document.activeElement.blur?.();
+  }
+}
+
+function focusSettingsReturnTarget(preferredTarget) {
+  for (const target of new Set([preferredTarget, openSettings])) {
+    if (!isSafeSettingsReturnTarget(target)) continue;
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      continue;
+    }
+    if (document.activeElement === target) return target;
+  }
+  return null;
+}
+
+function isSafeSettingsReturnTarget(target) {
+  if (!target?.isConnected || typeof target.focus !== "function") return false;
+  if (settingsDrawer.contains(target) || target.matches(":disabled")) return false;
+  if (target.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+
+  const style = target.ownerDocument?.defaultView?.getComputedStyle(target);
+  return style?.display !== "none" && style?.visibility !== "hidden";
 }
 
 function activateSettingsSection(section) {

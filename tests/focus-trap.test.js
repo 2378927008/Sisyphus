@@ -16,23 +16,32 @@ const FOCUSABLE_SELECTOR = [
 function createElement({
   id,
   disabled = false,
+  disabledByFieldset = false,
   hidden = false,
   ariaHidden = false,
   hiddenAncestor = false,
+  inertAncestor = false,
+  display = "block",
+  visibility = "visible",
   visible = true
 } = {}) {
   return {
     id,
     disabled,
     hidden,
+    offsetParent: null,
+    computedStyle: { display, visibility },
     focusCalls: 0,
+    matches(selector) {
+      return selector === ":disabled" && (disabled || disabledByFieldset);
+    },
     getAttribute(name) {
       return name === "aria-hidden" && ariaHidden ? "true" : null;
     },
     closest(selector) {
-      if (selector === '[aria-hidden="true"], [hidden]' && hiddenAncestor) {
-        return { hidden: true };
-      }
+      if (selector === '[aria-hidden="true"]' && (ariaHidden || hiddenAncestor)) return {};
+      if (selector === "[hidden]" && (hidden || hiddenAncestor)) return {};
+      if (selector === "[inert]" && inertAncestor) return {};
       return null;
     },
     getClientRects() {
@@ -47,16 +56,24 @@ function createElement({
 
 function createContainer(elements, activeElement = null) {
   const listeners = new Map();
-  const ownerDocument = { activeElement };
+  const ownerDocument = {
+    activeElement,
+    defaultView: {
+      getComputedStyle(element) {
+        return element.computedStyle;
+      }
+    }
+  };
   for (const element of elements) {
     element.ownerDocument = ownerDocument;
   }
 
-  return {
+  const container = {
     ownerDocument,
     listeners,
     addCalls: 0,
     removeCalls: 0,
+    focusCalls: 0,
     querySelectorAll(selector) {
       assert.equal(selector, FOCUSABLE_SELECTOR);
       return elements;
@@ -68,15 +85,20 @@ function createContainer(elements, activeElement = null) {
     removeEventListener(type, listener) {
       this.removeCalls += 1;
       if (listeners.get(type) === listener) listeners.delete(type);
+    },
+    focus() {
+      this.focusCalls += 1;
+      ownerDocument.activeElement = this;
     }
   };
+  return container;
 }
 
-function dispatchKey(container, key, { shiftKey = false } = {}) {
+function dispatchKey(container, key, { shiftKey = false, defaultPrevented = false } = {}) {
   const event = {
     key,
     shiftKey,
-    defaultPrevented: false,
+    defaultPrevented,
     preventDefault() {
       this.defaultPrevented = true;
     }
@@ -85,23 +107,39 @@ function dispatchKey(container, key, { shiftKey = false } = {}) {
   return event;
 }
 
-test("getFocusableElements returns only enabled, visible controls", () => {
+test("getFocusableElements excludes disabled, hidden, inert, and computed-invisible controls", () => {
   const enabled = createElement({ id: "enabled" });
   const disabled = createElement({ id: "disabled", disabled: true });
+  const disabledByFieldset = createElement({ id: "disabled-fieldset", disabledByFieldset: true });
   const hidden = createElement({ id: "hidden", hidden: true });
   const ariaHidden = createElement({ id: "aria-hidden", ariaHidden: true });
   const hiddenAncestor = createElement({ id: "hidden-ancestor", hiddenAncestor: true });
+  const inertAncestor = createElement({ id: "inert-ancestor", inertAncestor: true });
+  const displayNone = createElement({ id: "display-none", display: "none" });
+  const visibilityHidden = createElement({ id: "visibility-hidden", visibility: "hidden" });
   const invisible = createElement({ id: "invisible", visible: false });
   const container = createContainer([
     enabled,
     disabled,
+    disabledByFieldset,
     hidden,
     ariaHidden,
     hiddenAncestor,
+    inertAncestor,
+    displayNone,
+    visibilityHidden,
     invisible
   ]);
 
   assert.deepEqual(getFocusableElements(container), [enabled]);
+});
+
+test("getFocusableElements keeps fixed-like controls with visible client rects", () => {
+  const fixedLike = createElement({ id: "fixed-like" });
+  fixedLike.offsetParent = null;
+  const container = createContainer([fixedLike]);
+
+  assert.deepEqual(getFocusableElements(container), [fixedLike]);
 });
 
 test("activate stores return focus, focuses the first control, and listens once", () => {
@@ -131,6 +169,27 @@ test("activate prefers a caller-provided return focus element", () => {
   trap.activate();
 
   assert.equal(trap.getReturnFocus(), explicit);
+});
+
+test("activate focuses the container and captures Tab and Escape when no controls exist", () => {
+  const container = createContainer([]);
+  let escapeCalls = 0;
+  const trap = createFocusTrap({
+    container,
+    onEscape() {
+      escapeCalls += 1;
+    }
+  });
+
+  trap.activate();
+  const tabEvent = dispatchKey(container, "Tab");
+  const escapeEvent = dispatchKey(container, "Escape");
+
+  assert.equal(container.focusCalls, 1);
+  assert.equal(container.ownerDocument.activeElement, container);
+  assert.equal(tabEvent.defaultPrevented, true);
+  assert.equal(escapeEvent.defaultPrevented, true);
+  assert.equal(escapeCalls, 1);
 });
 
 test("Tab wraps from the last control to the first control", () => {
@@ -206,6 +265,28 @@ test("unhandled keys are not prevented", () => {
   assert.equal(event.defaultPrevented, false);
 });
 
+test("default-prevented events are ignored for nested focus traps", () => {
+  const first = createElement({ id: "first" });
+  const last = createElement({ id: "last" });
+  const container = createContainer([first, last]);
+  let escapeCalls = 0;
+  const trap = createFocusTrap({
+    container,
+    onEscape() {
+      escapeCalls += 1;
+    }
+  });
+  trap.activate();
+  container.ownerDocument.activeElement = last;
+
+  dispatchKey(container, "Tab", { defaultPrevented: true });
+  dispatchKey(container, "Escape", { defaultPrevented: true });
+
+  assert.equal(first.focusCalls, 1);
+  assert.equal(container.ownerDocument.activeElement, last);
+  assert.equal(escapeCalls, 0);
+});
+
 test("deactivate is idempotent and removes the keydown listener", () => {
   const first = createElement({ id: "first" });
   const container = createContainer([first]);
@@ -230,9 +311,11 @@ function getSettingsPanel(html, id, nextId) {
 test("settings drawer markup defines an accessible four-panel navigation", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const drawerTag = html.match(/<aside\b[^>]*id="settingsDrawer"[^>]*>/)?.[0] ?? "";
+  const drawerPanelTag = html.match(/<section\b[^>]*class="drawer-panel"[^>]*>/)?.[0] ?? "";
 
   assert.match(drawerTag, /role="dialog"/);
   assert.match(drawerTag, /aria-modal="true"/);
+  assert.match(drawerPanelTag, /tabindex="-1"/);
   assert.match(html, /class="settings-section-tabs"[^>]*role="tablist"/);
 
   const sections = [

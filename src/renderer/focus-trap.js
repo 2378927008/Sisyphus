@@ -9,9 +9,14 @@ const FOCUSABLE_SELECTOR = [
 
 export function getFocusableElements(container) {
   return [...container.querySelectorAll(FOCUSABLE_SELECTOR)].filter((element) => {
-    if (element.disabled || element.hidden) return false;
+    if (element.matches(":disabled") || element.hidden) return false;
     if (element.getAttribute("aria-hidden") === "true") return false;
-    if (element.closest('[aria-hidden="true"], [hidden]')) return false;
+    if (element.closest('[aria-hidden="true"]')) return false;
+    if (element.closest("[hidden]")) return false;
+    if (element.closest("[inert]")) return false;
+
+    const style = element.ownerDocument?.defaultView?.getComputedStyle(element);
+    if (style?.display === "none" || style?.visibility === "hidden") return false;
     return element.getClientRects().length > 0;
   });
 }
@@ -21,6 +26,8 @@ export function createFocusTrap({ container, onEscape, returnFocus } = {}) {
   let savedReturnFocus = null;
 
   function handleKeydown(event) {
+    if (event.defaultPrevented) return;
+
     if (event.key === "Escape") {
       event.preventDefault();
       onEscape?.();
@@ -56,7 +63,7 @@ export function createFocusTrap({ container, onEscape, returnFocus } = {}) {
       active = true;
       savedReturnFocus = returnFocus || container.ownerDocument.activeElement;
       container.addEventListener("keydown", handleKeydown);
-      getFocusableElements(container)[0]?.focus();
+      (getFocusableElements(container)[0] || container).focus();
     },
     deactivate() {
       if (!active) return;

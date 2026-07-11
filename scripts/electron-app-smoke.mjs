@@ -468,6 +468,60 @@ app.whenReady().then(async () => {
       (state) => !state.settingsDrawerOpen && state.activeElementId === "openSettings",
       5000
     );
+    const focusContainmentWarningCount = rendererMessages.filter((item) => (
+      item.level >= 2 && isFocusContainmentWarning(item.message)
+    )).length;
+    for (const invalidReturnFocus of ["detached", "disabled", "hidden"]) {
+      const triggerId = `smokeReturnFocus-${invalidReturnFocus}`;
+      const focusedTriggerId = await window.webContents.executeJavaScript(`
+        (() => {
+          const trigger = document.createElement('button');
+          trigger.id = '${triggerId}';
+          trigger.type = 'button';
+          document.body.append(trigger);
+          trigger.focus();
+          return document.activeElement?.id || '';
+        })()
+      `);
+      if (focusedTriggerId !== triggerId) {
+        throw new Error(`Could not focus ${invalidReturnFocus} settings trigger.`);
+      }
+
+      window.webContents.send("settings:open");
+      await waitForState(
+        window,
+        (state) => state.settingsDrawerOpen && state.activeElementId === "closeSettings",
+        5000
+      );
+      await window.webContents.executeJavaScript(`
+        (() => {
+          const trigger = document.querySelector('#${triggerId}');
+          if ('${invalidReturnFocus}' === 'detached') trigger.remove();
+          if ('${invalidReturnFocus}' === 'disabled') trigger.disabled = true;
+          if ('${invalidReturnFocus}' === 'hidden') trigger.hidden = true;
+          document.querySelector('#closeSettings').click();
+          trigger.remove();
+        })()
+      `);
+      await waitForState(
+        window,
+        (state) => (
+          !state.settingsDrawerOpen &&
+          state.settingsDrawerAriaHidden &&
+          state.settingsDrawerInert &&
+          state.activeElementId === "openSettings"
+        ),
+        5000
+      );
+    }
+    const focusContainmentWarnings = rendererMessages.filter((item) => (
+      item.level >= 2 && isFocusContainmentWarning(item.message)
+    ));
+    if (focusContainmentWarnings.length !== focusContainmentWarningCount) {
+      throw new Error(
+        `Settings close emitted focus containment warnings: ${focusContainmentWarnings.map((item) => item.message).join(" | ")}`
+      );
+    }
     window.webContents.send("settings:open");
     await waitForState(
       window,
@@ -1335,6 +1389,15 @@ function readHudState(window) {
 function isBlockedRendererWarning(message) {
   const text = String(message || "");
   return text.includes("Electron Security Warning") || text.includes("ScriptProcessorNode is deprecated");
+}
+
+function isFocusContainmentWarning(message) {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("blocked aria-hidden") ||
+    text.includes("aria-hidden") && text.includes("retained focus") ||
+    text.includes("inert") && text.includes("focus")
+  );
 }
 
 function assertPartialSettingsSave(actual, expected) {
