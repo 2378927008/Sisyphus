@@ -19,6 +19,8 @@ const timeout = setTimeout(() => {
   app.exit(2);
 }, 30000);
 
+const expectedInterfaceLanguageCodes = ["en", "zh-Hans", "ja", "ko", "zh-Hant", "fr", "ru", "es"];
+
 let settings = mergeSettings({
   ...defaultSettings,
   hotkey: "CommandOrControl+Alt+Space",
@@ -59,10 +61,10 @@ const historyFixtures = [
     processingError: "spawn C:\\private\\history-helper.exe ENOENT"
   },
   {
-    id: "history-third",
+    id: "history-emoji",
     createdAt: "2026-07-11T00:00:00.000Z",
     status: "complete",
-    text: "Third complete entry"
+    text: "Emoji history entry 🎤"
   }
 ];
 const insertTextCalls = [];
@@ -87,7 +89,8 @@ const missingSetupStatus = {
 const setupIpcCalls = {
   status: 0,
   refresh: 0,
-  start: []
+  start: [],
+  cancel: []
 };
 const setupStartResolvers = new Map();
 
@@ -174,6 +177,16 @@ function wireIpc() {
         assets: missingSetupStatus.assets
       }));
     });
+  });
+  ipcMain.handle("models:setup-cancel", (_event, type) => {
+    setupIpcCalls.cancel.push(type);
+    return {
+      type,
+      status: "cancelled",
+      output: [],
+      error: "",
+      assets: missingSetupStatus.assets
+    };
   });
   ipcMain.handle("dictation:status-latest", () => null);
   ipcMain.handle("dictation:wav", () => {
@@ -275,8 +288,10 @@ app.whenReady().then(async () => {
         state.recordLabel === "开始录音" &&
         state.statusText === "就绪。快捷键：Ctrl + Alt + Space" &&
         state.interfaceLanguage === "zh-Hans" &&
+        state.interfaceLanguageOptions.join(",") === expectedInterfaceLanguageCodes.join(",") &&
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&
+        !state.recordButtonDisabled &&
         state.hasSettingsDrawer &&
         state.hasShortcutRecorder &&
         state.hasLocalModelStatus &&
@@ -318,6 +333,23 @@ app.whenReady().then(async () => {
       initialState.globalShortcutPaused !== false
     ) {
       throw new Error("Windows productization controls should default to unchecked.");
+    }
+    const recordRect = initialState.recordButtonRect;
+    if (
+      recordRect.left < 0 ||
+      recordRect.top < 0 ||
+      recordRect.right > initialState.viewportWidth ||
+      recordRect.bottom > initialState.viewportHeight ||
+      recordRect.width <= 0 ||
+      recordRect.height <= 0
+    ) {
+      throw new Error(`Record button is outside the 980x720 viewport: ${JSON.stringify(recordRect)}.`);
+    }
+    const visibleMainTextLeak = /C:\\|\.exe\b|\.gguf\b|https?:\/\/|\bspawn\b|PowerShell|setup output/i.exec(
+      initialState.visibleMainText
+    );
+    if (visibleMainTextLeak) {
+      throw new Error(`Main page leaked implementation text: ${visibleMainTextLeak[0]}`);
     }
     const historyCallsBeforeResize = historyListCalls;
     await window.webContents.executeJavaScript(`
@@ -468,9 +500,6 @@ app.whenReady().then(async () => {
       (state) => !state.settingsDrawerOpen && state.activeElementId === "openSettings",
       5000
     );
-    const focusContainmentWarningCount = rendererMessages.filter((item) => (
-      item.level >= 2 && isFocusContainmentWarning(item.message)
-    )).length;
     for (const invalidReturnFocus of ["detached", "disabled", "hidden"]) {
       const triggerId = `smokeReturnFocus-${invalidReturnFocus}`;
       const focusedTriggerId = await window.webContents.executeJavaScript(`
@@ -517,9 +546,9 @@ app.whenReady().then(async () => {
     const focusContainmentWarnings = rendererMessages.filter((item) => (
       item.level >= 2 && isFocusContainmentWarning(item.message)
     ));
-    if (focusContainmentWarnings.length !== focusContainmentWarningCount) {
+    if (focusContainmentWarnings.length !== 0) {
       throw new Error(
-        `Settings close emitted focus containment warnings: ${focusContainmentWarnings.map((item) => item.message).join(" | ")}`
+        `Settings lifecycle emitted focus containment warnings: ${focusContainmentWarnings.map((item) => item.message).join(" | ")}`
       );
     }
     window.webContents.send("settings:open");
@@ -667,6 +696,14 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    const insertCallsBeforeFailedHistory = insertTextCalls.length;
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-history-action="insert"][data-history-id="history-failed"]').click()
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (insertTextCalls.length !== insertCallsBeforeFailedHistory) {
+      throw new Error("Failed history entry should not invoke insert text IPC.");
+    }
     await window.webContents.executeJavaScript(`
       document.querySelector('[data-history-action="copy"][data-history-id="history-en"]').click()
     `);
@@ -1097,6 +1134,7 @@ app.whenReady().then(async () => {
         activeSettingsSaveCalls === 0 &&
         state.outputLanguage === "zh-Hans" &&
         state.llmProvider === "mymemory" &&
+        !state.recordButtonDisabled &&
         state.providerStatusText.includes("MyMemory Free")
       ),
       5000
@@ -1240,6 +1278,9 @@ app.whenReady().then(async () => {
     if (blockedWarnings.length) {
       throw new Error(`Renderer emitted blocked warnings: ${blockedWarnings.map((item) => item.message).join(" | ")}`);
     }
+    if (rendererMessages.length !== 0) {
+      throw new Error(`Renderer emitted console messages: ${rendererMessages.map((item) => item.message).join(" | ")}`);
+    }
 
     console.log(JSON.stringify({
       ok: true,
@@ -1317,6 +1358,8 @@ function readRendererState(window) {
       resultAriaPlaceholder: document.querySelector('#resultText')?.getAttribute('aria-placeholder') || '',
       editorCharacterCount: Number(document.querySelector('#resultText')?.dataset.characterCount || 0),
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
+      interfaceLanguageOptions: [...(document.querySelector('#interfaceLanguage')?.options || [])]
+        .map((option) => option.value),
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
       hotkeyValue: document.querySelector('#hotkey')?.value || '',
@@ -1389,6 +1432,21 @@ function readRendererState(window) {
       copyAttemptTexts: window.__copyAttempts || [],
       execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
+      recordButtonDisabled: Boolean(document.querySelector('#recordButton')?.disabled),
+      recordButtonRect: (() => {
+        const rect = document.querySelector('#recordButton')?.getBoundingClientRect();
+        return rect ? {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height
+        } : null;
+      })(),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      visibleMainText: document.querySelector('main')?.innerText || '',
       hasLocalFlow: Boolean(window.localFlow)
     }))()
   `);

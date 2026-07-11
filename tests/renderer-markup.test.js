@@ -155,6 +155,25 @@ test("raw setup output belongs only to the advanced settings section", async () 
   assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
 });
 
+test("advanced setup controls stay isolated and history has no destructive renderer IPC", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const advanced = getElementMarkup(html, "section", "settingsAdvanced");
+  const dictation = getElementMarkup(html, "section", "dictationPanel");
+
+  for (const field of [
+    "whisperCliPath",
+    "whisperModelPath",
+    "embeddedLlmCliPath",
+    "embeddedLlmModelPath"
+  ]) {
+    assert.match(advanced, new RegExp(`name="${field}"`), `${field} should remain in Advanced`);
+    assert.doesNotMatch(dictation, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
+  }
+
+  assert.doesNotMatch(appSource, /history:(?:delete|remove|clear)/);
+});
+
 test("main window fallback does not claim local speech recognition is ready", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const mainEnd = html.indexOf("</main>");

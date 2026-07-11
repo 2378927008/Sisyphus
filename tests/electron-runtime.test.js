@@ -103,10 +103,48 @@ test("app smoke test uses the current Electron console-message event shape", asy
   assert.doesNotMatch(smokeSource, /console-message", \(_event, level, message, line, sourceId\)/);
 });
 
+test("app smoke rejects every focus containment warning instead of only new warnings", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /if \(focusContainmentWarnings\.length !== 0\)/);
+  assert.doesNotMatch(smokeSource, /focusContainmentWarnings\.length !== focusContainmentWarningCount/);
+});
+
+test("app smoke history fixtures include complete Chinese English and emoji entries", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+  const fixturesMatch = smokeSource.match(/const historyFixtures = \[(?<fixtures>[\s\S]*?)\n\];/);
+
+  assert.ok(fixturesMatch, "history fixtures should be declared");
+  const completeEntries = [...fixturesMatch.groups.fixtures.matchAll(/status:\s*"complete"[\s\S]*?text:\s*"([^"]+)"/g)]
+    .map((match) => match[1]);
+
+  assert.ok(completeEntries.length >= 3, "smoke history should include three completed entries");
+  assert.ok(completeEntries.some((text) => /[\u4e00-\u9fff]/.test(text)), "a completed history entry should be Chinese");
+  assert.ok(completeEntries.some((text) => /^[\x00-\x7F]+$/.test(text)), "a completed history entry should be English");
+  assert.ok(completeEntries.some((text) => /\p{Extended_Pictographic}/u.test(text)), "a completed history entry should include emoji");
+  assert.match(fixturesMatch.groups.fixtures, /status:\s*"failed"/);
+});
+
 test("app smoke stubs latest dictation status IPC for renderer startup replay", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 
   assert.match(smokeSource, /ipcMain\.handle\("dictation:status-latest", \(\) => null\)/);
+});
+
+test("app smoke explicitly stubs every renderer invoke channel", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+  const invokedChannels = [...preloadSource.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)]
+    .map((match) => match[1]);
+
+  assert.ok(invokedChannels.length > 0, "preload should expose renderer invoke channels");
+  for (const channel of invokedChannels) {
+    assert.match(
+      smokeSource,
+      new RegExp(`ipcMain\\.handle\\("${channel.replace(/[-:]/g, "\\$&")}"`),
+      `${channel} should have an explicit smoke handler`
+    );
+  }
 });
 
 test("preload shortcut toggle callback does not receive the raw IPC event", async () => {
