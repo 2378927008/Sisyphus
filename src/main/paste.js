@@ -127,7 +127,7 @@ export async function pasteText(text, deps = {}) {
       }
       Promise.resolve(fallback).then(
         (confirmed) => {
-          if (!settled && confirmed !== false) finishAbort();
+          if (!settled && confirmed !== false) finishUnconfirmedAbort();
         },
         () => {}
       );
@@ -291,7 +291,14 @@ function installLateProcessDrain(processHandle, deps = {}) {
   } catch {
     // Listener cleanup still bounds the handle even if unref is unavailable.
   }
-  timer = setTimer(cleanup, timeoutMs);
+  timer = setTimer(() => {
+    timer = null;
+  }, timeoutMs);
+  try {
+    timer?.unref?.();
+  } catch {
+    // The process itself is already unrefed and the error sink remains active.
+  }
   return cleanup;
 }
 

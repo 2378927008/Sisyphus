@@ -788,6 +788,7 @@ test("main process routes tray and IPC settings writes through one effects trans
   assert.ok(trayUpdateMatch, "tray settings updater should be defined");
   assert.ok(settingsSaveMatch, "settings:save handler should be defined inline");
   assert.match(trayUpdateMatch.groups.body, /saveSettingsWithSystemEffects\(settingsPatch\)/);
+  assert.doesNotMatch(trayUpdateMatch.groups.body, /reportSystemError|refreshTrayMenu/);
   assert.match(settingsSaveMatch.groups.body, /saveSettingsWithSystemEffects\(settings\)/);
 });
 

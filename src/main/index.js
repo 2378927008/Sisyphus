@@ -333,12 +333,7 @@ function sanitizeRendererStatusText(value) {
 }
 
 function updateSettingsFromTray(settingsPatch) {
-  void saveSettingsWithSystemEffects(settingsPatch).catch((error) => {
-    if (!error?.localFlowStatusReported) {
-      reportSystemError(error, "settings_update_failed");
-    }
-    refreshTrayMenu();
-  });
+  void saveSettingsWithSystemEffects(settingsPatch).catch(() => {});
 }
 
 function reportSystemError(error, reason) {
@@ -480,7 +475,6 @@ app.whenReady().then(async () => {
   });
   saveSettingsWithSystemEffects = createSettingsEffectsTransaction({
     settingsStore,
-    getCurrentSettings: () => lastSettings,
     setCurrentSettings: (settings) => {
       lastSettings = settings;
     },

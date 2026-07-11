@@ -110,10 +110,16 @@ test("pasteText falls back to Windows taskkill when child.kill returns false", a
 
   assert.equal(observed.state, "rejected");
   assert.equal(observed.value.code, "paste_failed");
-  assert.equal(child.listenerCount("error"), 0);
-  assert.equal(child.listenerCount("close"), 0);
+  assert.equal(child.listenerCount("error"), 1);
+  assert.equal(child.listenerCount("close"), 1);
   assert.equal(taskkill.listenerCount("error"), 0);
   assert.equal(taskkill.listenerCount("close"), 0);
+
+  child.emit("error", new Error("late child error after taskkill success"));
+  child.emit("close", 1);
+
+  assert.equal(child.listenerCount("error"), 0);
+  assert.equal(child.listenerCount("close"), 0);
 });
 
 test("pasteText uses an injected process-tree fallback when child.kill throws", async () => {
@@ -206,9 +212,15 @@ test("pasteText waits for its bounded timeout when taskkill errors", async () =>
 
   timers.fireNext();
 
+  assert.equal(child.listenerCount("error"), 1);
+  assert.equal(child.listenerCount("close"), 1);
+  assert.equal(timers.pendingCount, 0);
+
+  child.emit("error", new Error("late child error after drain timeout"));
+  child.emit("close", 1);
+
   assert.equal(child.listenerCount("error"), 0);
   assert.equal(child.listenerCount("close"), 0);
-  assert.equal(timers.pendingCount, 0);
 });
 
 test("pasteText detaches a hanging taskkill helper and drains late process events", async () => {
@@ -271,6 +283,7 @@ test("pasteText detaches a hanging taskkill helper and drains late process event
   assert.equal(taskkill.listenerCount("close"), 1);
   assert.equal(child.listenerCount("error"), 1);
   assert.equal(child.listenerCount("close"), 1);
+  assert.equal(timers.unrefCount, 2);
 
   taskkill.emit("error", new Error("late taskkill error"));
   child.emit("error", new Error("late child error"));
@@ -343,11 +356,21 @@ test("pasteText bounds drain cleanup when killing the taskkill helper throws", a
 
   timers.fireAll();
 
+  assert.equal(taskkill.listenerCount("error"), 1);
+  assert.equal(taskkill.listenerCount("close"), 1);
+  assert.equal(child.listenerCount("error"), 1);
+  assert.equal(child.listenerCount("close"), 1);
+  assert.equal(timers.pendingCount, 0);
+
+  taskkill.emit("error", new Error("late helper error after drain timeout"));
+  child.emit("error", new Error("late child error after drain timeout"));
+  taskkill.emit("close", 1);
+  child.emit("close", 1);
+
   assert.equal(taskkill.listenerCount("error"), 0);
   assert.equal(taskkill.listenerCount("close"), 0);
   assert.equal(child.listenerCount("error"), 0);
   assert.equal(child.listenerCount("close"), 0);
-  assert.equal(timers.pendingCount, 0);
 });
 
 test("pasteText never reports success during abort error and close races", async () => {
@@ -481,15 +504,22 @@ function createManualTimers() {
   let nextId = 1;
   const timers = new Map();
   const delays = [];
+  let unrefCount = 0;
 
   return {
     delays,
     setTimeout(callback, delay) {
       const id = nextId;
       nextId += 1;
-      timers.set(id, callback);
+      const handle = {
+        id,
+        unref() {
+          unrefCount += 1;
+        }
+      };
+      timers.set(handle, callback);
       delays.push(delay);
-      return id;
+      return handle;
     },
     clearTimeout(id) {
       timers.delete(id);
@@ -510,6 +540,9 @@ function createManualTimers() {
     },
     get pendingCount() {
       return timers.size;
+    },
+    get unrefCount() {
+      return unrefCount;
     }
   };
 }
