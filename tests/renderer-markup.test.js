@@ -50,6 +50,7 @@ test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
     "recentHistorySection",
     "historyPanel",
     "footerHealth",
+    "footerHealthText",
     "settingsDrawer"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
@@ -155,9 +156,12 @@ test("raw setup output belongs only to the advanced settings section", async () 
   assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
 });
 
-test("advanced setup controls stay isolated and history has no destructive renderer IPC", async () => {
+test("advanced setup controls stay isolated and history remains read-only across renderer IPC sources", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
   const advanced = getElementMarkup(html, "section", "settingsAdvanced");
   const dictation = getElementMarkup(html, "section", "dictationPanel");
 
@@ -171,7 +175,19 @@ test("advanced setup controls stay isolated and history has no destructive rende
     assert.doesNotMatch(dictation, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
   }
 
-  assert.doesNotMatch(appSource, /history:(?:delete|remove|clear)/);
+  for (const [name, source] of [
+    ["renderer", appSource],
+    ["preload", preloadSource],
+    ["main", mainSource],
+    ["smoke", smokeSource]
+  ]) {
+    for (const channel of ["history:delete", "history:write", "history:update", "history:clear"]) {
+      assert.equal(source.includes(channel), false, `${name} must not use ${channel}`);
+    }
+  }
+
+  assert.match(preloadSource, /history:list/);
+  assert.match(smokeSource, /history:list/);
 });
 
 test("main window fallback does not claim local speech recognition is ready", async () => {

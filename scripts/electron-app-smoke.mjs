@@ -20,6 +20,42 @@ const timeout = setTimeout(() => {
 }, 30000);
 
 const expectedInterfaceLanguageCodes = ["en", "zh-Hans", "ja", "ko", "zh-Hant", "fr", "ru", "es"];
+const smokeIpcChannelRegistry = [
+  "settings:get",
+  "settings:save",
+  "history:list",
+  "dictation:insert-text",
+  "diagnostics:whisper",
+  "diagnostics:text",
+  "providers:status",
+  "llm:status",
+  "models:setup-status",
+  "models:setup-refresh",
+  "models:setup-start",
+  "models:setup-cancel",
+  "dictation:status-latest",
+  "dictation:wav"
+];
+const registeredSmokeIpcChannels = new Set();
+
+function registerSmokeIpcHandler(channel, handler) {
+  if (!smokeIpcChannelRegistry.includes(channel)) {
+    throw new Error(`Unregistered smoke IPC channel: ${channel}`);
+  }
+  if (registeredSmokeIpcChannels.has(channel)) {
+    throw new Error(`Duplicate smoke IPC channel: ${channel}`);
+  }
+  ipcMain.handle(channel, handler);
+  registeredSmokeIpcChannels.add(channel);
+}
+
+function assertSmokeIpcCoverage() {
+  const missing = smokeIpcChannelRegistry.filter((channel) => !registeredSmokeIpcChannels.has(channel));
+  const unexpected = [...registeredSmokeIpcChannels].filter((channel) => !smokeIpcChannelRegistry.includes(channel));
+  if (missing.length || unexpected.length) {
+    throw new Error(`Smoke IPC coverage mismatch. Missing: ${missing.join(", ")}; unexpected: ${unexpected.join(", ")}`);
+  }
+}
 
 let settings = mergeSettings({
   ...defaultSettings,
@@ -70,6 +106,13 @@ const historyFixtures = [
 const insertTextCalls = [];
 let insertTextResult = { ok: true };
 let historyListCalls = 0;
+let whisperDiagnosticsResult = {
+  ready: true,
+  checks: [
+    { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
+  ]
+};
+let providerStatusOverride = null;
 
 const missingSetupStatus = {
   assets: {
@@ -95,8 +138,8 @@ const setupIpcCalls = {
 const setupStartResolvers = new Map();
 
 function wireIpc() {
-  ipcMain.handle("settings:get", () => settings);
-  ipcMain.handle("settings:save", async (_event, next) => {
+  registerSmokeIpcHandler("settings:get", () => settings);
+  registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(next);
     activeSettingsSaveCalls += 1;
     maxConcurrentSettingsSaveCalls = Math.max(maxConcurrentSettingsSaveCalls, activeSettingsSaveCalls);
@@ -121,28 +164,23 @@ function wireIpc() {
       activeSettingsSaveCalls -= 1;
     }
   });
-  ipcMain.handle("history:list", () => {
+  registerSmokeIpcHandler("history:list", () => {
     historyListCalls += 1;
     return historyFixtures;
   });
-  ipcMain.handle("dictation:insert-text", (_event, text) => {
+  registerSmokeIpcHandler("dictation:insert-text", (_event, text) => {
     insertTextCalls.push(text);
     return insertTextResult;
   });
-  ipcMain.handle("diagnostics:whisper", () => ({
-    ready: true,
-    checks: [
-      { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
-    ]
-  }));
-  ipcMain.handle("diagnostics:text", () => ({
+  registerSmokeIpcHandler("diagnostics:whisper", () => whisperDiagnosticsResult);
+  registerSmokeIpcHandler("diagnostics:text", () => ({
     ready: true,
     checks: [
       { label: "MyMemory Free", status: "pass", message: "Text provider diagnostics stubbed." }
     ]
   }));
-  ipcMain.handle("providers:status", () => getProcessingProviderStatus(settings));
-  ipcMain.handle("llm:status", () => ({
+  registerSmokeIpcHandler("providers:status", () => providerStatusOverride || getProcessingProviderStatus(settings));
+  registerSmokeIpcHandler("llm:status", () => ({
     ready: false,
     runtimeReady: false,
     modelReady: false,
@@ -155,18 +193,18 @@ function wireIpc() {
     cliPath: "",
     modelPath: ""
   }));
-  ipcMain.handle("models:setup-status", () => {
+  registerSmokeIpcHandler("models:setup-status", () => {
     setupIpcCalls.status += 1;
     if (setupIpcCalls.status === 1) {
       throw new Error("setup status unavailable");
     }
     return missingSetupStatus;
   });
-  ipcMain.handle("models:setup-refresh", () => {
+  registerSmokeIpcHandler("models:setup-refresh", () => {
     setupIpcCalls.refresh += 1;
     return missingSetupStatus;
   });
-  ipcMain.handle("models:setup-start", (_event, type) => {
+  registerSmokeIpcHandler("models:setup-start", (_event, type) => {
     setupIpcCalls.start.push(type);
     return new Promise((resolve) => {
       setupStartResolvers.set(type, (result) => resolve(result || {
@@ -178,7 +216,7 @@ function wireIpc() {
       }));
     });
   });
-  ipcMain.handle("models:setup-cancel", (_event, type) => {
+  registerSmokeIpcHandler("models:setup-cancel", (_event, type) => {
     setupIpcCalls.cancel.push(type);
     return {
       type,
@@ -188,8 +226,8 @@ function wireIpc() {
       assets: missingSetupStatus.assets
     };
   });
-  ipcMain.handle("dictation:status-latest", () => null);
-  ipcMain.handle("dictation:wav", () => {
+  registerSmokeIpcHandler("dictation:status-latest", () => null);
+  registerSmokeIpcHandler("dictation:wav", () => {
     settingsAtDictation = { ...settings };
     return dictationResult;
   });
@@ -198,6 +236,7 @@ function wireIpc() {
 app.whenReady().then(async () => {
   configureMediaPermissions(session.defaultSession);
   wireIpc();
+  assertSmokeIpcCoverage();
 
   const rendererMessages = [];
   const hudMessages = [];
@@ -292,6 +331,12 @@ app.whenReady().then(async () => {
         state.whisperLanguage === "auto" &&
         state.outputLanguage === "auto" &&
         !state.recordButtonDisabled &&
+        state.hasLanguageControls &&
+        state.hasVoiceCommandBar &&
+        state.hasResultText &&
+        state.hasRecentHistoryList &&
+        state.hasFooterHealthText &&
+        state.hasRecordButton &&
         state.hasSettingsDrawer &&
         state.hasShortcutRecorder &&
         state.hasLocalModelStatus &&
@@ -351,6 +396,78 @@ app.whenReady().then(async () => {
     if (visibleMainTextLeak) {
       throw new Error(`Main page leaked implementation text: ${visibleMainTextLeak[0]}`);
     }
+    whisperDiagnosticsResult = {
+      ready: false,
+      checks: [
+        { label: "Whisper", status: "fail", message: "Whisper runtime and model are missing." }
+      ]
+    };
+    providerStatusOverride = {
+      mode: "local",
+      readyToRecord: false,
+      recordingBlockedReason: "whisper_not_configured",
+      asr: {
+        provider: "localWhisper",
+        label: "Local whisper.cpp",
+        configured: false,
+        implemented: true,
+        ready: false,
+        blockedReason: "whisper_not_configured"
+      },
+      text: {
+        provider: "mymemory",
+        label: "MyMemory Free",
+        configured: true,
+        implemented: true,
+        ready: true,
+        blockedReason: ""
+      }
+    };
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#checkWhisper').click();
+        document.querySelector('#refreshSetupStatus').click();
+      })()
+    `);
+    const missingWhisperRecoveryState = await waitForState(
+      window,
+      (state) => (
+        state.recordButtonDisabled &&
+        state.visibleRecordRecoveryCount === 1 &&
+        state.recordRecoveryActionText.includes("Whisper") &&
+        state.whisperDiagnosticsText.includes("Whisper runtime and model are missing.") &&
+        state.mainSetupControlCount === 0
+      ),
+      5000
+    );
+    const recoveryWhisperStarts = setupIpcCalls.start.filter((type) => type === "whisper").length;
+    await window.webContents.executeJavaScript("document.querySelector('#recordRecoveryAction').click()");
+    await waitForState(
+      window,
+      () => setupIpcCalls.start.filter((type) => type === "whisper").length === recoveryWhisperStarts + 1,
+      5000
+    );
+    setupStartResolvers.get("whisper")?.({
+      type: "whisper",
+      status: "failed",
+      output: [],
+      error: "Whisper assets are unavailable.",
+      assets: missingSetupStatus.assets
+    });
+    await waitForState(window, (state) => state.cancelSetupHidden, 5000);
+    whisperDiagnosticsResult = {
+      ready: true,
+      checks: [
+        { label: "Smoke", status: "pass", message: "Whisper diagnostics stubbed." }
+      ]
+    };
+    providerStatusOverride = null;
+    await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
+    await waitForState(
+      window,
+      (state) => !state.recordButtonDisabled && state.visibleRecordRecoveryCount === 0,
+      5000
+    );
     const historyCallsBeforeResize = historyListCalls;
     await window.webContents.executeJavaScript(`
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: 640 });
@@ -1350,6 +1467,11 @@ function readRendererState(window) {
   return window.webContents.executeJavaScript(`
     (() => ({
       ready: Boolean(window.localFlow && document.querySelector('#recordButton')),
+      hasLanguageControls: Boolean(document.querySelector('#languageControls')),
+      hasVoiceCommandBar: Boolean(document.querySelector('#voiceCommandBar')),
+      hasResultText: Boolean(document.querySelector('#resultText')),
+      hasRecentHistoryList: Boolean(document.querySelector('#recentHistoryList')),
+      hasFooterHealthText: Boolean(document.querySelector('#footerHealthText')),
       isRecording: document.body.classList.contains('recording'),
       recordLabel: document.querySelector('#recordLabel')?.textContent || '',
       statusText: document.querySelector('#statusText')?.textContent || '',
@@ -1398,6 +1520,7 @@ function readRendererState(window) {
       hasSetupChecklist: Boolean(document.querySelector('#setupChecklist')),
       setupChecklistText: document.querySelector('#setupChecklist')?.textContent || '',
       setupOutputText: document.querySelector('#setupOutput')?.textContent || '',
+      whisperDiagnosticsText: document.querySelector('#diagnosticsList')?.textContent || '',
       textDiagnosticsText: document.querySelector('#textDiagnosticsList')?.textContent || '',
       hasInstallWhisperButton: Boolean(document.querySelector('#installWhisper')),
       hasInstallLlmButton: Boolean(document.querySelector('#installLlm')),
@@ -1432,6 +1555,11 @@ function readRendererState(window) {
       copyAttemptTexts: window.__copyAttempts || [],
       execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
+      visibleRecordRecoveryCount: document.querySelectorAll('#recordRecovery:not([hidden])').length,
+      recordRecoveryActionText: document.querySelector('#recordRecoveryAction')?.textContent?.trim() || '',
+      mainSetupControlCount: document.querySelector('main')?.querySelectorAll(
+        '#setupChecklist, #installWhisper, #installLlm, #refreshSetupStatus, #cancelSetup, #setupOutput, #whisperCliPath, #whisperModelPath, #embeddedLlmCliPath, #embeddedLlmModelPath'
+      ).length || 0,
       recordButtonDisabled: Boolean(document.querySelector('#recordButton')?.disabled),
       recordButtonRect: (() => {
         const rect = document.querySelector('#recordButton')?.getBoundingClientRect();

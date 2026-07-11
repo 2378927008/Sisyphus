@@ -18,6 +18,131 @@ function removeLeadingWhitespaceAndComments(source) {
   }
 }
 
+function getSmokeIpcChannelRegistry(smokeSource) {
+  const declaration = "const smokeIpcChannelRegistry =";
+  const declarationIndex = smokeSource.indexOf(declaration);
+  assert.notEqual(declarationIndex, -1, "smoke should declare an explicit IPC channel registry");
+
+  const arrayStart = smokeSource.indexOf("[", declarationIndex + declaration.length);
+  assert.notEqual(arrayStart, -1, "smoke IPC registry should be an array literal");
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+
+  for (let index = arrayStart; index < smokeSource.length; index += 1) {
+    const character = smokeSource[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === "\"" || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "[") depth += 1;
+    if (character === "]") depth -= 1;
+    if (depth === 0) {
+      return [...vm.runInNewContext(`(${smokeSource.slice(arrayStart, index + 1)})`)];
+    }
+  }
+
+  assert.fail("smoke IPC registry array should be closed");
+}
+
+async function getActualPreloadInvokeChannels(preloadSource) {
+  const invoked = [];
+  const listeners = new Map();
+  const sent = [];
+  let exposedApi = null;
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return Promise.resolve({ channel, payload });
+          },
+          on: (channel, callback) => {
+            listeners.set(channel, callback);
+          },
+          send: (channel, payload) => {
+            sent.push({ channel, payload });
+          }
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+  assert.deepEqual(Object.keys(exposedApi).sort(), [
+    "cancelModelSetup",
+    "checkTextProvider",
+    "checkWhisper",
+    "getLatestStatus",
+    "getLocalModelStatus",
+    "getModelSetupStatus",
+    "getProviderStatus",
+    "getSettings",
+    "insertText",
+    "listHistory",
+    "onOpenSettings",
+    "onRecordingReset",
+    "onRecordingStart",
+    "onRecordingStop",
+    "onShortcutToggle",
+    "onStatus",
+    "onSystemInputStatus",
+    "processWav",
+    "refreshModelSetupStatus",
+    "reportRecordingStatus",
+    "saveSettings",
+    "startModelSetup"
+  ]);
+
+  await exposedApi.getSettings();
+  await exposedApi.saveSettings({ hotkey: "CommandOrControl+Alt+Space" });
+  await exposedApi.listHistory();
+  await exposedApi.checkWhisper();
+  await exposedApi.checkTextProvider();
+  await exposedApi.getProviderStatus();
+  await exposedApi.getLocalModelStatus();
+  await exposedApi.getModelSetupStatus();
+  await exposedApi.startModelSetup("whisper");
+  await exposedApi.cancelModelSetup("whisper");
+  await exposedApi.refreshModelSetupStatus();
+  await exposedApi.getLatestStatus();
+  await exposedApi.insertText("smoke text");
+  await exposedApi.processWav(new Uint8Array([1, 2, 3]));
+  for (const subscribe of [
+    exposedApi.onShortcutToggle,
+    exposedApi.onRecordingStart,
+    exposedApi.onRecordingStop,
+    exposedApi.onRecordingReset,
+    exposedApi.onStatus,
+    exposedApi.onSystemInputStatus,
+    exposedApi.onOpenSettings
+  ]) {
+    subscribe(() => undefined);
+  }
+  exposedApi.reportRecordingStatus({ phase: "idle" });
+
+  assert.equal(listeners.size, 7, "every exposed subscription API should register a listener");
+  assert.deepEqual(sent, [{ channel: "recording:status", payload: { phase: "idle" } }]);
+  return [...new Set(invoked.map((item) => item.channel))].sort();
+}
+
 test("electronRuntimeSwitches disables sandbox and GPU paths for constrained Windows sessions", () => {
   assert.deepEqual(electronRuntimeSwitches, [
     "no-sandbox",
@@ -125,25 +250,37 @@ test("app smoke history fixtures include complete Chinese English and emoji entr
   assert.match(fixturesMatch.groups.fixtures, /status:\s*"failed"/);
 });
 
-test("app smoke stubs latest dictation status IPC for renderer startup replay", async () => {
-  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
-
-  assert.match(smokeSource, /ipcMain\.handle\("dictation:status-latest", \(\) => null\)/);
-});
-
-test("app smoke explicitly stubs every renderer invoke channel", async () => {
+test("app smoke registry matches the channels invoked by every exposed preload API", async () => {
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
-  const invokedChannels = [...preloadSource.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)]
-    .map((match) => match[1]);
+  const preloadChannels = await getActualPreloadInvokeChannels(preloadSource);
+  const smokeChannels = getSmokeIpcChannelRegistry(smokeSource).sort();
 
-  assert.ok(invokedChannels.length > 0, "preload should expose renderer invoke channels");
-  for (const channel of invokedChannels) {
-    assert.match(
-      smokeSource,
-      new RegExp(`ipcMain\\.handle\\("${channel.replace(/[-:]/g, "\\$&")}"`),
-      `${channel} should have an explicit smoke handler`
-    );
+  assert.deepEqual(smokeChannels, preloadChannels);
+  assert.equal([...smokeSource.matchAll(/ipcMain\.handle\(/g)].length, 1);
+  assert.match(smokeSource, /function registerSmokeIpcHandler\(channel, handler\)/);
+  assert.match(smokeSource, /registeredSmokeIpcChannels\.add\(channel\)/);
+  assert.match(smokeSource, /assertSmokeIpcCoverage\(\);/);
+});
+
+test("app smoke verifies missing Whisper recovery and first-screen controls", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  for (const token of [
+    "missingWhisperRecoveryState",
+    "whisperDiagnosticsResult",
+    "providerStatusOverride",
+    "visibleRecordRecoveryCount",
+    "recordRecoveryActionText",
+    "mainSetupControlCount",
+    "hasLanguageControls",
+    "hasVoiceCommandBar",
+    "hasResultText",
+    "hasRecentHistoryList",
+    "hasFooterHealthText",
+    "hasRecordButton"
+  ]) {
+    assert.match(smokeSource, new RegExp(token), token);
   }
 });
 
