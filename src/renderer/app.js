@@ -82,6 +82,10 @@ let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
 let recentHistoryCompact = window.innerHeight < 650;
 let processingLanguageSaveQueue = Promise.resolve();
+const processingLanguageRequestVersions = {
+  whisperLanguage: 0,
+  outputLanguage: 0
+};
 const mainTabs = [dictationTab, historyTab];
 const SETTINGS_SAVE_FAILED_MESSAGE = "Settings could not be saved.";
 const shortcutRecorder = createShortcutRecorder({
@@ -174,13 +178,15 @@ function changeProcessingLanguage(event) {
   const field = event.currentTarget;
   const settingName = field.name;
   const requestedValue = field.value;
+  const requestVersion = processingLanguageRequestVersions[settingName] + 1;
+  processingLanguageRequestVersions[settingName] = requestVersion;
 
   processingLanguageSaveQueue = processingLanguageSaveQueue.then(() => (
-    saveProcessingLanguage(field, settingName, requestedValue)
+    saveProcessingLanguage(field, settingName, requestedValue, requestVersion)
   ));
 }
 
-async function saveProcessingLanguage(field, settingName, requestedValue) {
+async function saveProcessingLanguage(field, settingName, requestedValue, requestVersion) {
   try {
     currentSettings = await window.localFlow.saveSettings({
       [settingName]: requestedValue
@@ -188,7 +194,12 @@ async function saveProcessingLanguage(field, settingName, requestedValue) {
     await refreshProviderStatus();
     await refreshSetupStatusView({ updateStatus: false });
     renderFooterHealth();
+    if (isLatestProcessingLanguageRequest(settingName, requestVersion)) {
+      setReadyStatus();
+    }
   } catch {
+    if (!isLatestProcessingLanguageRequest(settingName, requestVersion)) return;
+
     if (field.value === requestedValue) {
       field.value = currentSettings?.[settingName] ?? "auto";
     }
@@ -197,6 +208,10 @@ async function saveProcessingLanguage(field, settingName, requestedValue) {
     renderSetupChecklist();
     renderFooterHealth();
   }
+}
+
+function isLatestProcessingLanguageRequest(settingName, requestVersion) {
+  return processingLanguageRequestVersions[settingName] === requestVersion;
 }
 
 async function refreshProcessingProviderPreview() {

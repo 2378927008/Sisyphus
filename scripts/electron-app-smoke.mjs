@@ -723,8 +723,7 @@ app.whenReady().then(async () => {
         activeSettingsSaveCalls === 1 &&
         state.outputLanguage === "es" &&
         state.interfaceLanguage === "en" &&
-        state.hotkeyValue === "CommandOrControl+Shift+U" &&
-        state.statusText === "Settings could not be saved."
+        state.hotkeyValue === "CommandOrControl+Shift+U"
       ),
       5000
     );
@@ -743,6 +742,7 @@ app.whenReady().then(async () => {
         state.outputLanguage === "es" &&
         state.interfaceLanguage === "en" &&
         state.hotkeyValue === "CommandOrControl+Shift+U" &&
+        state.statusText === "Ready. Shortcut: Ctrl + Alt + Space" &&
         state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
       ),
       5000
@@ -758,7 +758,12 @@ app.whenReady().then(async () => {
     `);
     const failedLanguageSaveState = await waitForState(
       window,
-      (state) => state.outputLanguage === "es" && state.statusText === "Settings could not be saved.",
+      (state) => (
+        activeSettingsSaveCalls === 0 &&
+        settings.outputLanguage === "es" &&
+        state.outputLanguage === "es" &&
+        state.statusText === "Settings could not be saved."
+      ),
       5000
     );
     if (
