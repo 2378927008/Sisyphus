@@ -4,6 +4,145 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { electronRuntimeSwitches } from "../src/main/electron-runtime.js";
 
+function removeLeadingWhitespaceAndComments(source) {
+  let remainder = source;
+
+  while (true) {
+    remainder = remainder.replace(/^\s+/, "");
+    const comment = remainder.match(/^(?:\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)/);
+    if (!comment) {
+      return remainder;
+    }
+
+    remainder = remainder.slice(comment[0].length);
+  }
+}
+
+function getSmokeIpcChannelRegistry(smokeSource) {
+  const declaration = "const smokeIpcChannelRegistry =";
+  const declarationIndex = smokeSource.indexOf(declaration);
+  assert.notEqual(declarationIndex, -1, "smoke should declare an explicit IPC channel registry");
+
+  const arrayStart = smokeSource.indexOf("[", declarationIndex + declaration.length);
+  assert.notEqual(arrayStart, -1, "smoke IPC registry should be an array literal");
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+
+  for (let index = arrayStart; index < smokeSource.length; index += 1) {
+    const character = smokeSource[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === "\"" || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "[") depth += 1;
+    if (character === "]") depth -= 1;
+    if (depth === 0) {
+      return [...vm.runInNewContext(`(${smokeSource.slice(arrayStart, index + 1)})`)];
+    }
+  }
+
+  assert.fail("smoke IPC registry array should be closed");
+}
+
+async function getActualPreloadInvokeChannels(preloadSource) {
+  const invoked = [];
+  const listeners = new Map();
+  const sent = [];
+  let exposedApi = null;
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return Promise.resolve({ channel, payload });
+          },
+          on: (channel, callback) => {
+            listeners.set(channel, callback);
+          },
+          send: (channel, payload) => {
+            sent.push({ channel, payload });
+          }
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+  assert.deepEqual(Object.keys(exposedApi).sort(), [
+    "cancelModelSetup",
+    "checkTextProvider",
+    "checkWhisper",
+    "getLatestStatus",
+    "getLocalModelStatus",
+    "getModelSetupStatus",
+    "getProviderStatus",
+    "getSettings",
+    "insertText",
+    "listHistory",
+    "onOpenSettings",
+    "onRecordingReset",
+    "onRecordingStart",
+    "onRecordingStop",
+    "onShortcutToggle",
+    "onStatus",
+    "onSystemInputStatus",
+    "processWav",
+    "refreshModelSetupStatus",
+    "reportRecordingStatus",
+    "saveSettings",
+    "startModelSetup"
+  ]);
+
+  await exposedApi.getSettings();
+  await exposedApi.saveSettings({ hotkey: "CommandOrControl+Alt+Space" });
+  await exposedApi.listHistory();
+  await exposedApi.checkWhisper();
+  await exposedApi.checkTextProvider();
+  await exposedApi.getProviderStatus();
+  await exposedApi.getLocalModelStatus();
+  await exposedApi.getModelSetupStatus();
+  await exposedApi.startModelSetup("whisper");
+  await exposedApi.cancelModelSetup("whisper");
+  await exposedApi.refreshModelSetupStatus();
+  await exposedApi.getLatestStatus();
+  await exposedApi.insertText("smoke text");
+  await exposedApi.processWav(new Uint8Array([1, 2, 3]));
+  for (const subscribe of [
+    exposedApi.onShortcutToggle,
+    exposedApi.onRecordingStart,
+    exposedApi.onRecordingStop,
+    exposedApi.onRecordingReset,
+    exposedApi.onStatus,
+    exposedApi.onSystemInputStatus,
+    exposedApi.onOpenSettings
+  ]) {
+    subscribe(() => undefined);
+  }
+  exposedApi.reportRecordingStatus({ phase: "idle" });
+
+  assert.equal(listeners.size, 7, "every exposed subscription API should register a listener");
+  assert.deepEqual(sent, [{ channel: "recording:status", payload: { phase: "idle" } }]);
+  return [...new Set(invoked.map((item) => item.channel))].sort();
+}
+
 test("electronRuntimeSwitches disables sandbox and GPU paths for constrained Windows sessions", () => {
   assert.deepEqual(electronRuntimeSwitches, [
     "no-sandbox",
@@ -89,10 +228,60 @@ test("app smoke test uses the current Electron console-message event shape", asy
   assert.doesNotMatch(smokeSource, /console-message", \(_event, level, message, line, sourceId\)/);
 });
 
-test("app smoke stubs latest dictation status IPC for renderer startup replay", async () => {
+test("app smoke rejects every focus containment warning instead of only new warnings", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 
-  assert.match(smokeSource, /ipcMain\.handle\("dictation:status-latest", \(\) => null\)/);
+  assert.match(smokeSource, /if \(focusContainmentWarnings\.length !== 0\)/);
+  assert.doesNotMatch(smokeSource, /focusContainmentWarnings\.length !== focusContainmentWarningCount/);
+});
+
+test("app smoke history fixtures include complete Chinese English and emoji entries", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+  const fixturesMatch = smokeSource.match(/const historyFixtures = \[(?<fixtures>[\s\S]*?)\n\];/);
+
+  assert.ok(fixturesMatch, "history fixtures should be declared");
+  const completeEntries = [...fixturesMatch.groups.fixtures.matchAll(/status:\s*"complete"[\s\S]*?text:\s*"([^"]+)"/g)]
+    .map((match) => match[1]);
+
+  assert.ok(completeEntries.length >= 3, "smoke history should include three completed entries");
+  assert.ok(completeEntries.some((text) => /[\u4e00-\u9fff]/.test(text)), "a completed history entry should be Chinese");
+  assert.ok(completeEntries.some((text) => /^[\x00-\x7F]+$/.test(text)), "a completed history entry should be English");
+  assert.ok(completeEntries.some((text) => /\p{Extended_Pictographic}/u.test(text)), "a completed history entry should include emoji");
+  assert.match(fixturesMatch.groups.fixtures, /status:\s*"failed"/);
+});
+
+test("app smoke registry matches the channels invoked by every exposed preload API", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+  const preloadChannels = await getActualPreloadInvokeChannels(preloadSource);
+  const smokeChannels = getSmokeIpcChannelRegistry(smokeSource).sort();
+
+  assert.deepEqual(smokeChannels, preloadChannels);
+  assert.equal([...smokeSource.matchAll(/ipcMain\.handle\(/g)].length, 1);
+  assert.match(smokeSource, /function registerSmokeIpcHandler\(channel, handler\)/);
+  assert.match(smokeSource, /registeredSmokeIpcChannels\.add\(channel\)/);
+  assert.match(smokeSource, /assertSmokeIpcCoverage\(\);/);
+});
+
+test("app smoke verifies missing Whisper recovery and first-screen controls", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  for (const token of [
+    "missingWhisperRecoveryState",
+    "whisperDiagnosticsResult",
+    "providerStatusOverride",
+    "visibleRecordRecoveryCount",
+    "recordRecoveryActionText",
+    "mainSetupControlCount",
+    "hasLanguageControls",
+    "hasVoiceCommandBar",
+    "hasResultText",
+    "hasRecentHistoryList",
+    "hasFooterHealthText",
+    "hasRecordButton"
+  ]) {
+    assert.match(smokeSource, new RegExp(token), token);
+  }
 });
 
 test("preload shortcut toggle callback does not receive the raw IPC event", async () => {
@@ -318,6 +507,39 @@ test("preload exposes latest dictation status safely", async () => {
   assert.equal(exposedApi.ipcRenderer, undefined);
   assert.deepEqual(await exposedApi.getLatestStatus(), { phase: "error", message: "Shortcut conflict" });
   assert.deepEqual(invoked, [{ channel: "dictation:status-latest", payload: undefined }]);
+});
+
+test("preload exposes insert text IPC without raw ipcRenderer access", async () => {
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const invoked = [];
+  let exposedApi = null;
+
+  const sandbox = {
+    require: (moduleName) => {
+      assert.equal(moduleName, "electron");
+      return {
+        contextBridge: {
+          exposeInMainWorld: (_name, api) => {
+            exposedApi = api;
+          }
+        },
+        ipcRenderer: {
+          invoke: (channel, payload) => {
+            invoked.push({ channel, payload });
+            return { ok: true };
+          },
+          on: () => {},
+          send: () => {}
+        }
+      };
+    }
+  };
+
+  vm.runInNewContext(preloadSource, sandbox, { filename: "preload.cjs" });
+
+  assert.equal(exposedApi.ipcRenderer, undefined);
+  assert.deepEqual(await exposedApi.insertText("edited text"), { ok: true });
+  assert.deepEqual(invoked, [{ channel: "dictation:insert-text", payload: "edited text" }]);
 });
 
 test("preload exposes settings open listener without raw IPC event access", async () => {
@@ -553,6 +775,23 @@ test("settings save handler preserves previous startup values if system startup 
   assert.match(mainSource, /startMinimizedToTray/);
 });
 
+test("main process routes tray and IPC settings writes through one effects transaction", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const trayUpdateMatch = mainSource.match(/function updateSettingsFromTray\(settingsPatch\) \{(?<body>[\s\S]*?)\n\}/);
+  const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+
+  assert.match(
+    mainSource,
+    /import \{ createSettingsEffectsTransaction \} from "\.\/settings-effects-transaction\.js";/
+  );
+  assert.match(mainSource, /saveSettingsWithSystemEffects = createSettingsEffectsTransaction\(\{/);
+  assert.ok(trayUpdateMatch, "tray settings updater should be defined");
+  assert.ok(settingsSaveMatch, "settings:save handler should be defined inline");
+  assert.match(trayUpdateMatch.groups.body, /saveSettingsWithSystemEffects\(settingsPatch\)/);
+  assert.doesNotMatch(trayUpdateMatch.groups.body, /reportSystemError|refreshTrayMenu/);
+  assert.match(settingsSaveMatch.groups.body, /saveSettingsWithSystemEffects\(settings\)/);
+});
+
 test("app smoke reads product settings controls with null-safe fallbacks", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 
@@ -651,6 +890,35 @@ test("main process only accepts recording status from the main renderer", async 
   );
 });
 
+test("main process restricts insert text IPC to the main renderer", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const insertHandlerMatch = mainSource.match(
+    /ipcMain\.handle\("dictation:insert-text", async \(_event, text\) => \{(?<body>[\s\S]*?)\n\s*\}\);/
+  );
+
+  assert.ok(insertHandlerMatch, "insert text IPC handler should be defined");
+  const body = insertHandlerMatch.groups.body;
+  assert.match(mainSource, /import \{ insertTextIntoPreviousApp \} from "\.\/insert-text\.js";/);
+  const guardMatch = body.match(/if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return \{\s*ok: false,\s*reason: "unauthorized",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
+
+  assert.match(removeLeadingWhitespaceAndComments(body), /^if \(_event\.sender !== mainWindow\?\.webContents\) \{/);
+  assert.ok(guardMatch, "insert text handler should reject unauthorized senders");
+  assert.match(body, /try \{\s*return await insertTextIntoPreviousApp\(text, \{ mainWindow, clipboard \}\);\s*\} catch \{\s*return \{\s*ok: false,\s*reason: "paste_failed",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
+  assert.ok(
+    body.search(/\btext\b/) > guardMatch.index + guardMatch[0].length,
+    "main should not use text before the unauthorized sender guard has returned"
+  );
+});
+
+test("main process removes the default application menu after creating the main window", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const createWindowMatch = mainSource.match(/function createWindow\(\{ showOnReady = true \} = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+
+  assert.ok(createWindowMatch, "createWindow should be defined");
+  assert.match(createWindowMatch.groups.body, /mainWindow = new BrowserWindow\([\s\S]*?\);\s*Menu\.setApplicationMenu\(null\);/);
+  assert.match(mainSource, /Menu\.buildFromTemplate/);
+});
+
 test("main process delegates recording command timeouts to the system input controller", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
@@ -724,12 +992,14 @@ test("renderer reports recording lifecycle only after start succeeds and before 
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
   const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const failRecordingStartMatch = appSource.match(/function failRecordingStart\([^)]*\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(startRecordingMatch, "startRecording should be defined");
   assert.ok(stopRecordingMatch, "stopRecording should be defined");
+  assert.ok(failRecordingStartMatch, "failRecordingStart should be defined");
   assert.match(appSource, /function reportRecordingLifecycle\(payload\) \{/);
   assert.ok(
-    startRecordingMatch.groups.body.indexOf("await recorder.start()") <
+    startRecordingMatch.groups.body.indexOf("await nextRecorder.start()") <
       startRecordingMatch.groups.body.indexOf('reportRecordingLifecycle({ phase: "recording"'),
     "renderer should report recording only after recorder.start resolves"
   );
@@ -738,7 +1008,8 @@ test("renderer reports recording lifecycle only after start succeeds and before 
       stopRecordingMatch.groups.body.indexOf("await activeRecorder.stop()"),
     "renderer should report transcribing before awaiting recorder.stop"
   );
-  assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
+  assert.match(startRecordingMatch.groups.body, /failRecordingStart\(operationToken/);
+  assert.match(failRecordingStartMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
   assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "error"/);
 });
 

@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeIma
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-store.js";
+import { createSettingsEffectsTransaction } from "./settings-effects-transaction.js";
 import { DictationService } from "./dictation-service.js";
 import { applyElectronRuntimeSwitches } from "./electron-runtime.js";
 import { validateWhisperSetup } from "./whisper-diagnostics.js";
@@ -20,6 +21,7 @@ import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
 import { pasteText } from "./paste.js";
+import { insertTextIntoPreviousApp } from "./insert-text.js";
 import { createNativeInputShortcutFromPackage } from "./native-input-shortcut.js";
 import { createShortcutBackend } from "./shortcut-backend.js";
 
@@ -53,6 +55,7 @@ let appRoot;
 let hotkeyManager;
 let nativeShortcut;
 let lastSettings;
+let saveSettingsWithSystemEffects;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
 let lastDictationEntry;
@@ -72,6 +75,7 @@ function createWindow({ showOnReady = true } = {}) {
       nodeIntegration: false
     }
   });
+  Menu.setApplicationMenu(null);
 
   mainWindow.once("ready-to-show", () => {
     if (!showOnReady) {
@@ -328,43 +332,8 @@ function sanitizeRendererStatusText(value) {
   return typeof value === "string" ? value.slice(0, maxRendererStatusTextLength) : "";
 }
 
-async function saveSettingsWithSystemEffects(settings) {
-  const previousSettings = lastSettings || await settingsStore.getSettings();
-  const next = await settingsStore.saveSettings(settings);
-  lastSettings = next;
-
-  try {
-    applyStartupSettings(app, lastSettings);
-  } catch (error) {
-    const restored = await restoreStartupSettings(previousSettings);
-    await registerHotkey(restored);
-    reportSystemError(error, "startup_settings_failed");
-    error.localFlowStatusReported = true;
-    throw error;
-  }
-
-  await registerHotkey(lastSettings);
-  refreshTrayMenu();
-  return lastSettings;
-}
-
-async function restoreStartupSettings(previousSettings) {
-  const restored = await settingsStore.saveSettings({
-    launchAtLogin: previousSettings.launchAtLogin,
-    startMinimizedToTray: previousSettings.startMinimizedToTray
-  });
-  lastSettings = restored;
-  refreshTrayMenu();
-  return restored;
-}
-
 function updateSettingsFromTray(settingsPatch) {
-  void saveSettingsWithSystemEffects(settingsPatch).catch((error) => {
-    if (!error?.localFlowStatusReported) {
-      reportSystemError(error, "settings_update_failed");
-    }
-    refreshTrayMenu();
-  });
+  void saveSettingsWithSystemEffects(settingsPatch).catch(() => {});
 }
 
 function reportSystemError(error, reason) {
@@ -387,6 +356,25 @@ function wireIpc() {
 
     const status = sanitizeRecordingStatusPayload(payload);
     systemInputController?.handleRendererStatus(status);
+  });
+  ipcMain.handle("dictation:insert-text", async (_event, text) => {
+    if (_event.sender !== mainWindow?.webContents) {
+      return {
+        ok: false,
+        reason: "unauthorized",
+        message: "Paste failed. Text copied."
+      };
+    }
+
+    try {
+      return await insertTextIntoPreviousApp(text, { mainWindow, clipboard });
+    } catch {
+      return {
+        ok: false,
+        reason: "paste_failed",
+        message: "Paste failed. Text copied."
+      };
+    }
   });
   ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
   ipcMain.handle("settings:get", () => settingsStore.getSettings());
@@ -484,6 +472,16 @@ app.whenReady().then(async () => {
     onStart: () => systemInputController?.start(),
     onStop: () => systemInputController?.stop(),
     onPasteLast: () => pasteLastDictation()
+  });
+  saveSettingsWithSystemEffects = createSettingsEffectsTransaction({
+    settingsStore,
+    setCurrentSettings: (settings) => {
+      lastSettings = settings;
+    },
+    applyStartupSettings: (settings) => applyStartupSettings(app, settings),
+    registerHotkey,
+    refreshTrayMenu,
+    reportSystemError
   });
 
   wireIpc();

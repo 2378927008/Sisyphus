@@ -2,6 +2,7 @@ import { describeMicrophoneError } from "../shared/media-errors.js";
 import { getRecordReadiness } from "./record-readiness.js";
 import { getRecordRecoveryAction } from "./record-recovery-action.js";
 import { createShortcutRecorder } from "./shortcut-recorder.js";
+import { createFocusTrap } from "./focus-trap.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -12,6 +13,14 @@ import {
   whisperLanguages
 } from "../shared/languages.js";
 import { getUiText } from "./i18n.js";
+import { renderIcons } from "./icons.js";
+import {
+  createEditorState,
+  normalizeViewPhase,
+  projectHistory,
+  replaceEditorText,
+  restoreEditorText
+} from "./main-view-state.js";
 
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
@@ -22,8 +31,25 @@ const recordRecoveryAction = document.querySelector("#recordRecoveryAction");
 const statusText = document.querySelector("#statusText");
 const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
+const resultCharacterCount = document.querySelector("#resultCharacterCount");
 const historyList = document.querySelector("#historyList");
+const recentHistoryList = document.querySelector("#recentHistoryList");
 const refreshHistory = document.querySelector("#refreshHistory");
+const mainTabsRegion = document.querySelector("#mainTabs");
+const dictationTab = document.querySelector("#dictationTab");
+const historyTab = document.querySelector("#historyTab");
+const dictationPanel = document.querySelector("#dictationPanel");
+const historyPanel = document.querySelector("#historyPanel");
+const openHistory = document.querySelector("#openHistory");
+const viewAllHistory = document.querySelector("#viewAllHistory");
+viewAllHistory.querySelector(".button-label").dataset.i18n = "action.viewAll";
+const voiceCommandBar = document.querySelector("#voiceCommandBar");
+const phaseStatus = voiceCommandBar.querySelector(".provider-status");
+const shortcutHintText = document.querySelector(".shortcut-hint span:last-child");
+const resultActions = document.querySelector("#resultWorkspace .button-row");
+const headerHealthText = document.querySelector("#headerHealthText");
+const footerHealth = document.querySelector("#footerHealth");
+const footerCopyNodes = [...footerHealth.querySelectorAll("span:not([data-lucide])")];
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
 const checkTextProvider = document.querySelector("#checkTextProvider");
@@ -33,6 +59,10 @@ const textDiagnosticsList = document.querySelector("#textDiagnosticsList");
 const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
+const drawerPanel = settingsDrawer.querySelector(".drawer-panel");
+const settingsSectionNav = settingsDrawer.querySelector(".settings-section-tabs");
+const settingsSectionButtons = [...settingsDrawer.querySelectorAll("[data-settings-section]")];
+const settingsPanels = [...settingsDrawer.querySelectorAll("[data-settings-panel]")];
 const localModelStatus = document.querySelector("#localModelStatus");
 const setupLocalModel = document.querySelector("#setupLocalModel");
 const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
@@ -46,7 +76,10 @@ const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
 const cancelSetup = document.querySelector("#cancelSetup");
 const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
+const insertResult = document.querySelector("#insertResult");
+const restoreResult = document.querySelector("#restoreResult");
 const shortcutCaptureButtons = [...document.querySelectorAll("[data-shortcut-target]")];
+const WAVEFORM_BAR_COUNT = 24;
 
 let recorder = null;
 let isRecording = false;
@@ -59,6 +92,25 @@ let currentRecordRecoveryAction = null;
 let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
+let editorState = createEditorState();
+let emptyEditorMessageKey = "empty.result";
+let allHistory = [];
+let recentHistoryCompact = window.innerHeight < 650;
+let settingsSaveQueue = Promise.resolve();
+let processingLanguageErrorOwner = null;
+const processingLanguageRequestVersions = {
+  whisperLanguage: 0,
+  outputLanguage: 0
+};
+const mainTabs = [dictationTab, historyTab];
+const SETTINGS_SAVE_FAILED_KEY = "status.settingsSaveFailed";
+const ACTIVE_LANGUAGE_STATUS_PHASES = new Set([
+  "starting",
+  "recording",
+  "stopping",
+  "transcribing",
+  "pasting"
+]);
 const shortcutRecorder = createShortcutRecorder({
   eventTarget: window,
   buttons: shortcutCaptureButtons,
@@ -66,21 +118,99 @@ const shortcutRecorder = createShortcutRecorder({
   translate: (key, replacements) => t(key, replacements),
   onStatus: setStatus
 });
+const settingsFocusTrap = createFocusTrap({
+  container: drawerPanel,
+  onEscape: closeSettingsDrawer
+});
 
+prepareWindowsUiV3Markup();
 init();
+
+function prepareWindowsUiV3Markup() {
+  attachTranslationToIconLabel(dictationTab, "tab.dictation");
+  attachTranslationToIconLabel(historyTab, "tab.history");
+  attachTranslationToIconLabel(restoreResult, "action.restore");
+  attachTranslationToIconLabel(copyResult, "action.copy");
+  attachTranslationToIconLabel(insertResult, "action.insert");
+  attachTranslationToIconLabel(viewAllHistory, "action.viewAll");
+
+  recordButton.removeAttribute("aria-live");
+  phaseStatus.setAttribute("role", "status");
+  phaseStatus.setAttribute("aria-live", "polite");
+  phaseStatus.setAttribute("aria-atomic", "true");
+
+  document.querySelector("#settingsSectionGeneral").dataset.i18n = "settings.general";
+  document.querySelector("#settingsSectionShortcuts").dataset.i18n = "settings.shortcuts";
+  document.querySelector("#settingsSectionModels").dataset.i18n = "settings.modelsPrivacy";
+  document.querySelector("#settingsSectionAdvanced").dataset.i18n = "settings.advanced";
+  footerCopyNodes[1].dataset.i18n = "hint.autoKeepsLanguage";
+  mainTabsRegion.dataset.i18nAriaLabel = "aria.mainTabs";
+  voiceCommandBar.dataset.i18nAriaLabel = "aria.voiceCommandBar";
+  resultActions.dataset.i18nAriaLabel = "aria.resultActions";
+  footerHealth.dataset.i18nAriaLabel = "aria.localServices";
+  settingsSectionNav.dataset.i18nAriaLabel = "aria.settingsSections";
+
+  const waveform = document.createElement("div");
+  waveform.className = "waveform";
+  waveform.setAttribute("aria-hidden", "true");
+  waveform.replaceChildren(...Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
+    const bar = document.createElement("span");
+    bar.style.setProperty("--bar-index", String(index));
+    return bar;
+  }));
+  voiceCommandBar.insertBefore(waveform, phaseStatus);
+}
+
+function attachTranslationToIconLabel(button, key) {
+  button.dataset.i18nTitle = key;
+  button.dataset.i18nAriaLabel = key;
+
+  const existingLabel = button.querySelector(".button-label");
+  if (existingLabel) {
+    existingLabel.dataset.i18n = key;
+    return;
+  }
+
+  const textNode = [...button.childNodes].find((node) => (
+    node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ""
+  ));
+  if (!textNode) return;
+
+  const label = document.createElement("span");
+  label.className = "button-label";
+  label.dataset.i18n = key;
+  label.textContent = textNode.textContent.trim();
+  textNode.replaceWith(label);
+}
 
 async function init() {
   currentSettings = await window.localFlow.getSettings();
   currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
+  setViewPhase("idle");
+  renderEditorState();
+  activateTab(dictationTab);
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
   recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
-  openSettings.addEventListener("click", () => setSettingsDrawer(true));
-  closeSettings.addEventListener("click", () => setSettingsDrawer(false));
+  openSettings.addEventListener("click", () => openSettingsDrawer());
+  closeSettings.addEventListener("click", closeSettingsDrawer);
   settingsDrawer.addEventListener("click", closeSettingsFromBackdrop);
+  for (const button of settingsSectionButtons) {
+    button.addEventListener("click", () => activateSettingsSection(button.dataset.settingsSection));
+    button.addEventListener("keydown", handleSettingsSectionKeydown);
+  }
   refreshHistory.addEventListener("click", renderHistory);
+  viewAllHistory.addEventListener("click", () => activateTab(historyTab));
+  openHistory?.addEventListener("click", () => activateTab(historyTab));
+  for (const tab of mainTabs) {
+    tab.addEventListener("click", () => activateTab(tab));
+    tab.addEventListener("keydown", handleTabKeydown);
+  }
+  recentHistoryList.addEventListener("click", handleHistoryAction);
+  historyList.addEventListener("click", handleHistoryAction);
+  window.addEventListener("resize", handleRecentHistoryResize);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
@@ -90,8 +220,13 @@ async function init() {
   refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
   cancelSetup.addEventListener("click", cancelActiveModelSetup);
   copyResult.addEventListener("click", copyLatestResult);
+  insertResult.addEventListener("click", insertLatestResult);
+  restoreResult.addEventListener("click", restoreLatestResult);
+  resultText.addEventListener("blur", () => renderEditorState());
+  resultText.addEventListener("input", updateEditorFromInput);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
-  form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
+  form.whisperLanguage.addEventListener("change", changeProcessingLanguage);
+  form.outputLanguage.addEventListener("change", changeProcessingLanguage);
   form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
   for (const button of shortcutCaptureButtons) {
@@ -128,24 +263,90 @@ function changeInterfaceLanguage() {
   renderHistory();
 }
 
+function changeProcessingLanguage(event) {
+  const field = event.currentTarget;
+  const settingName = field.name;
+  const requestedValue = field.value;
+  const requestVersion = processingLanguageRequestVersions[settingName] + 1;
+  processingLanguageRequestVersions[settingName] = requestVersion;
+
+  enqueueSettingsOperation(() => (
+    saveProcessingLanguage(field, settingName, requestedValue, requestVersion)
+  ));
+}
+
+function enqueueSettingsOperation(operation) {
+  const pending = settingsSaveQueue.then(operation);
+  settingsSaveQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function saveProcessingLanguage(field, settingName, requestedValue, requestVersion) {
+  try {
+    currentSettings = await window.localFlow.saveSettings({
+      [settingName]: requestedValue
+    });
+    await refreshProviderStatus();
+    await refreshSetupStatusView({ updateStatus: false });
+    renderFooterHealth();
+    clearOwnedLanguageSaveFailure(settingName, requestVersion);
+  } catch {
+    if (!isLatestProcessingLanguageRequest(settingName, requestVersion)) return;
+
+    if (field.value === requestedValue) {
+      field.value = currentSettings?.[settingName] ?? "auto";
+    }
+    processingLanguageErrorOwner = {
+      field: settingName,
+      version: requestVersion
+    };
+    setStatus(t(SETTINGS_SAVE_FAILED_KEY));
+    renderProviderStatus();
+    renderSetupChecklist();
+    renderFooterHealth();
+  }
+}
+
+function isLatestProcessingLanguageRequest(settingName, requestVersion) {
+  return processingLanguageRequestVersions[settingName] === requestVersion;
+}
+
+function clearOwnedLanguageSaveFailure(settingName, requestVersion) {
+  const owner = processingLanguageErrorOwner;
+  if (!owner || owner.field !== settingName || requestVersion <= owner.version) return;
+
+  processingLanguageErrorOwner = null;
+  if (statusText.textContent !== t(SETTINGS_SAVE_FAILED_KEY)) return;
+  if (ACTIVE_LANGUAGE_STATUS_PHASES.has(document.body.dataset.phase)) return;
+  setReadyStatus();
+}
+
 async function refreshProcessingProviderPreview() {
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t(SETTINGS_SAVE_FAILED_KEY));
   }
 }
 
 function handleMainStatus(payload) {
   const phaseKeys = {
+    starting: "status.preparing",
+    recording: "status.recording",
+    stopping: "status.preparing",
     transcribing: "status.transcribing",
     polishing: "status.polishing",
     pasting: "status.pasting",
     done: "status.done"
   };
-  const key = phaseKeys[payload.phase];
+  const key = phaseKeys[payload?.phase];
 
-  setStatus(key ? t(key) : payload.message);
+  setViewPhase(payload?.phase);
+  if (key) {
+    setStatus(t(key));
+  } else if (payload?.phase === "idle") {
+    setReadyStatus();
+  }
 }
 
 async function runWhisperDiagnostics() {
@@ -155,8 +356,8 @@ async function runWhisperDiagnostics() {
     const result = await window.localFlow.checkWhisper();
     diagnosticsList.innerHTML = renderChecks(result.checks);
     setStatus(result.ready ? t("status.whisperReady") : t("status.whisperNeedsAttention"));
-  } catch (error) {
-    setStatus(t("status.whisperFailed", { message: error.message }));
+  } catch {
+    setStatus(t("status.whisperFailed"));
   }
 }
 
@@ -213,7 +414,7 @@ async function runMicrophoneDiagnostics() {
         message: describeMicrophoneError(error)
       }
     ]);
-    setStatus(describeMicrophoneError(error));
+    setStatus(t("status.microphoneFailed"));
   }
 }
 
@@ -232,7 +433,7 @@ async function runTextProviderDiagnostics() {
         message: error.message
       }
     ]);
-    setStatus(t("status.textProviderFailed", { message: error.message }));
+    setStatus(t("status.textProviderFailed"));
   }
 }
 
@@ -270,6 +471,20 @@ async function refreshProviderStatus() {
   applyRecordReadiness();
 }
 
+function renderFooterHealth(readiness = getCurrentRecordReadiness()) {
+  if (!footerHealth) return;
+
+  const healthMessage = readiness.ready
+    ? t("status.localReady")
+    : t("status.localNeedsSetup");
+  const statusNode = footerCopyNodes[0];
+  footerHealth.dataset.ready = String(readiness.ready);
+  headerHealthText.textContent = healthMessage;
+  if (statusNode) {
+    statusNode.textContent = healthMessage;
+  }
+}
+
 function renderProviderStatus() {
   if (!providerStatusText || !currentProviderStatus) return;
   providerStatusText.textContent = t("status.providerMode", {
@@ -290,6 +505,7 @@ function getCurrentRecordReadiness() {
 function applyRecordReadiness() {
   const readiness = getCurrentRecordReadiness();
   renderRecordReadiness(readiness);
+  renderFooterHealth(readiness);
 
   if (!readiness.ready && !isRecording) {
     showRecordReadinessReason(readiness);
@@ -361,7 +577,7 @@ async function applyRecordRecoveryAction() {
     return;
   }
 
-  setSettingsDrawer(true);
+  openSettingsDrawer();
 }
 
 function showLocalModelInstallCommand() {
@@ -398,8 +614,8 @@ async function refreshSetupStatusAndSettings() {
     await renderLocalModelStatus();
     await refreshProviderStatus();
     setStatus(t("setup.refreshed"));
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t("setup.refreshFailed"));
   } finally {
     setSetupBusy(false);
   }
@@ -433,9 +649,16 @@ async function runModelSetup(type) {
     await refreshProviderStatus();
     setStatus(result.status === "complete"
       ? t(type === "whisper" ? "setup.whisper.complete" : "setup.llm.complete")
-      : getSetupFailureMessage(result));
-  } catch (error) {
-    setStatus(error.message);
+      : getSetupFailureMessage(result, `setup.${type}.failed`));
+  } catch {
+    currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
+      type,
+      status: "failed",
+      output: [],
+      error: ""
+    });
+    renderSetupChecklist();
+    setStatus(t("setup.startFailed"));
   } finally {
     stopPolling();
     activeSetupType = "";
@@ -452,8 +675,8 @@ async function cancelActiveModelSetup() {
     currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
     renderSetupChecklist();
     setStatus(getSetupFailureMessage(result, "setup.cancelled"));
-  } catch (error) {
-    setStatus(error.message);
+  } catch {
+    setStatus(t("setup.cancelFailed"));
   }
 }
 
@@ -503,8 +726,11 @@ async function saveDetectedSetupPaths() {
   if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
 
   if (Object.keys(next).length) {
-    currentSettings = await window.localFlow.saveSettings(next);
-    fillSettings(currentSettings);
+    const fieldValuesAtSave = captureFormFieldValues();
+    await enqueueSettingsOperation(async () => {
+      currentSettings = await window.localFlow.saveSettings(next);
+      fillSettings(currentSettings, { fieldValuesAtSave });
+    });
   }
 }
 
@@ -648,19 +874,77 @@ function getSetupFailureMessage(setup, fallbackKey = "setup.failed") {
       return message;
     }
   }
-  return setup?.error || t(fallbackKey);
+  return t(fallbackKey);
 }
 
 async function copyLatestResult() {
-  const text = resultText.textContent.trim();
-  if (!text || resultText.dataset.emptyResult === "true") return;
+  if (editorState.empty) return;
 
   try {
-    await writeClipboardText(text);
+    await writeClipboardText(editorState.currentText);
     setStatus(t("status.copied"));
   } catch {
     setStatus(t("status.copyFailed"));
   }
+}
+
+async function insertLatestResult() {
+  if (editorState.empty) return;
+  await insertText(editorState.currentText);
+}
+
+async function insertText(text) {
+  if (typeof text !== "string" || text === "") return false;
+
+  try {
+    const result = await window.localFlow.insertText(text);
+    if (result?.ok === false || result?.success === false) {
+      setStatus(getSafeUiText("status.insertFailed", "Text could not be inserted."));
+      return false;
+    }
+    setStatus(getSafeUiText("status.inserted", "Text inserted."));
+    return true;
+  } catch {
+    setStatus(getSafeUiText("status.insertFailed", "Text could not be inserted."));
+    return false;
+  }
+}
+
+function restoreLatestResult() {
+  if (!editorState.dirty || editorState.empty) return;
+  editorState = restoreEditorText(editorState);
+  renderEditorState();
+}
+
+function updateEditorFromInput() {
+  emptyEditorMessageKey = "empty.result";
+  editorState = replaceEditorText(editorState, resultText.textContent || "");
+  renderEditorState({ syncText: false });
+}
+
+function replaceEditorBaseline(text, emptyMessageKey = "empty.result") {
+  emptyEditorMessageKey = emptyMessageKey;
+  editorState = replaceEditorText(editorState, text, { asBaseline: true });
+  renderEditorState();
+}
+
+function renderEditorState({ syncText = true } = {}) {
+  if (syncText) {
+    resultText.textContent = editorState.currentText;
+  }
+  if (editorState.empty) {
+    resultText.setAttribute("aria-placeholder", t(emptyEditorMessageKey));
+  } else {
+    resultText.removeAttribute("aria-placeholder");
+  }
+  resultText.dataset.emptyResult = String(editorState.empty);
+  resultText.dataset.characterCount = String(editorState.characterCount);
+  resultCharacterCount.textContent = t("label.characterCount", {
+    count: editorState.characterCount
+  });
+  restoreResult.disabled = !editorState.dirty || editorState.empty;
+  copyResult.disabled = editorState.empty;
+  insertResult.disabled = editorState.empty;
 }
 
 async function writeClipboardText(text) {
@@ -690,17 +974,106 @@ function copyTextWithTextarea(text) {
   return copied;
 }
 
-function setSettingsDrawer(open) {
-  if (!open) {
-    shortcutRecorder.cancel();
+function openSettingsDrawer(section = "general") {
+  const wasOpen = settingsDrawer.classList.contains("open");
+  settingsDrawer.inert = false;
+  settingsDrawer.classList.add("open");
+  settingsDrawer.setAttribute("aria-hidden", "false");
+  activateSettingsSection(section);
+  if (!wasOpen) settingsFocusTrap.activate();
+}
+
+function setSettingsDrawer(open, section = "general") {
+  if (open) openSettingsDrawer(section);
+  else closeSettingsDrawer();
+}
+
+function closeSettingsDrawer() {
+  if (!settingsDrawer.classList.contains("open")) return;
+
+  settingsFocusTrap.deactivate();
+  const returnFocus = settingsFocusTrap.getReturnFocus();
+  shortcutRecorder.cancel();
+  let focusedReturnTarget = focusSettingsReturnTarget(returnFocus);
+  if (settingsDrawer.contains(document.activeElement)) {
+    document.activeElement.blur?.();
   }
-  settingsDrawer.classList.toggle("open", open);
-  settingsDrawer.setAttribute("aria-hidden", open ? "false" : "true");
+
+  settingsDrawer.classList.remove("open");
+  settingsDrawer.setAttribute("aria-hidden", "true");
+  settingsDrawer.inert = true;
+
+  if (document.activeElement !== focusedReturnTarget) {
+    focusedReturnTarget = focusSettingsReturnTarget(focusedReturnTarget);
+  }
+  if (!focusedReturnTarget && settingsDrawer.contains(document.activeElement)) {
+    document.activeElement.blur?.();
+  }
+}
+
+function focusSettingsReturnTarget(preferredTarget) {
+  for (const target of new Set([preferredTarget, openSettings])) {
+    if (!isSafeSettingsReturnTarget(target)) continue;
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      continue;
+    }
+    if (document.activeElement === target) return target;
+  }
+  return null;
+}
+
+function isSafeSettingsReturnTarget(target) {
+  if (!target?.isConnected || typeof target.focus !== "function") return false;
+  if (settingsDrawer.contains(target) || target.matches(":disabled")) return false;
+  if (target.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+
+  const style = target.ownerDocument?.defaultView?.getComputedStyle(target);
+  return style?.display !== "none" && style?.visibility !== "hidden";
+}
+
+function activateSettingsSection(section) {
+  const activeSection = settingsSectionButtons.some((button) => button.dataset.settingsSection === section)
+    ? section
+    : "general";
+
+  for (const button of settingsSectionButtons) {
+    const selected = button.dataset.settingsSection === activeSection;
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
+  }
+
+  for (const panel of settingsPanels) {
+    panel.hidden = panel.dataset.settingsPanel !== activeSection;
+  }
+}
+
+function handleSettingsSectionKeydown(event) {
+  const currentIndex = settingsSectionButtons.indexOf(event.currentTarget);
+  if (currentIndex < 0) return;
+
+  let nextIndex = null;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (currentIndex + 1) % settingsSectionButtons.length;
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (currentIndex - 1 + settingsSectionButtons.length) % settingsSectionButtons.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = settingsSectionButtons.length - 1;
+  }
+
+  if (nextIndex === null) return;
+  event.preventDefault();
+  const nextButton = settingsSectionButtons[nextIndex];
+  activateSettingsSection(nextButton.dataset.settingsSection);
+  nextButton.focus();
 }
 
 function closeSettingsFromBackdrop(event) {
   if (event.target?.dataset?.closeSettings === "true") {
-    setSettingsDrawer(false);
+    closeSettingsDrawer();
   }
 }
 
@@ -720,11 +1093,18 @@ async function startRecording() {
 
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
-    if (!isCurrentRecordingOperation(operationToken)) return;
+  } catch {
+    failRecordingStart(operationToken, t(SETTINGS_SAVE_FAILED_KEY), "settings_save_failed");
+    return;
+  }
 
+  if (!isCurrentRecordingOperation(operationToken)) return;
+
+  try {
     if (!ensureRecordReady()) {
       const message = recordButton.title || statusText.textContent || "Recording is not ready.";
       setRecordingLifecyclePhase("idle");
+      setViewPhase("error");
       reportRecordingLifecycle({
         phase: "error",
         reason: "not_ready",
@@ -747,19 +1127,23 @@ async function startRecording() {
     updateRecordLabel();
     setStatus(t("status.recording"));
     reportRecordingLifecycle({ phase: "recording", message: t("status.recording") });
-  } catch (error) {
-    if (!isCurrentRecordingOperation(operationToken)) return;
-
-    const message = describeMicrophoneError(error);
-    setStatus(message);
-    cleanupRecorder();
-    isRecording = false;
-    setRecordingLifecyclePhase("idle");
-    document.body.classList.remove("recording");
-    updateRecordLabel();
-    applyRecordReadiness();
-    reportRecordingLifecycle({ phase: "error", message });
+  } catch {
+    failRecordingStart(operationToken, t("status.microphoneFailed"), "microphone_start_failed");
   }
+}
+
+function failRecordingStart(operationToken, message, reason) {
+  if (!isCurrentRecordingOperation(operationToken)) return;
+
+  setStatus(message);
+  cleanupRecorder();
+  isRecording = false;
+  setRecordingLifecyclePhase("idle");
+  setViewPhase("error");
+  document.body.classList.remove("recording");
+  updateRecordLabel();
+  applyRecordReadiness();
+  reportRecordingLifecycle({ phase: "error", reason, message });
 }
 
 async function stopRecording() {
@@ -775,6 +1159,7 @@ async function stopRecording() {
     applyRecordReadiness();
     setStatus(t("status.preparing"));
     reportRecordingLifecycle({ phase: "transcribing", message: t("status.preparing") });
+    setRecordingLifecyclePhase("transcribing");
 
     const activeRecorder = recorder;
     const wav = await activeRecorder.stop();
@@ -792,32 +1177,31 @@ async function stopRecording() {
     if (!isCurrentRecordingOperation(operationToken)) return;
 
     setRecordingLifecyclePhase("idle");
-  } catch (error) {
+    setViewPhase(entry?.status === "failed" ? "warning" : "done");
+  } catch {
     if (!isCurrentRecordingOperation(operationToken)) return;
 
-    setStatus(error.message);
+    const message = t("status.processingFailed");
+    setStatus(message);
     cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
+    setViewPhase("error");
     document.body.classList.remove("recording");
     updateRecordLabel();
     applyRecordReadiness();
-    reportRecordingLifecycle({ phase: "error", message: error.message });
+    reportRecordingLifecycle({ phase: "error", reason: "processing_failed", message });
   }
 }
 
 function renderDictationResult(entry) {
   if (entry?.status === "failed") {
-    resultText.dataset.emptyResult = "true";
-    resultText.textContent = t("result.outputFailed");
-    setStatus(t("status.outputFailed", {
-      message: entry.processingError || "Unknown text model error."
-    }));
+    replaceEditorBaseline("", "result.outputFailed");
+    setStatus(t("status.outputFailed"));
     return;
   }
 
-  resultText.dataset.emptyResult = "false";
-  resultText.textContent = entry.text;
+  replaceEditorBaseline(entry?.text || "");
 }
 
 async function saveSettings(event) {
@@ -858,22 +1242,29 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     qwenModelMirrorUrls: data.get("qwenModelMirrorUrls"),
     dictionary: data.get("dictionary")
   };
+  const fieldValuesAtSave = captureFormFieldValues(Object.keys(next));
 
-  currentSettings = await window.localFlow.saveSettings(next);
-  currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
-  applyInterfaceLanguage(currentLanguage);
-  fillSettings(currentSettings);
-  if (updateStatus) {
-    setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
-  }
-  await refreshProviderStatus();
-  await renderLocalModelStatus();
+  return enqueueSettingsOperation(async () => {
+    currentSettings = await window.localFlow.saveSettings(next);
+    fillSettings(currentSettings, { fieldValuesAtSave });
+    currentLanguage = normalizeInterfaceLanguage(form.interfaceLanguage.value);
+    applyInterfaceLanguage(currentLanguage);
+    if (updateStatus) {
+      setStatus(t("status.settingsSaved", { hotkey: formatHotkey(currentSettings.hotkey) }));
+    }
+    await refreshProviderStatus();
+    await renderLocalModelStatus();
+    return currentSettings;
+  });
 }
 
-function fillSettings(settings) {
+function fillSettings(settings, { fieldValuesAtSave } = {}) {
   for (const [key, value] of Object.entries(settings)) {
     const field = form.elements[key];
     if (!field) continue;
+    if (fieldValuesAtSave?.has(key) && readFormFieldValue(field) !== fieldValuesAtSave.get(key)) {
+      continue;
+    }
 
     if (field.type === "checkbox") {
       field.checked = Boolean(value);
@@ -887,18 +1278,180 @@ function fillSettings(settings) {
 
 async function renderHistory() {
   const history = await window.localFlow.listHistory();
+  allHistory = Array.isArray(history) ? history : [];
 
-  if (!history.length) {
+  if (!allHistory.length) {
     historyList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+    recentHistoryList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
     return;
   }
 
-  historyList.innerHTML = history.map((item) => `
-    <article class="history-item">
-      <time>${new Date(item.createdAt).toLocaleString()}</time>
-      <p>${escapeHtml(item.text)}</p>
+  renderRecentHistory();
+  renderFullHistory();
+}
+
+function renderRecentHistory() {
+  const limit = recentHistoryCompact ? 2 : 3;
+  const recent = projectHistory(allHistory, limit);
+
+  recentHistoryList.innerHTML = recent.length
+    ? recent.map((item) => renderHistoryItem(item, { recent: true })).join("")
+    : `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+  renderIcons(recentHistoryList);
+}
+
+function handleRecentHistoryResize() {
+  const nextCompact = window.innerHeight < 650;
+  if (nextCompact === recentHistoryCompact) return;
+
+  recentHistoryCompact = nextCompact;
+  renderRecentHistory();
+}
+
+function renderFullHistory() {
+  historyList.innerHTML = allHistory
+    .map((item, index) => renderHistoryItem(item, { index }))
+    .join("");
+  renderIcons(historyList);
+}
+
+function renderHistoryItem(item, { index = -1, recent = false } = {}) {
+  const text = typeof item?.text === "string" ? item.text : "";
+  const usable = item?.status === "complete" && text !== "";
+  const id = recent ? item.id : historyEntryId(item, index);
+  const resolvedIndex = recent ? findHistoryEntryIndex(id) : index;
+  const preview = usable
+    ? singleLineText(text)
+    : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");
+  const count = usable ? Array.from(text).length : 0;
+  const disabled = usable ? "" : " disabled";
+  const actionLabel = recent ? preview : formatHistoryTime(item?.createdAt);
+
+  return `
+    <article class="history-item" data-history-item data-history-status="${escapeHtml(item?.status || "empty")}">
+      <button
+        type="button"
+        class="history-select"
+        data-history-action="select"
+        data-history-id="${escapeHtml(id)}"
+        data-history-index="${resolvedIndex}"
+        aria-label="${escapeHtml(actionLabel || preview)}"
+        ${disabled}
+      >
+        <time>${escapeHtml(formatHistoryTime(item?.createdAt))}</time>
+        <p>${escapeHtml(preview)}</p>
+        <span data-history-character-count>${escapeHtml(t("label.characterCount", { count }))}</span>
+        <span data-lucide="ChevronRight" aria-hidden="true"></span>
+      </button>
+      ${recent ? "" : `
+        <div class="button-row">
+          <button
+            type="button"
+            class="ghost"
+            data-history-action="copy"
+            data-history-id="${escapeHtml(id)}"
+            data-history-index="${resolvedIndex}"
+            ${disabled}
+          >${escapeHtml(t("action.copy"))}</button>
+          <button
+            type="button"
+            class="ghost"
+            data-history-action="insert"
+            data-history-id="${escapeHtml(id)}"
+            data-history-index="${resolvedIndex}"
+            ${disabled}
+          >${escapeHtml(insertResult.textContent.trim() || "Insert")}</button>
+        </div>
+      `}
     </article>
-  `).join("");
+  `;
+}
+
+async function handleHistoryAction(event) {
+  const actionButton = event.target.closest?.("[data-history-action]");
+  if (!actionButton || actionButton.disabled) return;
+
+  const entry = allHistory[Number(actionButton.dataset.historyIndex)];
+  const text = typeof entry?.text === "string" ? entry.text : "";
+  if (entry?.status !== "complete" || text === "") return;
+
+  if (actionButton.dataset.historyAction === "select") {
+    replaceEditorBaseline(text);
+    activateTab(dictationTab);
+    return;
+  }
+
+  if (actionButton.dataset.historyAction === "copy") {
+    try {
+      await writeClipboardText(text);
+      setStatus(t("status.copied"));
+    } catch {
+      setStatus(t("status.copyFailed"));
+    }
+    return;
+  }
+
+  if (actionButton.dataset.historyAction === "insert") {
+    await insertText(text);
+  }
+}
+
+function captureFormFieldValues(keys = Array.from(form.elements, (field) => field.name).filter(Boolean)) {
+  const values = new Map();
+  for (const key of keys) {
+    const field = form.elements[key];
+    if (field) values.set(key, readFormFieldValue(field));
+  }
+  return values;
+}
+
+function readFormFieldValue(field) {
+  return field.type === "checkbox" ? Boolean(field.checked) : field.value;
+}
+
+function historyEntryId(entry, index) {
+  return typeof entry?.id === "string" && entry.id.trim() !== ""
+    ? entry.id
+    : `${typeof entry?.createdAt === "string" ? entry.createdAt : ""}:${index}`;
+}
+
+function findHistoryEntryIndex(id) {
+  return allHistory.findIndex((entry, index) => historyEntryId(entry, index) === id);
+}
+
+function singleLineText(text) {
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+function formatHistoryTime(createdAt) {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(currentLanguage);
+}
+
+function activateTab(activeTab, { focus = false } = {}) {
+  for (const tab of mainTabs) {
+    const selected = tab === activeTab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+
+  dictationPanel.hidden = activeTab !== dictationTab;
+  historyPanel.hidden = activeTab !== historyTab;
+  if (focus) activeTab.focus();
+}
+
+function handleTabKeydown(event) {
+  const currentIndex = mainTabs.indexOf(event.currentTarget);
+  let nextIndex = currentIndex;
+
+  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % mainTabs.length;
+  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + mainTabs.length) % mainTabs.length;
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = mainTabs.length - 1;
+  else return;
+
+  event.preventDefault();
+  activateTab(mainTabs[nextIndex], { focus: true });
 }
 
 function applyInterfaceLanguage(language) {
@@ -909,22 +1462,42 @@ function applyInterfaceLanguage(language) {
   const selectedValues = readLanguageSelections();
   populateLanguageSelects(selectedValues);
 
-  for (const element of document.querySelectorAll("[data-i18n]")) {
-    element.textContent = t(element.dataset.i18n);
-  }
-
-  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
-    element.placeholder = t(element.dataset.i18nPlaceholder);
-  }
+  applyTranslations();
+  renderShortcutHint();
+  renderIcons();
 
   renderProviderStatus();
   renderSetupChecklist();
   updateRecordLabel();
   shortcutRecorder.refreshLabels();
 
-  if (resultText.dataset.emptyResult === "true") {
-    resultText.textContent = t("empty.result");
+  renderEditorState();
+}
+
+function applyTranslations(root = document) {
+  for (const element of root.querySelectorAll("[data-i18n]")) {
+    if (element === resultText) continue;
+    element.textContent = t(element.dataset.i18n);
   }
+
+  for (const element of root.querySelectorAll("[data-i18n-placeholder]")) {
+    element.placeholder = t(element.dataset.i18nPlaceholder);
+  }
+
+  for (const element of root.querySelectorAll("[data-i18n-title]")) {
+    element.title = t(element.dataset.i18nTitle);
+  }
+
+  for (const element of root.querySelectorAll("[data-i18n-aria-label]")) {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+  }
+}
+
+function renderShortcutHint() {
+  const hotkey = form.hotkey?.value || currentSettings?.hotkey || "CommandOrControl+Alt+Space";
+  shortcutHintText.textContent = t("hint.shortcut", {
+    hotkey: formatHotkey(hotkey)
+  });
 }
 
 function readLanguageSelections() {
@@ -1036,10 +1609,23 @@ function cleanupRecorder(targetRecorder = recorder) {
 
 function setRecordingLifecyclePhase(phase) {
   recordingLifecyclePhase = phase;
+  setViewPhase(phase);
+}
+
+function setViewPhase(phase) {
+  const normalizedPhase = normalizeViewPhase(phase);
+  document.body.dataset.phase = normalizedPhase;
+  voiceCommandBar.dataset.phase = normalizedPhase;
+  phaseStatus.textContent = t(`phase.${normalizedPhase}`);
 }
 
 function t(key, replacements = {}) {
   return getUiText(currentLanguage, key, replacements);
+}
+
+function getSafeUiText(key, fallback) {
+  const translated = t(key);
+  return translated === key ? fallback : translated;
 }
 
 function formatHotkey(hotkey) {

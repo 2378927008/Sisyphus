@@ -4,6 +4,510 @@ import { readFile } from "node:fs/promises";
 
 const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|銉|鞚|氇|瑾|閷|鞁/;
 
+function getElementMarkup(html, tagName, id) {
+  const openingMatch = new RegExp(`<${tagName}\\b[^>]*\\bid="${id}"[^>]*>`, "i").exec(html);
+  assert.ok(openingMatch, `${tagName}#${id} should exist`);
+
+  const searchStart = openingMatch.index + openingMatch[0].length;
+  const tagPattern = new RegExp(`<\\/?${tagName}\\b[^>]*>`, "gi");
+  let depth = 1;
+
+  for (const match of html.slice(searchStart).matchAll(tagPattern)) {
+    const token = match[0];
+    depth += token.startsWith("</") ? -1 : 1;
+    if (depth === 0) {
+      const endIndex = searchStart + match.index + token.length;
+      return html.slice(openingMatch.index, endIndex);
+    }
+  }
+
+  assert.fail(`${tagName}#${id} should have a closing tag`);
+}
+
+test("renderer uses the exact local Lucide runtime dependency", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8")
+  );
+
+  assert.equal(packageJson.dependencies.lucide, "1.24.0");
+  assert.equal(packageJson.dependencies["uiohook-napi"], "^1.5.5");
+  assert.equal(packageJson.devDependencies.electron, "38.8.6");
+  assert.equal(packageJson.devDependencies["electron-builder"], "^26.15.3");
+  assert.equal(packageJson.build.npmRebuild, false);
+});
+
+test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  for (const id of [
+    "appHeader",
+    "mainTabs",
+    "dictationPanel",
+    "languageControls",
+    "voiceCommandBar",
+    "recordRecovery",
+    "resultWorkspace",
+    "resultCharacterCount",
+    "recentHistorySection",
+    "historyPanel",
+    "headerHealthText",
+    "footerHealth",
+    "footerHealthText",
+    "settingsDrawer"
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+
+  assert.match(html, /id="mainTabs"[^>]*role="tablist"/);
+  assert.match(
+    html,
+    /<button[^>]*id="dictationTab"[^>]*role="tab"[^>]*aria-selected="true"[^>]*aria-controls="dictationPanel"/
+  );
+  assert.match(
+    html,
+    /<button[^>]*id="historyTab"[^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-controls="historyPanel"/
+  );
+  assert.match(
+    html,
+    /id="dictationPanel"[^>]*role="tabpanel"[^>]*aria-labelledby="dictationTab"/
+  );
+  assert.match(
+    html,
+    /id="historyPanel"[^>]*role="tabpanel"[^>]*aria-labelledby="historyTab"[^>]*hidden/
+  );
+});
+
+test("header renders the existing Local Flow icon as decorative brand artwork", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  assert.match(
+    html,
+    /<img\b(?=[^>]*class="app-brand-icon")(?=[^>]*src="\.\.\/\.\.\/assets\/local-flow-icon\.svg")(?=[^>]*alt="")(?=[^>]*aria-hidden="true")[^>]*>/
+  );
+  assert.match(html, /<h1>Local Flow<\/h1>/);
+});
+
+test("renderer markup uses unique element ids", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+
+  assert.ok(ids.length > 0);
+  assert.deepEqual([...new Set(duplicates)], []);
+});
+
+test("latest result remains editable and exposes recovery and insertion actions", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  assert.match(html, /id="resultEditor"/);
+  assert.match(
+    html,
+    /id="resultText"[^>]*contenteditable="true"[^>]*role="textbox"[^>]*aria-multiline="true"/
+  );
+  assert.match(html, /id="restoreResult"/);
+  assert.match(html, /id="insertResult"/);
+  assert.match(html, /id="copyResult"/);
+});
+
+test("latest result exposes a visible localized character count", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(html, /id="resultCharacterCount"[^>]*class="result-character-count"[^>]*>0 个字符<\/span>/);
+  assert.match(appSource, /const resultCharacterCount = document\.querySelector\("#resultCharacterCount"\)/);
+  assert.match(
+    appSource,
+    /resultCharacterCount\.textContent = t\("label\.characterCount", \{\s*count: editorState\.characterCount\s*\}\)/s
+  );
+  assert.match(
+    styles,
+    /\.result-character-count\s*\{[^}]*flex:\s*0 0 auto[^}]*color:\s*var\(--muted\)[^}]*font-size:\s*12px[^}]*white-space:\s*nowrap/s
+  );
+  assert.match(smokeSource, /visibleCharacterCount:\s*document\.querySelector\('#resultCharacterCount'\)/);
+  assert.match(smokeSource, /state\.visibleCharacterCount === "0 个字符"/);
+  assert.match(smokeSource, /state\.visibleCharacterCount === "8 characters"/);
+});
+
+test("main window separates recent history from the full history list", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  assert.match(html, /id="recentHistorySection"[\s\S]*id="recentHistoryList"/);
+  assert.match(html, /id="historyPanel"[\s\S]*id="fullHistoryList"[\s\S]*id="historyList"/);
+  assert.match(html, /id="footerHealth"/);
+});
+
+test("history refresh and view-all commands keep separate semantics", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const recentHistory = getElementMarkup(html, "section", "recentHistorySection");
+  const fullHistory = getElementMarkup(html, "section", "historyPanel");
+  const viewAllButton = getElementMarkup(recentHistory, "button", "viewAllHistory");
+  const refreshButton = getElementMarkup(fullHistory, "button", "refreshHistory");
+
+  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
+  assert.match(
+    appSource,
+    /viewAllHistory\.querySelector\("\.button-label"\)\.dataset\.i18n\s*=\s*"action\.viewAll"/
+  );
+  assert.match(refreshButton, /data-i18n="action\.refresh"/);
+  assert.match(refreshButton, />[\s\S]*刷新[\s\S]*<\/button>/);
+  assert.doesNotMatch(recentHistory, /id="refreshHistory"/);
+  assert.doesNotMatch(fullHistory, /id="viewAllHistory"/);
+});
+
+test("settings drawer groups existing controls into four stable sections", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  for (const section of [
+    "settingsGeneral",
+    "settingsShortcuts",
+    "settingsModels",
+    "settingsAdvanced"
+  ]) {
+    assert.match(html, new RegExp(`<section[^>]*id="${section}"`), section);
+    assert.match(html, new RegExp(`id="${section}"[\\s\\S]*?<button[^>]*type="button"`), `${section} button`);
+  }
+
+  const dictationPanel = html.match(/id="dictationPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
+  const settingsDrawer = html.slice(html.indexOf('id="settingsDrawer"'));
+  assert.doesNotMatch(dictationPanel, /id="setupChecklist"/);
+  assert.match(settingsDrawer, /id="setupChecklist"/);
+  assert.match(settingsDrawer, /id="providerStatusText"/);
+  assert.match(settingsDrawer, /id="installWhisper"/);
+  assert.match(settingsDrawer, /id="installLlm"/);
+  assert.match(settingsDrawer, /id="setupOutput"/);
+});
+
+test("raw setup output belongs only to the advanced settings section", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const models = getElementMarkup(html, "section", "settingsModels");
+  const advanced = getElementMarkup(html, "section", "settingsAdvanced");
+
+  assert.doesNotMatch(models, /id="setupOutput"/);
+  assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
+});
+
+test("advanced setup controls stay isolated and history remains read-only across renderer IPC sources", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+  const advanced = getElementMarkup(html, "section", "settingsAdvanced");
+  const dictation = getElementMarkup(html, "section", "dictationPanel");
+
+  for (const field of [
+    "whisperCliPath",
+    "whisperModelPath",
+    "embeddedLlmCliPath",
+    "embeddedLlmModelPath"
+  ]) {
+    assert.match(advanced, new RegExp(`name="${field}"`), `${field} should remain in Advanced`);
+    assert.doesNotMatch(dictation, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
+  }
+
+  for (const [name, source] of [
+    ["renderer", appSource],
+    ["preload", preloadSource],
+    ["main", mainSource],
+    ["smoke", smokeSource]
+  ]) {
+    for (const channel of ["history:delete", "history:write", "history:update", "history:clear"]) {
+      assert.equal(source.includes(channel), false, `${name} must not use ${channel}`);
+    }
+  }
+
+  assert.match(preloadSource, /history:list/);
+  assert.match(smokeSource, /history:list/);
+});
+
+test("main window fallback uses the short safe local setup status", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const mainEnd = html.indexOf("</main>");
+  const mainMarkup = html.slice(html.indexOf("<main"), mainEnd + "</main>".length);
+  const header = getElementMarkup(html, "header", "appHeader");
+  const footer = getElementMarkup(html, "footer", "footerHealth");
+
+  assert.match(header, /本地 Whisper 待配置/);
+  assert.match(footer, /本地 Whisper 待配置/);
+  assert.doesNotMatch(mainMarkup, /已就绪/);
+});
+
+test("renderer loads only local Lucide placeholders and no hand-drawn icons", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const iconsSource = await readFile(new URL("../src/renderer/icons.js", import.meta.url), "utf8").catch(() => "");
+
+  assert.match(iconsSource, /node_modules\/lucide\/dist\/esm\/lucide\.mjs/);
+  assert.match(iconsSource, /createIcons/);
+  assert.match(iconsSource, /export function renderIcons\(root = document\)/);
+  for (const icon of [
+    "Mic",
+    "Settings",
+    "History",
+    "Copy",
+    "Undo2",
+    "CornerDownLeft",
+    "ChevronRight",
+    "Keyboard",
+    "CheckCircle2",
+    "AlertTriangle",
+    "X"
+  ]) {
+    assert.match(iconsSource, new RegExp(`\\b${icon}\\b`), icon);
+    assert.match(html, new RegExp(`data-lucide="${icon}"`), icon);
+  }
+
+  assert.match(iconsSource, /width:\s*"18"/);
+  assert.match(iconsSource, /height:\s*"18"/);
+  assert.match(iconsSource, /"stroke-width":\s*"1\.8"/);
+  assert.match(iconsSource, /"aria-hidden":\s*"true"/);
+  assert.doesNotMatch(html, /https?:\/\/[^"']*(?:lucide|cdn)/i);
+  assert.doesNotMatch(html, /<svg\b/i);
+  assert.doesNotMatch(html, /record-orb/);
+
+  const iconsScriptIndex = html.indexOf('src="./icons.js"');
+  const appScriptIndex = html.indexOf('src="./app.js"');
+  assert.ok(iconsScriptIndex >= 0, "icons module script should be present");
+  assert.ok(appScriptIndex > iconsScriptIndex, "icons module should load before app.js");
+});
+
+test("pure icon buttons have static and translatable accessible Chinese names", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  for (const id of ["openSettings", "closeSettings"]) {
+    const button = html.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`))?.[0] ?? "";
+    assert.match(button, /title="[\u4e00-\u9fff]+"/, `${id} title`);
+    assert.match(button, /aria-label="[\u4e00-\u9fff]+"/, `${id} aria-label`);
+    assert.match(button, /data-i18n-title="[^"]+"/, `${id} translatable title`);
+    assert.match(button, /data-i18n-aria-label="[^"]+"/, `${id} translatable aria-label`);
+  }
+});
+
+test("localized icon controls preserve icons by translating only child labels", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const iconButtons = [...html.matchAll(/<button\b[\s\S]*?<\/button>/g)]
+    .map((match) => match[0])
+    .filter((button) => button.includes("data-lucide="));
+
+  assert.ok(iconButtons.length > 0);
+  for (const button of iconButtons) {
+    const openingTag = button.match(/^<button\b[^>]*>/)?.[0] ?? "";
+    const id = openingTag.match(/\bid="([^"]+)"/)?.[1] ?? "unnamed icon button";
+    assert.doesNotMatch(openingTag, /\sdata-i18n="/, id);
+  }
+
+  const copyButton = getElementMarkup(html, "button", "copyResult");
+  assert.match(copyButton, /data-lucide="Copy"/);
+  assert.match(
+    copyButton,
+    /<span class="button-label" data-i18n="action\.copy">复制<\/span>/
+  );
+
+  const viewAllButton = getElementMarkup(html, "button", "viewAllHistory");
+  assert.match(viewAllButton, /data-lucide="ChevronRight"/);
+  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
+  assert.doesNotMatch(viewAllButton.match(/^<button\b[^>]*>/)?.[0] ?? "", /\sdata-i18n=/);
+});
+
+test("interface translation updates text and accessible attributes before refreshing icons", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(appSource, /import\s*\{\s*renderIcons\s*\}\s*from\s*"\.\/icons\.js"/);
+  assert.match(appSource, /function applyTranslations\(root = document\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-placeholder\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-title\]"\)/);
+  assert.match(appSource, /querySelectorAll\("\[data-i18n-aria-label\]"\)/);
+  assert.match(appSource, /element\.placeholder\s*=\s*t\(element\.dataset\.i18nPlaceholder\)/);
+  assert.match(appSource, /element\.title\s*=\s*t\(element\.dataset\.i18nTitle\)/);
+  assert.match(appSource, /element\.setAttribute\("aria-label",\s*t\(element\.dataset\.i18nAriaLabel\)\)/);
+  assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderIcons\(\);/);
+});
+
+test("localization targets cover container names and the dynamic shortcut hint", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  for (const [target, key] of [
+    ["mainTabsRegion", "aria.mainTabs"],
+    ["voiceCommandBar", "aria.voiceCommandBar"],
+    ["resultActions", "aria.resultActions"],
+    ["footerHealth", "aria.localServices"],
+    ["settingsSectionNav", "aria.settingsSections"]
+  ]) {
+    assert.match(
+      appSource,
+      new RegExp(`${target}\\.dataset\\.i18nAriaLabel = \\"${key.replace(".", "\\.")}\\"`),
+      `${target} accessible name`
+    );
+  }
+
+  assert.match(appSource, /function renderShortcutHint\(\)/);
+  assert.match(appSource, /shortcutHintText\.textContent = t\("hint\.shortcut", \{/);
+  assert.match(appSource, /hotkey:\s*formatHotkey\(hotkey\)/);
+  assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderShortcutHint\(\);[\s\S]*?renderIcons\(\);/);
+});
+
+test("localized Windows UI v3 structure preserves icon controls and dynamic content", async () => {
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  for (const [control, key] of [
+    ["dictationTab", "tab.dictation"],
+    ["historyTab", "tab.history"],
+    ["restoreResult", "action.restore"],
+    ["copyResult", "action.copy"],
+    ["insertResult", "action.insert"]
+  ]) {
+    assert.match(
+      appSource,
+      new RegExp(`attachTranslationToIconLabel\\(${control}, \\"${key.replace(".", "\\.")}\\"\\)`),
+      control
+    );
+  }
+
+  for (const key of [
+    "settings.general",
+    "settings.shortcuts",
+    "settings.modelsPrivacy",
+    "settings.advanced",
+    "hint.autoKeepsLanguage"
+  ]) {
+    assert.match(appSource, new RegExp(`dataset\\.i18n = \\"${key.replace(".", "\\.")}\\"`), key);
+  }
+
+  assert.match(appSource, /const WAVEFORM_BAR_COUNT = 24/);
+  assert.match(appSource, /attachTranslationToIconLabel\(viewAllHistory, "action\.viewAll"\)/);
+  assert.match(appSource, /button\.dataset\.i18nTitle = key/);
+  assert.match(appSource, /button\.dataset\.i18nAriaLabel = key/);
+  assert.match(appSource, /recordButton\.removeAttribute\("aria-live"\)/);
+  assert.match(appSource, /phaseStatus\.setAttribute\("role", "status"\)/);
+  assert.match(appSource, /phaseStatus\.setAttribute\("aria-live", "polite"\)/);
+  assert.match(appSource, /className = "waveform"/);
+  assert.match(appSource, /Array\.from\(\{ length: WAVEFORM_BAR_COUNT \}/);
+  assert.match(appSource, /t\("label\.characterCount", \{ count \}\)/);
+  assert.match(appSource, /phaseStatus\.textContent = t\(`phase\.\$\{normalizedPhase\}`\)/);
+  assert.match(appSource, /const headerHealthText = document\.querySelector\("#headerHealthText"\)/);
+  assert.match(
+    appSource,
+    /const healthMessage = readiness\.ready\s*\? t\("status\.localReady"\)\s*:\s*t\("status\.localNeedsSetup"\)/s
+  );
+  assert.match(appSource, /headerHealthText\.textContent = healthMessage/);
+  assert.match(appSource, /statusNode\.textContent = healthMessage/);
+});
+
+test("Windows UI v3 styles enforce the approved visual and responsive system", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  for (const token of [
+    ["--background", "#F6F8F7"],
+    ["--surface", "#FFFFFF"],
+    ["--text", "#17211E"],
+    ["--muted", "#66716D"],
+    ["--line", "#DCE3E0"],
+    ["--accent", "#078A68"],
+    ["--recording", "#D64B3C"],
+    ["--warning", "#A96F16"],
+    ["--error", "#B83A3A"]
+  ]) {
+    assert.match(styles, new RegExp(`${token[0]}:\\s*${token[1]}`, "i"), token[0]);
+  }
+
+  assert.match(styles, /font-family:\s*"Segoe UI",\s*"Microsoft YaHei",\s*system-ui/);
+  assert.match(styles, /letter-spacing:\s*0/);
+  assert.match(styles, /body\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /\.app-shell\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /#recordButton\s*\{[^}]*border-radius:\s*6px/s);
+  assert.match(styles, /\.status-line\s*\{[^}]*min-height:\s*\d+px/s);
+  assert.match(styles, /\.drawer-panel\s*\{[^}]*width:\s*min\(560px,\s*100vw\)/s);
+  assert.match(styles, /@media\s*\(max-width:\s*919px\)/);
+  assert.match(styles, /@media\s*\(max-height:\s*649px\)/);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(styles, /:focus-visible\s*\{[^}]*outline:\s*2px/s);
+  assert.match(styles, /@media\s*\(max-width:\s*919px\)[\s\S]*?\.button-label\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /@media\s*\(max-height:\s*649px\)[\s\S]*?#recentHistoryList \.history-item:nth-child\(3\)\s*\{[^}]*display:\s*none/s);
+  assert.doesNotMatch(styles, /^\s*\.history-item:nth-child\(3\)\s*\{/m);
+  assert.doesNotMatch(styles, /(?:linear|radial)-gradient/i);
+  assert.doesNotMatch(styles, /record-orb/);
+  assert.doesNotMatch(styles, /border-radius:\s*(?:50%|999\w*)[^;]*;[^}]*#recordButton/s);
+});
+
+test("minimum window keeps a compact waveform and two recent history rows", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const narrowStart = styles.indexOf("@media (max-width: 760px)");
+  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
+  const reducedMotionStart = styles.indexOf("@media (prefers-reduced-motion: reduce)");
+  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
+  const lowHeightStyles = styles.slice(lowHeightStart, reducedMotionStart);
+
+  assert.ok(narrowStart >= 0 && lowHeightStart > narrowStart);
+  assert.match(
+    narrowStyles,
+    /#voiceCommandBar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) minmax\(72px,\s*96px\) auto/s
+  );
+  assert.match(
+    narrowStyles,
+    /\.waveform\s*\{[^}]*min-width:\s*72px[^}]*max-width:\s*96px/s
+  );
+  assert.doesNotMatch(narrowStyles, /\.waveform\s*\{[^}]*display:\s*none/s);
+  assert.match(
+    lowHeightStyles,
+    /#recentHistorySection\s*\{[^}]*max-height:\s*148px[^}]*overflow-y:\s*auto[^}]*padding:\s*6px 10px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#recentHistorySection \.section-title\s*\{[^}]*margin-bottom:\s*2px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#viewAllHistory\s*\{[^}]*min-height:\s*28px[^}]*padding:\s*3px 6px/s
+  );
+  assert.match(
+    lowHeightStyles,
+    /#recentHistoryList \.history-select\s*\{[^}]*padding:\s*4px 6px/s
+  );
+});
+
+test("full history aligns selection and actions on one desktop row", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const narrowStart = styles.indexOf("@media (max-width: 760px)");
+  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
+  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
+
+  assert.match(
+    styles,
+    /#historyList \.history-item\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto[^}]*align-items:\s*center/s
+  );
+  assert.match(
+    styles,
+    /#historyList \.history-item > \.button-row\s*\{[^}]*flex-wrap:\s*nowrap[^}]*padding:\s*0 10px 0 0/s
+  );
+  assert.match(
+    narrowStyles,
+    /#historyList \.history-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s
+  );
+});
+
+test("explanatory copy stays at body size while only metadata and raw output are smaller", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.drawer-hint\s*\{[^}]*font-size:\s*14px/s);
+  assert.match(
+    styles,
+    /\.setup-row p,\s*\.model-status span,\s*\.diagnostic span\s*\{[^}]*font-size:\s*14px/s
+  );
+
+  const smallTextBlocks = [...styles.matchAll(/([^{}]+)\{[^{}]*font-size:\s*(?:12|13)px[^{}]*\}/g)];
+  assert.ok(smallTextBlocks.length > 0, "metadata and raw output should retain compact text");
+  for (const block of smallTextBlocks) {
+    assert.match(
+      block[1],
+      /history-select time|data-history-character-count|result-character-count|setup-output|install-command|hud-timer/,
+      `small text is limited to metadata or raw output: ${block[1].trim()}`
+    );
+  }
+});
+
 test("settings expose dictation modes without a legacy translation mode", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
@@ -72,7 +576,7 @@ test("renderer fallback markup uses readable Chinese copy", async () => {
   assert.match(html, /<title>Local Flow 本地语音输入<\/title>/);
   assert.match(html, />开始录音<\/span>/);
   assert.match(html, />安装 Whisper<\/button>/);
-  assert.match(html, />还没有转写结果。<\/p>/);
+  assert.match(html, />还没有转写结果。<\/(?:p|div)>/);
   assert.doesNotMatch(html, mojibakePattern);
 });
 
