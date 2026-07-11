@@ -34,6 +34,10 @@ let dictationResult = {
 };
 const settingsSaveCalls = [];
 let settingsSaveError = "";
+let deferProcessingLanguageSaves = false;
+let activeSettingsSaveCalls = 0;
+let maxConcurrentSettingsSaveCalls = 0;
+const deferredSettingsSaveResolvers = [];
 const historyFixtures = [
   {
     id: "history-zh",
@@ -63,6 +67,7 @@ const historyFixtures = [
 ];
 const insertTextCalls = [];
 let insertTextResult = { ok: true };
+let historyListCalls = 0;
 
 const missingSetupStatus = {
   assets: {
@@ -88,15 +93,30 @@ const setupStartResolvers = new Map();
 
 function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
-  ipcMain.handle("settings:save", (_event, next) => {
+  ipcMain.handle("settings:save", async (_event, next) => {
     settingsSaveCalls.push(next);
-    if (settingsSaveError) {
-      throw new Error(settingsSaveError);
+    activeSettingsSaveCalls += 1;
+    maxConcurrentSettingsSaveCalls = Math.max(maxConcurrentSettingsSaveCalls, activeSettingsSaveCalls);
+    try {
+      if (settingsSaveError) {
+        throw new Error(settingsSaveError);
+      }
+      if (deferProcessingLanguageSaves && ("whisperLanguage" in next || "outputLanguage" in next)) {
+        const deferredError = await new Promise((resolve) => deferredSettingsSaveResolvers.push(resolve));
+        if (deferredError) {
+          throw new Error(deferredError);
+        }
+      }
+      settings = mergeSettings(next, settings);
+      return settings;
+    } finally {
+      activeSettingsSaveCalls -= 1;
     }
-    settings = mergeSettings(next, settings);
-    return settings;
   });
-  ipcMain.handle("history:list", () => historyFixtures);
+  ipcMain.handle("history:list", () => {
+    historyListCalls += 1;
+    return historyFixtures;
+  });
   ipcMain.handle("dictation:insert-text", (_event, text) => {
     insertTextCalls.push(text);
     return insertTextResult;
@@ -269,6 +289,9 @@ app.whenReady().then(async () => {
         state.hasInsertResultButton &&
         state.hasRestoreResultButton &&
         state.restoreResultDisabled &&
+        state.resultText === "" &&
+        state.resultEmpty &&
+        state.resultAriaPlaceholder.length > 0 &&
         state.editorCharacterCount === 0 &&
         state.recentHistoryCount === 3 &&
         state.dictationTabSelected &&
@@ -289,6 +312,23 @@ app.whenReady().then(async () => {
       initialState.globalShortcutPaused !== false
     ) {
       throw new Error("Windows productization controls should default to unchecked.");
+    }
+    const historyCallsBeforeResize = historyListCalls;
+    await window.webContents.executeJavaScript(`
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 640 });
+      window.dispatchEvent(new Event('resize'));
+    `);
+    await waitForState(window, (state) => state.recentHistoryCount === 2, 5000);
+    if (historyListCalls !== historyCallsBeforeResize) {
+      throw new Error("Responsive recent history should not request history again.");
+    }
+    await window.webContents.executeJavaScript(`
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 720 });
+      window.dispatchEvent(new Event('resize'));
+    `);
+    await waitForState(window, (state) => state.recentHistoryCount === 3, 5000);
+    if (historyListCalls !== historyCallsBeforeResize) {
+      throw new Error("Responsive recent history should redraw from cached history.");
     }
     window.webContents.send("dictation:status", {
       phase: "error",
@@ -542,7 +582,8 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         insertTextCalls.at(-1) === "编辑后复制和插入" &&
-        state.resultText === "编辑后复制和插入"
+        state.resultText === "编辑后复制和插入" &&
+        state.statusText === "Text inserted."
       ),
       5000
     );
@@ -556,7 +597,8 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         insertTextCalls.length > insertCallsBeforeFailure &&
-        state.resultText === "编辑后复制和插入"
+        state.resultText === "编辑后复制和插入" &&
+        state.statusText === "Text could not be inserted."
       ),
       5000
     );
@@ -643,6 +685,70 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    const languageQueueStart = settingsSaveCalls.length;
+    maxConcurrentSettingsSaveCalls = 0;
+    deferProcessingLanguageSaves = true;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#hotkey').value = 'CommandOrControl+Shift+U';
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'zh-Hans';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+        outputLanguage.value = 'es';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        settingsSaveCalls.length > languageQueueStart &&
+        state.outputLanguage === "es" &&
+        state.interfaceLanguage === "en" &&
+        state.hotkeyValue === "CommandOrControl+Shift+U"
+      ),
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (settingsSaveCalls.length !== languageQueueStart + 1 || activeSettingsSaveCalls !== 1) {
+      throw new Error("Processing language saves were not serialized.");
+    }
+    assertPartialSettingsSave(settingsSaveCalls[languageQueueStart], {
+      outputLanguage: "zh-Hans"
+    });
+    deferredSettingsSaveResolvers.shift()?.("spawn C:\\private\\stale-language-save.exe ENOENT");
+    await waitForState(
+      window,
+      (state) => (
+        settingsSaveCalls.length === languageQueueStart + 2 &&
+        activeSettingsSaveCalls === 1 &&
+        state.outputLanguage === "es" &&
+        state.interfaceLanguage === "en" &&
+        state.hotkeyValue === "CommandOrControl+Shift+U" &&
+        state.statusText === "Settings could not be saved."
+      ),
+      5000
+    );
+    assertPartialSettingsSave(settingsSaveCalls[languageQueueStart + 1], {
+      outputLanguage: "es"
+    });
+    if (maxConcurrentSettingsSaveCalls !== 1) {
+      throw new Error(`Expected one active settings save, saw ${maxConcurrentSettingsSaveCalls}.`);
+    }
+    deferredSettingsSaveResolvers.shift()?.();
+    const myMemoryTargetPreviewState = await waitForState(
+      window,
+      (state) => (
+        activeSettingsSaveCalls === 0 &&
+        settings.outputLanguage === "es" &&
+        state.outputLanguage === "es" &&
+        state.interfaceLanguage === "en" &&
+        state.hotkeyValue === "CommandOrControl+Shift+U" &&
+        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
+      ),
+      5000
+    );
+    deferProcessingLanguageSaves = false;
+    settingsSaveError = "spawn C:\\private\\settings-helper.exe ENOENT";
     await window.webContents.executeJavaScript(`
       (() => {
         const outputLanguage = document.querySelector('#outputLanguage');
@@ -650,26 +756,9 @@ app.whenReady().then(async () => {
         outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
       })()
     `);
-    const myMemoryTargetPreviewState = await waitForState(
-      window,
-      (state) => (
-        state.outputLanguage === "zh-Hans" &&
-        settingsSaveCalls.some((call) => call.outputLanguage === "zh-Hans") &&
-        state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
-      ),
-      5000
-    );
-    settingsSaveError = "spawn C:\\private\\settings-helper.exe ENOENT";
-    await window.webContents.executeJavaScript(`
-      (() => {
-        const outputLanguage = document.querySelector('#outputLanguage');
-        outputLanguage.value = 'auto';
-        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-      })()
-    `);
     const failedLanguageSaveState = await waitForState(
       window,
-      (state) => state.outputLanguage === "zh-Hans" && state.statusText === "Settings could not be saved.",
+      (state) => state.outputLanguage === "es" && state.statusText === "Settings could not be saved.",
       5000
     );
     if (
@@ -680,6 +769,10 @@ app.whenReady().then(async () => {
       throw new Error(`Settings failure leaked diagnostics: ${failedLanguageSaveState.statusText}`);
     }
     settingsSaveError = "";
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#hotkey').value = 'CommandOrControl+Alt+Space'
+    `);
+    const whisperEnglishSaveIndex = settingsSaveCalls.length;
     await window.webContents.executeJavaScript(`
       (() => {
         const whisperLanguage = document.querySelector('#whisperLanguage');
@@ -695,6 +788,10 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    assertPartialSettingsSave(settingsSaveCalls[whisperEnglishSaveIndex], {
+      whisperLanguage: "en"
+    });
+    const whisperAutoSaveIndex = settingsSaveCalls.length;
     await window.webContents.executeJavaScript(`
       (() => {
         const whisperLanguage = document.querySelector('#whisperLanguage');
@@ -702,7 +799,17 @@ app.whenReady().then(async () => {
         whisperLanguage.dispatchEvent(new Event('change', { bubbles: true }));
       })()
     `);
-    await waitForState(window, (state) => state.whisperLanguage === "auto", 5000);
+    await waitForState(
+      window,
+      (state) => (
+        state.whisperLanguage === "auto" &&
+        settingsSaveCalls.length > whisperAutoSaveIndex
+      ),
+      5000
+    );
+    assertPartialSettingsSave(settingsSaveCalls[whisperAutoSaveIndex], {
+      whisperLanguage: "auto"
+    });
     await window.webContents.executeJavaScript(`
       (() => {
         const outputLanguage = document.querySelector('#outputLanguage');
@@ -854,7 +961,9 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         !state.isRecording &&
-        state.resultText.includes("Target language output failed") &&
+        state.resultText === "" &&
+        state.resultEmpty &&
+        state.resultAriaPlaceholder.includes("Target language output failed") &&
         state.statusText.includes("Local language model exited with code 3221225477")
       ),
       10000
@@ -951,6 +1060,8 @@ function readRendererState(window) {
       recordLabel: document.querySelector('#recordLabel')?.textContent || '',
       statusText: document.querySelector('#statusText')?.textContent || '',
       resultText: document.querySelector('#resultText')?.textContent || '',
+      resultEmpty: document.querySelector('#resultText')?.dataset.emptyResult === 'true',
+      resultAriaPlaceholder: document.querySelector('#resultText')?.getAttribute('aria-placeholder') || '',
       editorCharacterCount: Number(document.querySelector('#resultText')?.dataset.characterCount || 0),
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
@@ -1028,4 +1139,15 @@ function readHudState(window) {
 function isBlockedRendererWarning(message) {
   const text = String(message || "");
   return text.includes("Electron Security Warning") || text.includes("ScriptProcessorNode is deprecated");
+}
+
+function assertPartialSettingsSave(actual, expected) {
+  const actualKeys = Object.keys(actual || {});
+  const expectedKeys = Object.keys(expected);
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    expectedKeys.some((key) => actual[key] !== expected[key])
+  ) {
+    throw new Error(`Expected partial settings save ${JSON.stringify(expected)}, saw ${JSON.stringify(actual)}.`);
+  }
 }

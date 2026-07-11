@@ -10,7 +10,10 @@ import {
 } from "../src/renderer/main-view-state.js";
 
 test("creates an empty editor state", () => {
-  assert.deepEqual(createEditorState(), {
+  const state = createEditorState();
+
+  assert.equal(state.currentText, "");
+  assert.deepEqual(state, {
     baselineText: "",
     currentText: "",
     characterCount: 0,

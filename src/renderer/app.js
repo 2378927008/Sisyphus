@@ -80,7 +80,10 @@ let currentLanguage = defaultInterfaceLanguage;
 let editorState = createEditorState();
 let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
+let recentHistoryCompact = window.innerHeight < 650;
+let processingLanguageSaveQueue = Promise.resolve();
 const mainTabs = [dictationTab, historyTab];
+const SETTINGS_SAVE_FAILED_MESSAGE = "Settings could not be saved.";
 const shortcutRecorder = createShortcutRecorder({
   eventTarget: window,
   buttons: shortcutCaptureButtons,
@@ -114,6 +117,7 @@ async function init() {
   }
   recentHistoryList.addEventListener("click", handleHistoryAction);
   historyList.addEventListener("click", handleHistoryAction);
+  window.addEventListener("resize", handleRecentHistoryResize);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
@@ -125,7 +129,6 @@ async function init() {
   copyResult.addEventListener("click", copyLatestResult);
   insertResult.addEventListener("click", insertLatestResult);
   restoreResult.addEventListener("click", restoreLatestResult);
-  resultText.addEventListener("focus", prepareEmptyEditor);
   resultText.addEventListener("blur", () => renderEditorState());
   resultText.addEventListener("input", updateEditorFromInput);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
@@ -167,17 +170,29 @@ function changeInterfaceLanguage() {
   renderHistory();
 }
 
-async function changeProcessingLanguage(event) {
+function changeProcessingLanguage(event) {
   const field = event.currentTarget;
   const settingName = field.name;
+  const requestedValue = field.value;
 
+  processingLanguageSaveQueue = processingLanguageSaveQueue.then(() => (
+    saveProcessingLanguage(field, settingName, requestedValue)
+  ));
+}
+
+async function saveProcessingLanguage(field, settingName, requestedValue) {
   try {
-    await saveSettingsFromCurrentForm({ updateStatus: false });
+    currentSettings = await window.localFlow.saveSettings({
+      [settingName]: requestedValue
+    });
+    await refreshProviderStatus();
     await refreshSetupStatusView({ updateStatus: false });
     renderFooterHealth();
   } catch {
-    field.value = currentSettings?.[settingName] ?? "auto";
-    setStatus(getSafeUiText("status.settingsSaveFailed", "Settings could not be saved."));
+    if (field.value === requestedValue) {
+      field.value = currentSettings?.[settingName] ?? "auto";
+    }
+    setStatus(SETTINGS_SAVE_FAILED_MESSAGE);
     renderProviderStatus();
     renderSetupChecklist();
     renderFooterHealth();
@@ -768,12 +783,6 @@ function restoreLatestResult() {
   renderEditorState();
 }
 
-function prepareEmptyEditor() {
-  if (editorState.empty) {
-    resultText.textContent = "";
-  }
-}
-
 function updateEditorFromInput() {
   emptyEditorMessageKey = "empty.result";
   editorState = replaceEditorText(editorState, resultText.textContent || "");
@@ -788,9 +797,12 @@ function replaceEditorBaseline(text, emptyMessageKey = "empty.result") {
 
 function renderEditorState({ syncText = true } = {}) {
   if (syncText) {
-    resultText.textContent = editorState.empty
-      ? t(emptyEditorMessageKey)
-      : editorState.currentText;
+    resultText.textContent = editorState.currentText;
+  }
+  if (editorState.empty) {
+    resultText.setAttribute("aria-placeholder", t(emptyEditorMessageKey));
+  } else {
+    resultText.removeAttribute("aria-placeholder");
   }
   resultText.dataset.emptyResult = String(editorState.empty);
   resultText.dataset.characterCount = String(editorState.characterCount);
@@ -1039,12 +1051,20 @@ async function renderHistory() {
 }
 
 function renderRecentHistory() {
-  const limit = window.innerHeight < 650 ? 2 : 3;
+  const limit = recentHistoryCompact ? 2 : 3;
   const recent = projectHistory(allHistory, limit);
 
   recentHistoryList.innerHTML = recent.length
     ? recent.map((item) => renderHistoryItem(item, { recent: true })).join("")
     : `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+}
+
+function handleRecentHistoryResize() {
+  const nextCompact = window.innerHeight < 650;
+  if (nextCompact === recentHistoryCompact) return;
+
+  recentHistoryCompact = nextCompact;
+  renderRecentHistory();
 }
 
 function renderFullHistory() {
