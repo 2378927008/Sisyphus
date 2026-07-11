@@ -775,6 +775,22 @@ test("settings save handler preserves previous startup values if system startup 
   assert.match(mainSource, /startMinimizedToTray/);
 });
 
+test("main process routes tray and IPC settings writes through one effects transaction", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const trayUpdateMatch = mainSource.match(/function updateSettingsFromTray\(settingsPatch\) \{(?<body>[\s\S]*?)\n\}/);
+  const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+
+  assert.match(
+    mainSource,
+    /import \{ createSettingsEffectsTransaction \} from "\.\/settings-effects-transaction\.js";/
+  );
+  assert.match(mainSource, /saveSettingsWithSystemEffects = createSettingsEffectsTransaction\(\{/);
+  assert.ok(trayUpdateMatch, "tray settings updater should be defined");
+  assert.ok(settingsSaveMatch, "settings:save handler should be defined inline");
+  assert.match(trayUpdateMatch.groups.body, /saveSettingsWithSystemEffects\(settingsPatch\)/);
+  assert.match(settingsSaveMatch.groups.body, /saveSettingsWithSystemEffects\(settings\)/);
+});
+
 test("app smoke reads product settings controls with null-safe fallbacks", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 

@@ -28,12 +28,11 @@ export async function pasteText(text, deps = {}) {
   const signal = deps.signal;
   const wait = deps.wait || waitForTimeout;
   const platform = deps.platform ?? process.platform;
-  const killProcessTree = deps.killProcessTree || ((child) => (
-    killPasteProcessTree(child, { platform, spawn: spawnImpl })
-  ));
+  const killProcessTree = deps.killProcessTree || killPasteProcessTree;
   const setTimer = deps.setTimeout || setTimeout;
   const clearTimer = deps.clearTimeout || clearTimeout;
   const terminationTimeoutMs = normalizeTerminationTimeout(deps.terminationTimeoutMs);
+  const drainTimeoutMs = normalizeTerminationTimeout(deps.drainTimeoutMs ?? terminationTimeoutMs);
 
   if (!clipboard?.writeText) {
     throw new PasteError("Clipboard integration is unavailable.", "clipboard_unavailable");
@@ -65,8 +64,11 @@ export async function pasteText(text, deps = {}) {
     let aborting = false;
     let fallbackStarted = false;
     let terminationTimer = null;
+    let fallbackAbortController = null;
+    let childDrainInstalled = false;
     const cleanup = () => {
       clearTerminationTimer();
+      fallbackAbortController?.abort();
       signal?.removeEventListener("abort", onAbort);
       child.removeListener?.("error", onError);
       child.removeListener?.("close", onClose);
@@ -84,6 +86,17 @@ export async function pasteText(text, deps = {}) {
       clearTimer(terminationTimer);
       terminationTimer = null;
     };
+    const finishUnconfirmedAbort = () => {
+      if (!childDrainInstalled) {
+        childDrainInstalled = true;
+        installLateProcessDrain(child, {
+          setTimeout: setTimer,
+          clearTimeout: clearTimer,
+          timeoutMs: drainTimeoutMs
+        });
+      }
+      finishAbort();
+    };
     const armTerminationTimer = (onTimeout) => {
       clearTerminationTimer();
       terminationTimer = setTimer(() => {
@@ -95,12 +108,20 @@ export async function pasteText(text, deps = {}) {
       if (settled || fallbackStarted) return;
 
       fallbackStarted = true;
-      armTerminationTimer(finishAbort);
+      armTerminationTimer(finishUnconfirmedAbort);
       if (platform !== "win32" || !child.pid) return;
 
+      fallbackAbortController = new AbortController();
       let fallback;
       try {
-        fallback = killProcessTree(child, { platform, spawn: spawnImpl });
+        fallback = killProcessTree(child, {
+          platform,
+          spawn: spawnImpl,
+          signal: fallbackAbortController.signal,
+          setTimeout: setTimer,
+          clearTimeout: clearTimer,
+          drainTimeoutMs
+        });
       } catch {
         return;
       }
@@ -167,6 +188,10 @@ export async function pasteText(text, deps = {}) {
 export function killPasteProcessTree(child, deps = {}) {
   const platform = deps.platform ?? process.platform;
   const spawnImpl = deps.spawn || spawn;
+  const signal = deps.signal;
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
+  const drainTimeoutMs = normalizeTerminationTimeout(deps.drainTimeoutMs);
   if (platform !== "win32" || !child?.pid) return Promise.resolve(false);
 
   return new Promise((resolve, reject) => {
@@ -184,8 +209,9 @@ export function killPasteProcessTree(child, deps = {}) {
 
     let settled = false;
     const cleanup = () => {
-      killer.removeListener?.("error", onError);
-      killer.removeListener?.("close", onClose);
+      signal?.removeEventListener("abort", onAbort);
+      killer?.removeListener?.("error", onError);
+      killer?.removeListener?.("close", onClose);
     };
     const finish = (error, confirmed = false) => {
       if (settled) return;
@@ -202,6 +228,22 @@ export function killPasteProcessTree(child, deps = {}) {
         finish(new Error(`taskkill exited with code ${code}.`));
       }
     };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      installLateProcessDrain(killer, {
+        setTimeout: setTimer,
+        clearTimeout: clearTimer,
+        timeoutMs: drainTimeoutMs
+      });
+      try {
+        killer?.kill?.();
+      } catch {
+        // The helper remains unrefed and guarded by the late-event drain.
+      }
+      resolve(false);
+    };
 
     if (!killer?.once) {
       finish(new Error("taskkill process could not be monitored."));
@@ -209,7 +251,48 @@ export function killPasteProcessTree(child, deps = {}) {
     }
     killer.once("error", onError);
     killer.once("close", onClose);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
+}
+
+function installLateProcessDrain(processHandle, deps = {}) {
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
+  const timeoutMs = normalizeTerminationTimeout(deps.timeoutMs);
+  let cleaned = false;
+  let timer = null;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+    processHandle?.removeListener?.("error", onError);
+    processHandle?.removeListener?.("close", onClose);
+  };
+  const onError = () => {};
+  const onClose = () => cleanup();
+
+  if (typeof processHandle?.on !== "function") {
+    try {
+      processHandle?.unref?.();
+    } catch {
+      // Nothing else can be detached from an unmonitorable process handle.
+    }
+    return cleanup;
+  }
+
+  processHandle.on("error", onError);
+  processHandle.once?.("close", onClose);
+  try {
+    processHandle.unref?.();
+  } catch {
+    // Listener cleanup still bounds the handle even if unref is unavailable.
+  }
+  timer = setTimer(cleanup, timeoutMs);
+  return cleanup;
 }
 
 function waitForTimeout(milliseconds, signal) {

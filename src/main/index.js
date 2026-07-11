@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeIma
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-store.js";
+import { createSettingsEffectsTransaction } from "./settings-effects-transaction.js";
 import { DictationService } from "./dictation-service.js";
 import { applyElectronRuntimeSwitches } from "./electron-runtime.js";
 import { validateWhisperSetup } from "./whisper-diagnostics.js";
@@ -54,6 +55,7 @@ let appRoot;
 let hotkeyManager;
 let nativeShortcut;
 let lastSettings;
+let saveSettingsWithSystemEffects;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
 let lastDictationEntry;
@@ -330,36 +332,6 @@ function sanitizeRendererStatusText(value) {
   return typeof value === "string" ? value.slice(0, maxRendererStatusTextLength) : "";
 }
 
-async function saveSettingsWithSystemEffects(settings) {
-  const previousSettings = lastSettings || await settingsStore.getSettings();
-  const next = await settingsStore.saveSettings(settings);
-  lastSettings = next;
-
-  try {
-    applyStartupSettings(app, lastSettings);
-  } catch (error) {
-    const restored = await restoreStartupSettings(previousSettings);
-    await registerHotkey(restored);
-    reportSystemError(error, "startup_settings_failed");
-    error.localFlowStatusReported = true;
-    throw error;
-  }
-
-  await registerHotkey(lastSettings);
-  refreshTrayMenu();
-  return lastSettings;
-}
-
-async function restoreStartupSettings(previousSettings) {
-  const restored = await settingsStore.saveSettings({
-    launchAtLogin: previousSettings.launchAtLogin,
-    startMinimizedToTray: previousSettings.startMinimizedToTray
-  });
-  lastSettings = restored;
-  refreshTrayMenu();
-  return restored;
-}
-
 function updateSettingsFromTray(settingsPatch) {
   void saveSettingsWithSystemEffects(settingsPatch).catch((error) => {
     if (!error?.localFlowStatusReported) {
@@ -505,6 +477,17 @@ app.whenReady().then(async () => {
     onStart: () => systemInputController?.start(),
     onStop: () => systemInputController?.stop(),
     onPasteLast: () => pasteLastDictation()
+  });
+  saveSettingsWithSystemEffects = createSettingsEffectsTransaction({
+    settingsStore,
+    getCurrentSettings: () => lastSettings,
+    setCurrentSettings: (settings) => {
+      lastSettings = settings;
+    },
+    applyStartupSettings: (settings) => applyStartupSettings(app, settings),
+    registerHotkey,
+    refreshTrayMenu,
+    reportSystemError
   });
 
   wireIpc();
