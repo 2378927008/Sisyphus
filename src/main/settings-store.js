@@ -129,29 +129,40 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   return merged;
 }
 
-export function createSettingsStore(userDataPath, baseSettings = defaultSettings, secretCodec = null) {
+export function createSettingsStore(userDataPath, baseSettings = defaultSettings, secretCodec = null, ioOverrides = {}) {
   const settingsPath = path.join(userDataPath, "settings.json");
   const historyPath = path.join(userDataPath, "history.json");
+  const io = resolveFileIo(ioOverrides);
+  let settingsOperationQueue = Promise.resolve();
+  const enqueueSettingsOperation = (operation) => {
+    const pending = settingsOperationQueue.then(operation);
+    settingsOperationQueue = pending.catch(() => {});
+    return pending;
+  };
 
   return {
-    async getSettings(options = {}) {
-      const settings = await loadSettings(settingsPath, baseSettings, secretCodec);
-      return options.includeSecrets ? settings : redactSecrets(settings);
+    getSettings(options = {}) {
+      return enqueueSettingsOperation(async () => {
+        const settings = await loadSettings(settingsPath, baseSettings, secretCodec, io);
+        return options.includeSecrets ? settings : redactSecrets(settings);
+      });
     },
-    async saveSettings(settings, options = {}) {
-      const existing = await loadSettings(settingsPath, baseSettings, secretCodec);
-      const next = mergeSettings({ ...existing, ...omitEmptyProviderSelectionOverrides(settings) }, baseSettings);
-      await writeJson(settingsPath, toPersistedSettings(next, secretCodec));
-      return options.includeSecrets ? next : redactSecrets(next);
+    saveSettings(settings, options = {}) {
+      return enqueueSettingsOperation(async () => {
+        const existing = await loadSettings(settingsPath, baseSettings, secretCodec, io);
+        const next = mergeSettings({ ...existing, ...omitEmptyProviderSelectionOverrides(settings) }, baseSettings);
+        await writeJson(settingsPath, toPersistedSettings(next, secretCodec), io);
+        return options.includeSecrets ? next : redactSecrets(next);
+      });
     },
     async getHistory() {
-      const history = await loadJson(historyPath, []);
+      const history = await loadJson(historyPath, [], io);
       return Array.isArray(history) ? history : [];
     },
     async addHistory(entry, limit = defaultSettings.historyLimit) {
       const history = await this.getHistory();
       const next = [entry, ...history].slice(0, limit);
-      await writeJson(historyPath, next);
+      await writeJson(historyPath, next, io);
       return next;
     }
   };
@@ -181,20 +192,20 @@ function normalizeShortcutMode(value) {
   return String(value || "").trim() === "hold" ? "hold" : "toggle";
 }
 
-async function loadSettings(settingsPath, baseSettings, secretCodec) {
-  const persisted = await loadJson(settingsPath, baseSettings);
+async function loadSettings(settingsPath, baseSettings, secretCodec, io) {
+  const persisted = await loadJson(settingsPath, baseSettings, io);
   const settings = mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
-  const repaired = await repairMissingLocalAssetPaths(settings, baseSettings);
+  const repaired = await repairMissingLocalAssetPaths(settings, baseSettings, io);
   const changedKeys = localAssetPathKeys.filter((key) => settings[key] !== repaired[key]);
 
   if (changedKeys.length) {
-    await persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys);
+    await persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys, io);
   }
 
   return repaired;
 }
 
-async function persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys) {
+async function persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys, io) {
   const next = persisted && typeof persisted === "object" && !Array.isArray(persisted)
     ? { ...persisted }
     : {};
@@ -204,13 +215,13 @@ async function persistRepairedLocalAssetPaths(settingsPath, persisted, repaired,
   }
 
   try {
-    await writeJson(settingsPath, next);
+    await writeJson(settingsPath, next, io);
   } catch {
     // Keep the repaired in-memory settings usable if migration cannot be persisted.
   }
 }
 
-async function repairMissingLocalAssetPaths(settings, baseSettings) {
+async function repairMissingLocalAssetPaths(settings, baseSettings, io) {
   let changed = false;
   const next = { ...settings };
 
@@ -218,11 +229,11 @@ async function repairMissingLocalAssetPaths(settings, baseSettings) {
     const currentPath = String(next[key] || "").trim();
     const detectedPath = String(baseSettings[key] || "").trim();
 
-    if (currentPath && await isFile(currentPath)) {
+    if (currentPath && await isFile(currentPath, io)) {
       continue;
     }
 
-    if (detectedPath && await isFile(detectedPath)) {
+    if (detectedPath && await isFile(detectedPath, io)) {
       if (currentPath !== detectedPath) {
         next[key] = detectedPath;
         changed = true;
@@ -239,9 +250,9 @@ async function repairMissingLocalAssetPaths(settings, baseSettings) {
   return changed ? mergeSettings(next, baseSettings) : settings;
 }
 
-async function isFile(filePath) {
+async function isFile(filePath, io) {
   try {
-    const file = await fsStat(filePath);
+    const file = await io.stat(filePath);
     return file.isFile();
   } catch {
     return false;
@@ -314,16 +325,25 @@ function toPersistedSettings(settings, secretCodec) {
   return persisted;
 }
 
-async function loadJson(filePath, fallback) {
+async function loadJson(filePath, fallback, io) {
   try {
-    const content = await readFile(filePath, "utf8");
+    const content = await io.readFile(filePath, "utf8");
     return JSON.parse(content);
   } catch {
     return fallback;
   }
 }
 
-async function writeJson(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+async function writeJson(filePath, value, io) {
+  await io.mkdir(path.dirname(filePath), { recursive: true });
+  await io.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function resolveFileIo(overrides) {
+  return {
+    mkdir: overrides.mkdir || mkdir,
+    readFile: overrides.readFile || readFile,
+    stat: overrides.stat || fsStat,
+    writeFile: overrides.writeFile || writeFile
+  };
 }

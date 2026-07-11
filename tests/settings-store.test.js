@@ -141,6 +141,112 @@ test("mergeSettings reports recording ready when Whisper paths are configured", 
   assert.equal(settings.providerStatus.readyToRecord, true);
 });
 
+test("createSettingsStore accepts optional settings I/O dependencies", async () => {
+  let readCalls = 0;
+  const store = createSettingsStore(
+    "C:/virtual-local-flow",
+    defaultSettings,
+    null,
+    {
+      readFile: async () => {
+        readCalls += 1;
+        const error = new Error("missing settings");
+        error.code = "ENOENT";
+        throw error;
+      },
+      writeFile: async () => {},
+      mkdir: async () => {},
+      stat: async () => {
+        const error = new Error("missing asset");
+        error.code = "ENOENT";
+        throw error;
+      }
+    }
+  );
+
+  const settings = await store.getSettings();
+
+  assert.equal(readCalls, 1);
+  assert.equal(settings.hotkey, defaultSettings.hotkey);
+});
+
+test("saveSettings serializes full user settings with detected setup paths", async () => {
+  const controlledIo = createFirstWriteBarrierIo();
+  const store = createSettingsStore("C:/virtual-local-flow", defaultSettings, null, controlledIo.io);
+  const fullUserSave = store.saveSettings({
+    ...defaultSettings,
+    hotkey: "CommandOrControl+Shift+Space",
+    outputLanguage: "fr"
+  });
+  await controlledIo.firstWriteStarted;
+
+  const setupPathSave = store.saveSettings({
+    whisperCliPath: "C:/local-flow/whisper-cli.exe",
+    whisperModelPath: "C:/local-flow/ggml-base.bin"
+  });
+  const readsBeforeFirstWriteCompleted = controlledIo.readCalls;
+
+  controlledIo.releaseFirstWrite();
+  await Promise.all([fullUserSave, setupPathSave]);
+  const persisted = controlledIo.readPersisted();
+
+  assert.equal(readsBeforeFirstWriteCompleted, 1);
+  assert.equal(persisted.hotkey, "CommandOrControl+Shift+Space");
+  assert.equal(persisted.outputLanguage, "fr");
+  assert.equal(persisted.whisperCliPath, "C:/local-flow/whisper-cli.exe");
+  assert.equal(persisted.whisperModelPath, "C:/local-flow/ggml-base.bin");
+});
+
+test("getSettings waits for an in-flight save and reads its committed value", async () => {
+  const controlledIo = createFirstWriteBarrierIo();
+  const store = createSettingsStore("C:/virtual-local-flow", defaultSettings, null, controlledIo.io);
+  const save = store.saveSettings({ outputLanguage: "es" });
+  await controlledIo.firstWriteStarted;
+
+  const get = store.getSettings();
+  const readsBeforeFirstWriteCompleted = controlledIo.readCalls;
+
+  controlledIo.releaseFirstWrite();
+  const [, settings] = await Promise.all([save, get]);
+
+  assert.equal(readsBeforeFirstWriteCompleted, 1);
+  assert.equal(settings.outputLanguage, "es");
+});
+
+test("settings operation queue recovers after a rejected save", async () => {
+  let content = null;
+  let writeCalls = 0;
+  const store = createSettingsStore("C:/virtual-local-flow", defaultSettings, null, {
+    mkdir: async () => {},
+    readFile: async () => {
+      if (content === null) {
+        const error = new Error("missing settings");
+        error.code = "ENOENT";
+        throw error;
+      }
+      return content;
+    },
+    stat: async () => ({ isFile: () => true }),
+    writeFile: async (_filePath, nextContent) => {
+      writeCalls += 1;
+      if (writeCalls === 1) {
+        throw new Error("injected settings write failure");
+      }
+      content = nextContent;
+    }
+  });
+
+  await assert.rejects(
+    store.saveSettings({ hotkey: "CommandOrControl+Shift+Space" }),
+    /injected settings write failure/
+  );
+  const saved = await store.saveSettings({ outputLanguage: "ja" });
+
+  assert.equal(writeCalls, 2);
+  assert.equal(saved.outputLanguage, "ja");
+  assert.equal(JSON.parse(content).outputLanguage, "ja");
+});
+
 test("getSettings repairs missing persisted local model paths from detected vendor defaults", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-settings-"));
   const vendorPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-vendor-"));
@@ -540,3 +646,49 @@ test("saveSettings uses an injected secret codec instead of persisting raw cloud
     await rm(userDataPath, { recursive: true, force: true });
   }
 });
+
+function createFirstWriteBarrierIo() {
+  let content = null;
+  let readCalls = 0;
+  let writeCalls = 0;
+  let releaseFirstWrite;
+  let markFirstWriteStarted;
+  const firstWriteStarted = new Promise((resolve) => {
+    markFirstWriteStarted = resolve;
+  });
+  const firstWriteRelease = new Promise((resolve) => {
+    releaseFirstWrite = resolve;
+  });
+
+  return {
+    firstWriteStarted,
+    releaseFirstWrite,
+    get readCalls() {
+      return readCalls;
+    },
+    readPersisted() {
+      return JSON.parse(content);
+    },
+    io: {
+      mkdir: async () => {},
+      readFile: async () => {
+        readCalls += 1;
+        if (content === null) {
+          const error = new Error("missing settings");
+          error.code = "ENOENT";
+          throw error;
+        }
+        return content;
+      },
+      stat: async () => ({ isFile: () => true }),
+      writeFile: async (_filePath, nextContent) => {
+        writeCalls += 1;
+        if (writeCalls === 1) {
+          markFirstWriteStarted();
+          await firstWriteRelease;
+        }
+        content = nextContent;
+      }
+    }
+  };
+}
