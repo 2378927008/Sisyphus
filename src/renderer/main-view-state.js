@@ -27,7 +27,8 @@ function editorState(baselineText, currentText) {
     baselineText,
     currentText,
     characterCount: characterCount(currentText),
-    dirty: currentText !== baselineText
+    dirty: currentText !== baselineText,
+    empty: currentText === ""
   };
 }
 
@@ -81,5 +82,6 @@ export function projectHistory(entries, limit) {
 }
 
 export function normalizeViewPhase(phase) {
+  if (phase === "polishing") return "transcribing";
   return VIEW_PHASES.has(phase) ? phase : "idle";
 }

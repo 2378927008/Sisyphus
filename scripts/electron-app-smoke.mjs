@@ -33,6 +33,36 @@ let dictationResult = {
   text: "smoke transcript"
 };
 const settingsSaveCalls = [];
+let settingsSaveError = "";
+const historyFixtures = [
+  {
+    id: "history-zh",
+    createdAt: "2026-07-11T03:00:00.000Z",
+    status: "complete",
+    text: "中文历史记录"
+  },
+  {
+    id: "history-en",
+    createdAt: "2026-07-11T02:00:00.000Z",
+    status: "complete",
+    text: "English history entry"
+  },
+  {
+    id: "history-failed",
+    createdAt: "2026-07-11T01:00:00.000Z",
+    status: "failed",
+    text: "",
+    processingError: "spawn C:\\private\\history-helper.exe ENOENT"
+  },
+  {
+    id: "history-third",
+    createdAt: "2026-07-11T00:00:00.000Z",
+    status: "complete",
+    text: "Third complete entry"
+  }
+];
+const insertTextCalls = [];
+let insertTextResult = { ok: true };
 
 const missingSetupStatus = {
   assets: {
@@ -60,10 +90,17 @@ function wireIpc() {
   ipcMain.handle("settings:get", () => settings);
   ipcMain.handle("settings:save", (_event, next) => {
     settingsSaveCalls.push(next);
+    if (settingsSaveError) {
+      throw new Error(settingsSaveError);
+    }
     settings = mergeSettings(next, settings);
     return settings;
   });
-  ipcMain.handle("history:list", () => []);
+  ipcMain.handle("history:list", () => historyFixtures);
+  ipcMain.handle("dictation:insert-text", (_event, text) => {
+    insertTextCalls.push(text);
+    return insertTextResult;
+  });
   ipcMain.handle("diagnostics:whisper", () => ({
     ready: true,
     checks: [
@@ -229,6 +266,17 @@ app.whenReady().then(async () => {
         state.hasCancelSetupButton &&
         state.cancelSetupHidden &&
         state.hasCopyResultButton &&
+        state.hasInsertResultButton &&
+        state.hasRestoreResultButton &&
+        state.restoreResultDisabled &&
+        state.editorCharacterCount === 0 &&
+        state.recentHistoryCount === 3 &&
+        state.dictationTabSelected &&
+        !state.historyTabSelected &&
+        state.dictationPanelHidden === false &&
+        state.historyPanelHidden &&
+        state.bodyPhase === "idle" &&
+        state.voiceCommandPhase === "idle" &&
         state.hasCheckTextProviderButton &&
         state.providerStatusText.includes("Local whisper.cpp") &&
         state.providerStatusText.includes("MyMemory Free")
@@ -241,6 +289,22 @@ app.whenReady().then(async () => {
       initialState.globalShortcutPaused !== false
     ) {
       throw new Error("Windows productization controls should default to unchecked.");
+    }
+    window.webContents.send("dictation:status", {
+      phase: "error",
+      message: "spawn C:\\private\\phase-helper.exe ENOENT"
+    });
+    const safePhaseState = await waitForState(
+      window,
+      (state) => state.bodyPhase === "error" && state.voiceCommandPhase === "error",
+      5000
+    );
+    if (
+      safePhaseState.statusText.includes("spawn") ||
+      safePhaseState.statusText.includes("private") ||
+      safePhaseState.statusText.includes("ENOENT")
+    ) {
+      throw new Error(`Phase status leaked diagnostics: ${safePhaseState.statusText}`);
     }
     window.webContents.send("settings:open");
     await waitForState(window, (state) => state.settingsDrawerOpen === true, 5000);
@@ -361,6 +425,149 @@ app.whenReady().then(async () => {
       })()
     `);
     await waitForState(window, (state) => state.copyAttempts === 0, 5000);
+
+    await window.webContents.executeJavaScript("document.querySelector('#viewAllHistory').click()");
+    await waitForState(
+      window,
+      (state) => (
+        state.historyTabSelected &&
+        !state.dictationTabSelected &&
+        state.dictationPanelHidden &&
+        state.historyPanelHidden === false &&
+        state.fullHistoryCount === historyFixtures.length &&
+        state.failedHistoryActionsDisabled
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-history-action="copy"][data-history-id="history-en"]').click()
+    `);
+    await waitForState(
+      window,
+      (state) => state.copyAttemptTexts.includes("English history entry"),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-history-action="insert"][data-history-id="history-en"]').click()
+    `);
+    await waitForState(
+      window,
+      () => insertTextCalls.at(-1) === "English history entry",
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#historyTab').dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowLeft',
+        bubbles: true,
+        cancelable: true
+      }))
+    `);
+    await waitForState(
+      window,
+      (state) => state.dictationTabSelected && state.activeElementId === "dictationTab",
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#dictationTab').dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'End',
+        bubbles: true,
+        cancelable: true
+      }))
+    `);
+    await waitForState(
+      window,
+      (state) => state.historyTabSelected && state.activeElementId === "historyTab",
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-history-action="select"][data-history-id="history-zh"]').click()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.dictationTabSelected &&
+        state.resultText === "中文历史记录" &&
+        state.editorCharacterCount === Array.from("中文历史记录").length &&
+        state.restoreResultDisabled
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const editor = document.querySelector('#resultText');
+        editor.textContent = '中文历史已编辑';
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.resultText === "中文历史已编辑" &&
+        state.editorCharacterCount === Array.from("中文历史已编辑").length &&
+        !state.restoreResultDisabled
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    await waitForState(
+      window,
+      (state) => state.resultText === "中文历史记录" && state.restoreResultDisabled,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const editor = document.querySelector('#resultText');
+        editor.textContent = '编辑后复制和插入';
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+        window.__copyAttempts = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: (text) => {
+              window.__copyAttempts.push(text);
+              return Promise.resolve();
+            }
+          }
+        });
+        document.querySelector('#copyResult').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.copyAttemptTexts.includes("编辑后复制和插入"),
+      5000
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#insertResult').click()");
+    await waitForState(
+      window,
+      (state) => (
+        insertTextCalls.at(-1) === "编辑后复制和插入" &&
+        state.resultText === "编辑后复制和插入"
+      ),
+      5000
+    );
+    const insertCallsBeforeFailure = insertTextCalls.length;
+    insertTextResult = {
+      ok: false,
+      message: "spawn C:\\private\\insert-helper.exe ENOENT"
+    };
+    await window.webContents.executeJavaScript("document.querySelector('#insertResult').click()");
+    const failedInsertState = await waitForState(
+      window,
+      (state) => (
+        insertTextCalls.length > insertCallsBeforeFailure &&
+        state.resultText === "编辑后复制和插入"
+      ),
+      5000
+    );
+    if (
+      failedInsertState.statusText.includes("spawn") ||
+      failedInsertState.statusText.includes("private") ||
+      failedInsertState.statusText.includes("ENOENT")
+    ) {
+      throw new Error(`Insert failure leaked diagnostics: ${failedInsertState.statusText}`);
+    }
+    insertTextResult = { ok: true };
     const failedSetupRefreshCalls = setupIpcCalls.refresh;
     const failedSetupSaveCalls = settingsSaveCalls.length;
     await window.webContents.executeJavaScript("document.querySelector('#installLlm').click()");
@@ -447,10 +654,55 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         state.outputLanguage === "zh-Hans" &&
+        settingsSaveCalls.some((call) => call.outputLanguage === "zh-Hans") &&
         state.providerStatusText === "Cloud mode · Local whisper.cpp + MyMemory Free"
       ),
       5000
     );
+    settingsSaveError = "spawn C:\\private\\settings-helper.exe ENOENT";
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const outputLanguage = document.querySelector('#outputLanguage');
+        outputLanguage.value = 'auto';
+        outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    const failedLanguageSaveState = await waitForState(
+      window,
+      (state) => state.outputLanguage === "zh-Hans" && state.statusText === "Settings could not be saved.",
+      5000
+    );
+    if (
+      failedLanguageSaveState.statusText.includes("spawn") ||
+      failedLanguageSaveState.statusText.includes("private") ||
+      failedLanguageSaveState.statusText.includes("ENOENT")
+    ) {
+      throw new Error(`Settings failure leaked diagnostics: ${failedLanguageSaveState.statusText}`);
+    }
+    settingsSaveError = "";
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const whisperLanguage = document.querySelector('#whisperLanguage');
+        whisperLanguage.value = 'en';
+        whisperLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.whisperLanguage === "en" &&
+        settingsSaveCalls.some((call) => call.whisperLanguage === "en")
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const whisperLanguage = document.querySelector('#whisperLanguage');
+        whisperLanguage.value = 'auto';
+        whisperLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(window, (state) => state.whisperLanguage === "auto", 5000);
     await window.webContents.executeJavaScript(`
       (() => {
         const outputLanguage = document.querySelector('#outputLanguage');
@@ -533,7 +785,12 @@ app.whenReady().then(async () => {
     window.webContents.send("recording:start");
     const recordingState = await waitForState(
       window,
-      (state) => state.isRecording && state.recordLabel === "停止并转写",
+      (state) => (
+        state.isRecording &&
+        state.recordLabel === "停止并转写" &&
+        state.bodyPhase === "recording" &&
+        state.voiceCommandPhase === "recording"
+      ),
       10000
     );
 
@@ -543,7 +800,9 @@ app.whenReady().then(async () => {
       (state) => (
         !state.isRecording &&
         state.recordLabel === "开始录音" &&
-        state.resultText === "smoke transcript"
+        state.resultText === "smoke transcript" &&
+        state.bodyPhase === "done" &&
+        state.voiceCommandPhase === "done"
       ),
       10000
     );
@@ -692,6 +951,7 @@ function readRendererState(window) {
       recordLabel: document.querySelector('#recordLabel')?.textContent || '',
       statusText: document.querySelector('#statusText')?.textContent || '',
       resultText: document.querySelector('#resultText')?.textContent || '',
+      editorCharacterCount: Number(document.querySelector('#resultText')?.dataset.characterCount || 0),
       interfaceLanguage: document.querySelector('#interfaceLanguage')?.value || '',
       whisperLanguage: document.querySelector('#whisperLanguage')?.value || '',
       outputLanguage: document.querySelector('#outputLanguage')?.value || '',
@@ -723,12 +983,31 @@ function readRendererState(window) {
       hasCancelSetupButton: Boolean(document.querySelector('#cancelSetup')),
       cancelSetupHidden: Boolean(document.querySelector('#cancelSetup')?.hidden),
       hasCopyResultButton: Boolean(document.querySelector('#copyResult')),
+      hasInsertResultButton: Boolean(document.querySelector('#insertResult')),
+      hasRestoreResultButton: Boolean(document.querySelector('#restoreResult')),
+      restoreResultDisabled: Boolean(document.querySelector('#restoreResult')?.disabled),
+      recentHistoryCount: document.querySelectorAll('#recentHistoryList [data-history-item]').length,
+      fullHistoryCount: document.querySelectorAll('#historyList [data-history-item]').length,
+      failedHistoryActionsDisabled: (() => {
+        const actions = [...document.querySelectorAll(
+          '#historyList [data-history-status="failed"] [data-history-action]'
+        )];
+        return actions.length > 0 && actions.every((action) => action.disabled);
+      })(),
+      dictationTabSelected: document.querySelector('#dictationTab')?.getAttribute('aria-selected') === 'true',
+      historyTabSelected: document.querySelector('#historyTab')?.getAttribute('aria-selected') === 'true',
+      dictationPanelHidden: Boolean(document.querySelector('#dictationPanel')?.hidden),
+      historyPanelHidden: Boolean(document.querySelector('#historyPanel')?.hidden),
+      activeElementId: document.activeElement?.id || '',
+      bodyPhase: document.body.dataset.phase || '',
+      voiceCommandPhase: document.querySelector('#voiceCommandBar')?.dataset.phase || '',
       hasCheckTextProviderButton: Boolean(document.querySelector('#checkTextProvider')),
       installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
       installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
       installLlmHidden: Boolean(document.querySelector('#installLlm')?.hidden),
       refreshSetupDisabled: Boolean(document.querySelector('#refreshSetupStatus')?.disabled),
       copyAttempts: window.__copyAttempts?.length || 0,
+      copyAttemptTexts: window.__copyAttempts || [],
       execCommands: window.__execCommands || [],
       hasRecordButton: Boolean(document.querySelector('#recordButton')),
       hasLocalFlow: Boolean(window.localFlow)

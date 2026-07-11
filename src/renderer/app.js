@@ -12,6 +12,13 @@ import {
   whisperLanguages
 } from "../shared/languages.js";
 import { getUiText } from "./i18n.js";
+import {
+  createEditorState,
+  normalizeViewPhase,
+  projectHistory,
+  replaceEditorText,
+  restoreEditorText
+} from "./main-view-state.js";
 
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
@@ -23,7 +30,16 @@ const statusText = document.querySelector("#statusText");
 const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
 const historyList = document.querySelector("#historyList");
+const recentHistoryList = document.querySelector("#recentHistoryList");
 const refreshHistory = document.querySelector("#refreshHistory");
+const dictationTab = document.querySelector("#dictationTab");
+const historyTab = document.querySelector("#historyTab");
+const dictationPanel = document.querySelector("#dictationPanel");
+const historyPanel = document.querySelector("#historyPanel");
+const openHistory = document.querySelector("#openHistory");
+const viewAllHistory = document.querySelector("#viewAllHistory");
+const voiceCommandBar = document.querySelector("#voiceCommandBar");
+const footerHealth = document.querySelector("#footerHealth");
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
 const checkTextProvider = document.querySelector("#checkTextProvider");
@@ -46,6 +62,8 @@ const refreshSetupStatus = document.querySelector("#refreshSetupStatus");
 const cancelSetup = document.querySelector("#cancelSetup");
 const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
+const insertResult = document.querySelector("#insertResult");
+const restoreResult = document.querySelector("#restoreResult");
 const shortcutCaptureButtons = [...document.querySelectorAll("[data-shortcut-target]")];
 
 let recorder = null;
@@ -59,6 +77,10 @@ let currentRecordRecoveryAction = null;
 let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
+let editorState = createEditorState();
+let emptyEditorMessageKey = "empty.result";
+let allHistory = [];
+const mainTabs = [dictationTab, historyTab];
 const shortcutRecorder = createShortcutRecorder({
   eventTarget: window,
   buttons: shortcutCaptureButtons,
@@ -74,6 +96,9 @@ async function init() {
   currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
+  setViewPhase("idle");
+  renderEditorState();
+  activateTab(dictationTab);
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
   recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
@@ -81,6 +106,14 @@ async function init() {
   closeSettings.addEventListener("click", () => setSettingsDrawer(false));
   settingsDrawer.addEventListener("click", closeSettingsFromBackdrop);
   refreshHistory.addEventListener("click", renderHistory);
+  viewAllHistory.addEventListener("click", () => activateTab(historyTab));
+  openHistory?.addEventListener("click", () => activateTab(historyTab));
+  for (const tab of mainTabs) {
+    tab.addEventListener("click", () => activateTab(tab));
+    tab.addEventListener("keydown", handleTabKeydown);
+  }
+  recentHistoryList.addEventListener("click", handleHistoryAction);
+  historyList.addEventListener("click", handleHistoryAction);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
@@ -90,8 +123,14 @@ async function init() {
   refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
   cancelSetup.addEventListener("click", cancelActiveModelSetup);
   copyResult.addEventListener("click", copyLatestResult);
+  insertResult.addEventListener("click", insertLatestResult);
+  restoreResult.addEventListener("click", restoreLatestResult);
+  resultText.addEventListener("focus", prepareEmptyEditor);
+  resultText.addEventListener("blur", () => renderEditorState());
+  resultText.addEventListener("input", updateEditorFromInput);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
-  form.outputLanguage.addEventListener("change", refreshProcessingProviderPreview);
+  form.whisperLanguage.addEventListener("change", changeProcessingLanguage);
+  form.outputLanguage.addEventListener("change", changeProcessingLanguage);
   form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
   form.addEventListener("submit", saveSettings);
   for (const button of shortcutCaptureButtons) {
@@ -128,6 +167,23 @@ function changeInterfaceLanguage() {
   renderHistory();
 }
 
+async function changeProcessingLanguage(event) {
+  const field = event.currentTarget;
+  const settingName = field.name;
+
+  try {
+    await saveSettingsFromCurrentForm({ updateStatus: false });
+    await refreshSetupStatusView({ updateStatus: false });
+    renderFooterHealth();
+  } catch {
+    field.value = currentSettings?.[settingName] ?? "auto";
+    setStatus(getSafeUiText("status.settingsSaveFailed", "Settings could not be saved."));
+    renderProviderStatus();
+    renderSetupChecklist();
+    renderFooterHealth();
+  }
+}
+
 async function refreshProcessingProviderPreview() {
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
@@ -138,14 +194,22 @@ async function refreshProcessingProviderPreview() {
 
 function handleMainStatus(payload) {
   const phaseKeys = {
+    starting: "status.preparing",
+    recording: "status.recording",
+    stopping: "status.preparing",
     transcribing: "status.transcribing",
     polishing: "status.polishing",
     pasting: "status.pasting",
     done: "status.done"
   };
-  const key = phaseKeys[payload.phase];
+  const key = phaseKeys[payload?.phase];
 
-  setStatus(key ? t(key) : payload.message);
+  setViewPhase(payload?.phase);
+  if (key) {
+    setStatus(t(key));
+  } else if (payload?.phase === "idle") {
+    setReadyStatus();
+  }
 }
 
 async function runWhisperDiagnostics() {
@@ -268,6 +332,20 @@ async function refreshProviderStatus() {
   renderProviderStatus();
   renderSetupChecklist();
   applyRecordReadiness();
+  renderFooterHealth();
+}
+
+function renderFooterHealth() {
+  if (!footerHealth) return;
+
+  const readiness = getCurrentRecordReadiness();
+  const statusNode = footerHealth.querySelectorAll("span")[1];
+  footerHealth.dataset.ready = String(readiness.ready);
+  if (statusNode) {
+    statusNode.textContent = readiness.ready
+      ? t("status.whisperReady")
+      : getRecordDisabledMessage(readiness);
+  }
 }
 
 function renderProviderStatus() {
@@ -652,15 +730,73 @@ function getSetupFailureMessage(setup, fallbackKey = "setup.failed") {
 }
 
 async function copyLatestResult() {
-  const text = resultText.textContent.trim();
-  if (!text || resultText.dataset.emptyResult === "true") return;
+  if (editorState.empty) return;
 
   try {
-    await writeClipboardText(text);
+    await writeClipboardText(editorState.currentText);
     setStatus(t("status.copied"));
   } catch {
     setStatus(t("status.copyFailed"));
   }
+}
+
+async function insertLatestResult() {
+  if (editorState.empty) return;
+  await insertText(editorState.currentText);
+}
+
+async function insertText(text) {
+  if (typeof text !== "string" || text === "") return false;
+
+  try {
+    const result = await window.localFlow.insertText(text);
+    if (result?.ok === false || result?.success === false) {
+      setStatus(getSafeUiText("status.insertFailed", "Text could not be inserted."));
+      return false;
+    }
+    setStatus(getSafeUiText("status.inserted", "Text inserted."));
+    return true;
+  } catch {
+    setStatus(getSafeUiText("status.insertFailed", "Text could not be inserted."));
+    return false;
+  }
+}
+
+function restoreLatestResult() {
+  if (!editorState.dirty || editorState.empty) return;
+  editorState = restoreEditorText(editorState);
+  renderEditorState();
+}
+
+function prepareEmptyEditor() {
+  if (editorState.empty) {
+    resultText.textContent = "";
+  }
+}
+
+function updateEditorFromInput() {
+  emptyEditorMessageKey = "empty.result";
+  editorState = replaceEditorText(editorState, resultText.textContent || "");
+  renderEditorState({ syncText: false });
+}
+
+function replaceEditorBaseline(text, emptyMessageKey = "empty.result") {
+  emptyEditorMessageKey = emptyMessageKey;
+  editorState = replaceEditorText(editorState, text, { asBaseline: true });
+  renderEditorState();
+}
+
+function renderEditorState({ syncText = true } = {}) {
+  if (syncText) {
+    resultText.textContent = editorState.empty
+      ? t(emptyEditorMessageKey)
+      : editorState.currentText;
+  }
+  resultText.dataset.emptyResult = String(editorState.empty);
+  resultText.dataset.characterCount = String(editorState.characterCount);
+  restoreResult.disabled = !editorState.dirty || editorState.empty;
+  copyResult.disabled = editorState.empty;
+  insertResult.disabled = editorState.empty;
 }
 
 async function writeClipboardText(text) {
@@ -725,6 +861,7 @@ async function startRecording() {
     if (!ensureRecordReady()) {
       const message = recordButton.title || statusText.textContent || "Recording is not ready.";
       setRecordingLifecyclePhase("idle");
+      setViewPhase("error");
       reportRecordingLifecycle({
         phase: "error",
         reason: "not_ready",
@@ -755,6 +892,7 @@ async function startRecording() {
     cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
+    setViewPhase("error");
     document.body.classList.remove("recording");
     updateRecordLabel();
     applyRecordReadiness();
@@ -775,6 +913,7 @@ async function stopRecording() {
     applyRecordReadiness();
     setStatus(t("status.preparing"));
     reportRecordingLifecycle({ phase: "transcribing", message: t("status.preparing") });
+    setRecordingLifecyclePhase("transcribing");
 
     const activeRecorder = recorder;
     const wav = await activeRecorder.stop();
@@ -792,6 +931,7 @@ async function stopRecording() {
     if (!isCurrentRecordingOperation(operationToken)) return;
 
     setRecordingLifecyclePhase("idle");
+    setViewPhase(entry?.status === "failed" ? "warning" : "done");
   } catch (error) {
     if (!isCurrentRecordingOperation(operationToken)) return;
 
@@ -799,6 +939,7 @@ async function stopRecording() {
     cleanupRecorder();
     isRecording = false;
     setRecordingLifecyclePhase("idle");
+    setViewPhase("error");
     document.body.classList.remove("recording");
     updateRecordLabel();
     applyRecordReadiness();
@@ -808,16 +949,14 @@ async function stopRecording() {
 
 function renderDictationResult(entry) {
   if (entry?.status === "failed") {
-    resultText.dataset.emptyResult = "true";
-    resultText.textContent = t("result.outputFailed");
+    replaceEditorBaseline("", "result.outputFailed");
     setStatus(t("status.outputFailed", {
       message: entry.processingError || "Unknown text model error."
     }));
     return;
   }
 
-  resultText.dataset.emptyResult = "false";
-  resultText.textContent = entry.text;
+  replaceEditorBaseline(entry?.text || "");
 }
 
 async function saveSettings(event) {
@@ -887,18 +1026,157 @@ function fillSettings(settings) {
 
 async function renderHistory() {
   const history = await window.localFlow.listHistory();
+  allHistory = Array.isArray(history) ? history : [];
 
-  if (!history.length) {
+  if (!allHistory.length) {
     historyList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+    recentHistoryList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
     return;
   }
 
-  historyList.innerHTML = history.map((item) => `
-    <article class="history-item">
-      <time>${new Date(item.createdAt).toLocaleString()}</time>
-      <p>${escapeHtml(item.text)}</p>
+  renderRecentHistory();
+  renderFullHistory();
+}
+
+function renderRecentHistory() {
+  const limit = window.innerHeight < 650 ? 2 : 3;
+  const recent = projectHistory(allHistory, limit);
+
+  recentHistoryList.innerHTML = recent.length
+    ? recent.map((item) => renderHistoryItem(item, { recent: true })).join("")
+    : `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
+}
+
+function renderFullHistory() {
+  historyList.innerHTML = allHistory
+    .map((item, index) => renderHistoryItem(item, { index }))
+    .join("");
+}
+
+function renderHistoryItem(item, { index = -1, recent = false } = {}) {
+  const text = typeof item?.text === "string" ? item.text : "";
+  const usable = item?.status === "complete" && text !== "";
+  const id = recent ? item.id : historyEntryId(item, index);
+  const resolvedIndex = recent ? findHistoryEntryIndex(id) : index;
+  const preview = usable
+    ? singleLineText(text)
+    : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");
+  const count = usable ? Array.from(text).length : 0;
+  const disabled = usable ? "" : " disabled";
+  const actionLabel = recent ? preview : formatHistoryTime(item?.createdAt);
+
+  return `
+    <article class="history-item" data-history-item data-history-status="${escapeHtml(item?.status || "empty")}">
+      <button
+        type="button"
+        class="history-select"
+        data-history-action="select"
+        data-history-id="${escapeHtml(id)}"
+        data-history-index="${resolvedIndex}"
+        aria-label="${escapeHtml(actionLabel || preview)}"
+        ${disabled}
+      >
+        <time>${escapeHtml(formatHistoryTime(item?.createdAt))}</time>
+        <p>${escapeHtml(preview)}</p>
+        <span data-history-character-count>${count}</span>
+        <span data-lucide="ChevronRight" aria-hidden="true"></span>
+      </button>
+      ${recent ? "" : `
+        <div class="button-row">
+          <button
+            type="button"
+            class="ghost"
+            data-history-action="copy"
+            data-history-id="${escapeHtml(id)}"
+            data-history-index="${resolvedIndex}"
+            ${disabled}
+          >${escapeHtml(t("action.copy"))}</button>
+          <button
+            type="button"
+            class="ghost"
+            data-history-action="insert"
+            data-history-id="${escapeHtml(id)}"
+            data-history-index="${resolvedIndex}"
+            ${disabled}
+          >${escapeHtml(insertResult.textContent.trim() || "Insert")}</button>
+        </div>
+      `}
     </article>
-  `).join("");
+  `;
+}
+
+async function handleHistoryAction(event) {
+  const actionButton = event.target.closest?.("[data-history-action]");
+  if (!actionButton || actionButton.disabled) return;
+
+  const entry = allHistory[Number(actionButton.dataset.historyIndex)];
+  const text = typeof entry?.text === "string" ? entry.text : "";
+  if (entry?.status !== "complete" || text === "") return;
+
+  if (actionButton.dataset.historyAction === "select") {
+    replaceEditorBaseline(text);
+    activateTab(dictationTab);
+    return;
+  }
+
+  if (actionButton.dataset.historyAction === "copy") {
+    try {
+      await writeClipboardText(text);
+      setStatus(t("status.copied"));
+    } catch {
+      setStatus(t("status.copyFailed"));
+    }
+    return;
+  }
+
+  if (actionButton.dataset.historyAction === "insert") {
+    await insertText(text);
+  }
+}
+
+function historyEntryId(entry, index) {
+  return typeof entry?.id === "string" && entry.id.trim() !== ""
+    ? entry.id
+    : `${typeof entry?.createdAt === "string" ? entry.createdAt : ""}:${index}`;
+}
+
+function findHistoryEntryIndex(id) {
+  return allHistory.findIndex((entry, index) => historyEntryId(entry, index) === id);
+}
+
+function singleLineText(text) {
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+function formatHistoryTime(createdAt) {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(currentLanguage);
+}
+
+function activateTab(activeTab, { focus = false } = {}) {
+  for (const tab of mainTabs) {
+    const selected = tab === activeTab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+
+  dictationPanel.hidden = activeTab !== dictationTab;
+  historyPanel.hidden = activeTab !== historyTab;
+  if (focus) activeTab.focus();
+}
+
+function handleTabKeydown(event) {
+  const currentIndex = mainTabs.indexOf(event.currentTarget);
+  let nextIndex = currentIndex;
+
+  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % mainTabs.length;
+  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + mainTabs.length) % mainTabs.length;
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = mainTabs.length - 1;
+  else return;
+
+  event.preventDefault();
+  activateTab(mainTabs[nextIndex], { focus: true });
 }
 
 function applyInterfaceLanguage(language) {
@@ -910,6 +1188,7 @@ function applyInterfaceLanguage(language) {
   populateLanguageSelects(selectedValues);
 
   for (const element of document.querySelectorAll("[data-i18n]")) {
+    if (element === resultText) continue;
     element.textContent = t(element.dataset.i18n);
   }
 
@@ -922,9 +1201,7 @@ function applyInterfaceLanguage(language) {
   updateRecordLabel();
   shortcutRecorder.refreshLabels();
 
-  if (resultText.dataset.emptyResult === "true") {
-    resultText.textContent = t("empty.result");
-  }
+  renderEditorState();
 }
 
 function readLanguageSelections() {
@@ -1036,10 +1313,22 @@ function cleanupRecorder(targetRecorder = recorder) {
 
 function setRecordingLifecyclePhase(phase) {
   recordingLifecyclePhase = phase;
+  setViewPhase(phase);
+}
+
+function setViewPhase(phase) {
+  const normalizedPhase = normalizeViewPhase(phase);
+  document.body.dataset.phase = normalizedPhase;
+  voiceCommandBar.dataset.phase = normalizedPhase;
 }
 
 function t(key, replacements = {}) {
   return getUiText(currentLanguage, key, replacements);
+}
+
+function getSafeUiText(key, fallback) {
+  const translated = t(key);
+  return translated === key ? fallback : translated;
 }
 
 function formatHotkey(hotkey) {

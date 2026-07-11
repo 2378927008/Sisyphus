@@ -14,7 +14,8 @@ test("creates an empty editor state", () => {
     baselineText: "",
     currentText: "",
     characterCount: 0,
-    dirty: false
+    dirty: false,
+    empty: true
   });
 });
 
@@ -29,6 +30,7 @@ test("uses generated text as the baseline and tracks user edits", () => {
   assert.equal(edited.currentText, "第一段已编辑");
   assert.equal(edited.characterCount, Array.from("第一段已编辑").length);
   assert.equal(edited.dirty, true);
+  assert.equal(edited.empty, false);
 });
 
 test("restores the current editor state to its baseline", () => {
@@ -46,7 +48,8 @@ test("loads history text as a new editor baseline", () => {
     baselineText: "历史文本",
     currentText: "历史文本",
     characterCount: Array.from("历史文本").length,
-    dirty: false
+    dirty: false,
+    empty: false
   });
 });
 
@@ -110,12 +113,17 @@ test("normalizes known view phases and falls back to idle", () => {
   assert.equal(normalizeViewPhase(null), "idle");
 });
 
+test("maps polishing work onto the transcribing view phase", () => {
+  assert.equal(normalizeViewPhase("polishing"), "transcribing");
+});
+
 test("handles invalid inputs without throwing and normalizes the limit", () => {
   assert.deepEqual(createEditorState(null), {
     baselineText: "",
     currentText: "",
     characterCount: 0,
-    dirty: false
+    dirty: false,
+    empty: true
   });
   assert.equal(replaceEditorText(null, null).currentText, "");
   assert.equal(restoreEditorText(null).currentText, "");
