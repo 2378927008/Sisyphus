@@ -111,8 +111,8 @@ test("history refresh and view-all commands keep separate semantics", async () =
   const viewAllButton = getElementMarkup(recentHistory, "button", "viewAllHistory");
   const refreshButton = getElementMarkup(fullHistory, "button", "refreshHistory");
 
-  assert.match(viewAllButton, /data-i18n="action\.viewAll"/);
-  assert.match(viewAllButton, />[\s\S]*查看全部[\s\S]*<\/button>/);
+  assert.doesNotMatch(viewAllButton, /action\.viewAll/);
+  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
   assert.match(refreshButton, /data-i18n="action\.refresh"/);
   assert.match(refreshButton, />[\s\S]*刷新[\s\S]*<\/button>/);
   assert.doesNotMatch(recentHistory, /id="refreshHistory"/);
@@ -211,6 +211,32 @@ test("pure icon buttons have static and translatable accessible Chinese names", 
     assert.match(button, /data-i18n-title="[^"]+"/, `${id} translatable title`);
     assert.match(button, /data-i18n-aria-label="[^"]+"/, `${id} translatable aria-label`);
   }
+});
+
+test("localized icon controls preserve icons by translating only child labels", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const iconButtons = [...html.matchAll(/<button\b[\s\S]*?<\/button>/g)]
+    .map((match) => match[0])
+    .filter((button) => button.includes("data-lucide="));
+
+  assert.ok(iconButtons.length > 0);
+  for (const button of iconButtons) {
+    const openingTag = button.match(/^<button\b[^>]*>/)?.[0] ?? "";
+    const id = openingTag.match(/\bid="([^"]+)"/)?.[1] ?? "unnamed icon button";
+    assert.doesNotMatch(openingTag, /\sdata-i18n="/, id);
+  }
+
+  const copyButton = getElementMarkup(html, "button", "copyResult");
+  assert.match(copyButton, /data-lucide="Copy"/);
+  assert.match(
+    copyButton,
+    /<span class="button-label" data-i18n="action\.copy">复制<\/span>/
+  );
+
+  const viewAllButton = getElementMarkup(html, "button", "viewAllHistory");
+  assert.match(viewAllButton, /data-lucide="ChevronRight"/);
+  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
+  assert.doesNotMatch(viewAllButton, /action\.viewAll/);
 });
 
 test("settings expose dictation modes without a legacy translation mode", async () => {
