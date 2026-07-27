@@ -675,7 +675,10 @@ test("main process imports Windows productization modules", async () => {
   assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
   assert.match(mainSource, /import \{ buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip \} from "\.\/tray-menu\.js";/);
   assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
-  assert.match(mainSource, /import \{ bindMainWindowLifecycle, buildMainWindowOptions, revealMainWindow \} from "\.\/main-window\.js";/);
+  assert.match(
+    mainSource,
+    /import \{\s*bindMainWindowLifecycle,\s*buildMainWindowOptions,\s*revealMainWindow,\s*showMainWindowLoadFailure\s*\} from "\.\/main-window\.js";/
+  );
   assert.match(mainSource, /import \{ createNativeInputShortcutFromPackage \} from "\.\/native-input-shortcut\.js";/);
   assert.match(mainSource, /import \{ createShortcutBackend \} from "\.\/shortcut-backend\.js";/);
 });

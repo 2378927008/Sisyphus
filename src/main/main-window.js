@@ -28,6 +28,42 @@ export function revealMainWindow(window) {
   return true;
 }
 
+export async function showMainWindowLoadFailure({
+  app,
+  dialog,
+  language = "en"
+} = {}) {
+  const chinese = language === "zh-Hans";
+  const message = chinese
+    ? "Local Flow \u4e3b\u7a97\u53e3\u52a0\u8f7d\u5931\u8d25\u3002\u53ef\u4ee5\u9000\u51fa\u5e94\u7528\uff0c\u6216\u7ee7\u7eed\u5728\u540e\u53f0\u8fd0\u884c\u5e76\u7a0d\u540e\u91cd\u65b0\u6253\u5f00\u3002"
+    : "Local Flow could not load its main window. You can exit, or keep it running in the background and reopen it later.";
+  const buttons = chinese
+    ? ["\u9000\u51fa", "\u7ee7\u7eed\u5728\u540e\u53f0"]
+    : ["Exit", "Keep running in background"];
+
+  try {
+    const result = await dialog?.showMessageBox?.({
+      type: "error",
+      title: "Local Flow",
+      message,
+      buttons,
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    });
+
+    if (result?.response === 0) {
+      app.isQuitting = true;
+      app.quit?.();
+      return true;
+    }
+  } catch {
+    // The recovery dialog is best-effort; the tray remains available.
+  }
+
+  return false;
+}
+
 export function bindMainWindowLifecycle({
   window,
   showOnReady = true,

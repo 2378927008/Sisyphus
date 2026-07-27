@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
+import * as mainWindowModule from "../src/main/main-window.js";
+
+const {
   bindMainWindowLifecycle,
   buildMainWindowOptions,
   revealMainWindow
-} from "../src/main/main-window.js";
+} = mainWindowModule;
 
 test("main window uses V4 dimensions and native frame", () => {
   const options = buildMainWindowOptions({ preloadPath: "C:/app/preload.cjs" });
@@ -27,6 +29,81 @@ test("ready and load fallback reveal only once", () => {
 
   assert.equal(harness.calls.show, 1);
   assert.equal(harness.calls.focus, 1);
+});
+
+test("hidden startup ignores both ready and load fallback reveals", () => {
+  const harness = createWindowHarness();
+  bindMainWindowLifecycle({ window: harness.window, showOnReady: false });
+
+  harness.emitWindow("ready-to-show");
+  harness.emitContents("did-finish-load");
+
+  assert.equal(harness.calls.show, 0);
+  assert.equal(harness.calls.focus, 0);
+});
+
+test("load failure dialog uses fixed recovery copy without diagnostics", async () => {
+  assert.equal(typeof mainWindowModule.showMainWindowLoadFailure, "function");
+  let displayedOptions;
+  const diagnosticFailure = {
+    errorCode: -2,
+    errorDescription: "spawn C:\\Users\\Administrator\\private-helper.exe ENOENT stderr https://secret.example",
+    validatedURL: "file:///C:/Users/Administrator/AppData/Local/Local%20Flow/resources/app/index.html"
+  };
+
+  await mainWindowModule.showMainWindowLoadFailure({
+    app: {
+      isQuitting: false,
+      quit() {
+        assert.fail("keep-running response must not quit");
+      }
+    },
+    dialog: {
+      async showMessageBox(options) {
+        displayedOptions = options;
+        return { response: 1 };
+      }
+    },
+    language: "en",
+    failure: diagnosticFailure
+  });
+
+  assert.deepEqual(displayedOptions, {
+    type: "error",
+    title: "Local Flow",
+    message: "Local Flow could not load its main window. You can exit, or keep it running in the background and reopen it later.",
+    buttons: ["Exit", "Keep running in background"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  });
+  assert.doesNotMatch(
+    JSON.stringify(displayedOptions),
+    /Administrator|file:|https?:|spawn|ENOENT|stderr|private-helper/i
+  );
+});
+
+test("load failure dialog localizes the same fixed recovery action", async () => {
+  assert.equal(typeof mainWindowModule.showMainWindowLoadFailure, "function");
+  let displayedOptions;
+
+  await mainWindowModule.showMainWindowLoadFailure({
+    app: {},
+    dialog: {
+      async showMessageBox(options) {
+        displayedOptions = options;
+        return { response: 1 };
+      }
+    },
+    language: "zh-Hans"
+  });
+
+  assert.equal(
+    displayedOptions.message,
+    "Local Flow \u4e3b\u7a97\u53e3\u52a0\u8f7d\u5931\u8d25\u3002\u53ef\u4ee5\u9000\u51fa\u5e94\u7528\uff0c\u6216\u7ee7\u7eed\u5728\u540e\u53f0\u8fd0\u884c\u5e76\u7a0d\u540e\u91cd\u65b0\u6253\u5f00\u3002"
+  );
+  assert.deepEqual(displayedOptions.buttons, ["\u9000\u51fa", "\u7ee7\u7eed\u5728\u540e\u53f0"]);
+  assert.equal("detail" in displayedOptions, false);
 });
 
 test("reveal restores a minimized window before focusing it", () => {

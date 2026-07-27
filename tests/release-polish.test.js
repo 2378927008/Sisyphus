@@ -58,7 +58,9 @@ test("main process retains recoverable main-window and tray lifecycle wiring", a
   const lifecycle = await readFile(new URL("../src/main/main-window.js", import.meta.url), "utf8");
 
   assert.match(main, /onFirstHide: showBackgroundNotice/);
-  assert.match(main, /onLoadFailure: handleMainFrameLoadFailure/);
+  assert.match(main, /onLoadFailure:\s*\(\)\s*=>\s*\{/);
+  assert.match(main, /showMainWindowLoadFailure\(\{/);
+  assert.doesNotMatch(main, /validatedURL|errorDescription/);
   assert.match(main, /tray\?\.displayBalloon\?\.\(/);
   assert.match(main, /globalShortcut\.unregisterAll\?\.\(\)/);
   assert.match(main, /nativeShortcut\?\.unregisterAll\?\.\(\)/);
