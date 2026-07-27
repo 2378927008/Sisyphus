@@ -360,7 +360,7 @@ async function loadHistory(historyPath, io) {
 
 function normalizeHistoryPatch(patch) {
   const next = {};
-  const fields = ["status", "pasteStatus", "source", "snippetId"];
+  const fields = ["status", "pasteStatus", "source", "snippetId", "detectedLanguage", "providerMode"];
   for (const key of fields) {
     if (Object.hasOwn(patch || {}, key)) {
       next[key] = String(patch[key] ?? "").trim();

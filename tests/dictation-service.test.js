@@ -2,6 +2,85 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DictationService } from "../src/main/dictation-service.js";
 
+test("processTranscript expands an exact snippet without polishing", async () => {
+  const history = [];
+  const polishCalls = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      snippets: [{ id: "s1", trigger: "meeting notes", text: "Meeting notes template" }]
+    }),
+    clipboard: {},
+    transcribe: async () => "meeting notes",
+    polish: async (...args) => {
+      polishCalls.push(args);
+      return "should not be used";
+    },
+    notifyStatus: () => {}
+  });
+
+  const result = await service.processTranscript("  meeting notes  ");
+
+  assert.equal(result.transcript, "  meeting notes  ");
+  assert.equal(result.text, "Meeting notes template");
+  assert.equal(result.source, "snippet");
+  assert.equal(result.snippetId, "s1");
+  assert.equal(result.status, "complete");
+  assert.equal(polishCalls.length, 0);
+  assert.equal(history.length, 0);
+});
+
+test("processTranscript only expands complete normalized snippet matches", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      snippets: [{ id: "s1", trigger: "meeting notes", text: "Meeting notes template" }]
+    }),
+    clipboard: {},
+    polish: async (transcript) => `cleaned: ${transcript}`,
+    notifyStatus: () => {}
+  });
+
+  const result = await service.processTranscript("please create meeting notes");
+
+  assert.equal(result.text, "cleaned: please create meeting notes");
+  assert.equal(result.source, "dictation");
+  assert.equal(result.snippetId, "");
+});
+
+test("processWav transcribes once and writes one snippet history entry", async () => {
+  const history = [];
+  let transcribeCalls = 0;
+  let pasteCalls = 0;
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      pasteAfterTranscribe: true,
+      snippets: [{ id: "s1", trigger: "meeting notes", text: "Meeting notes template" }]
+    }),
+    clipboard: {},
+    transcribe: async () => {
+      transcribeCalls += 1;
+      return "meeting notes";
+    },
+    polish: async () => {
+      throw new Error("snippet should bypass polishing");
+    },
+    paste: async () => {
+      pasteCalls += 1;
+    },
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(transcribeCalls, 1);
+  assert.equal(history.length, 1);
+  assert.equal(history[0], entry);
+  assert.equal(entry.text, "Meeting notes template");
+  assert.equal(entry.source, "snippet");
+  assert.equal(entry.snippetId, "s1");
+  assert.equal(pasteCalls, 1);
+});
+
 test("processWav saves polished result and pastes when enabled", async () => {
   const history = [];
   const service = new DictationService({

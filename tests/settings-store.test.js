@@ -680,6 +680,30 @@ test("history updates preserve transcript and serialize writes", async () => {
   }
 });
 
+test("history updates persist processing metadata without changing the transcript", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-processing-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+    await store.addHistory({ id: "h1", transcript: "original", text: "edited", status: "complete" });
+    const updated = await store.updateHistory("h1", {
+      transcript: "attempted replacement",
+      detectedLanguage: "en",
+      providerMode: "local",
+      source: "snippet",
+      snippetId: "s1"
+    });
+
+    assert.equal(updated.transcript, "original");
+    assert.equal(updated.detectedLanguage, "en");
+    assert.equal(updated.providerMode, "local");
+    assert.equal(updated.source, "snippet");
+    assert.equal(updated.snippetId, "s1");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("history replacement writes clean up temporary files when rename fails", async () => {
   const writes = [];
   const removed = [];

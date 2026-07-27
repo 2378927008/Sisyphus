@@ -1,5 +1,6 @@
 import { detectLikelyLanguage } from "../shared/language-detection.js";
 import { isTargetOutputLanguage } from "../shared/languages.js";
+import { expandExactSnippet } from "../shared/personalization.js";
 import { transcribeWithWhisper } from "./local-asr.js";
 import { polishTranscript } from "./local-llm.js";
 import { pasteText } from "./paste.js";
@@ -36,45 +37,22 @@ export class DictationService {
 
     this.notifyStatus({ phase: "transcribing", message: "Transcribing speech..." });
     const transcript = await this.transcribe(wavBuffer, settings);
-    const detectedLanguage = detectLikelyLanguage(transcript);
-
-    let text = transcript.trim();
-    let status = "complete";
-    let processingError = "";
-
-    try {
-      this.notifyStatus({ phase: "polishing", message: "Cleaning up dictation..." });
-      if (isTargetOutputLanguage(settings.outputLanguage)) {
-        assertTextProviderCanProcess(providers);
-      }
-      text = await this.polish(transcript, settings);
-    } catch (error) {
-      status = isTargetOutputLanguage(settings.outputLanguage) ? "failed" : "partial";
-      if (status === "failed") {
-        text = "";
-      }
-      processingError = error instanceof Error ? error.message : String(error);
-    }
+    const processing = await this.processTranscript(transcript, { settings, providers });
 
     const entry = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
-      transcript,
-      text,
+      ...processing,
       mode: settings.polishMode,
       outputLanguage: settings.outputLanguage,
-      detectedLanguage,
-      providerMode: providers.mode,
-      status,
-      processingError,
       pasteStatus: settings.pasteAfterTranscribe ? "pending" : "skipped",
       pasteError: ""
     };
 
-    if (settings.pasteAfterTranscribe && status === "complete") {
+    if (settings.pasteAfterTranscribe && entry.status === "complete") {
       this.notifyStatus({ phase: "pasting", message: "Pasting into the active app..." });
       try {
-        await this.paste(text, { clipboard: this.clipboard });
+        await this.paste(entry.text, { clipboard: this.clipboard });
         entry.pasteStatus = "complete";
       } catch (error) {
         entry.pasteStatus = "failed";
@@ -93,13 +71,61 @@ export class DictationService {
 
     await this.settingsStore.addHistory(entry, settings.historyLimit);
 
-    const finalReason = getFinalReason(status);
+    const finalReason = getFinalReason(entry.status);
     this.notifyStatus({
-      phase: getFinalPhase(status),
+      phase: getFinalPhase(entry.status),
       ...(finalReason ? { reason: finalReason } : {}),
-      message: getFinalMessage(status, processingError)
+      message: getFinalMessage(entry.status, entry.processingError)
     });
     return entry;
+  }
+
+  async processTranscript(transcript, { settings, providers } = {}) {
+    const effectiveSettings = settings || await this.settingsStore.getSettings({ includeSecrets: true });
+    const effectiveProviders = providers || this.providerStatus(effectiveSettings);
+    const snippet = expandExactSnippet(transcript, effectiveSettings.snippets);
+    const detectedLanguage = detectLikelyLanguage(transcript);
+
+    if (snippet.matched) {
+      return {
+        transcript,
+        text: snippet.text,
+        status: "complete",
+        processingError: "",
+        detectedLanguage,
+        providerMode: effectiveProviders.mode,
+        source: "snippet",
+        snippetId: snippet.snippetId
+      };
+    }
+
+    let text = String(transcript ?? "").trim();
+    let status = "complete";
+    let processingError = "";
+
+    try {
+      if (isTargetOutputLanguage(effectiveSettings.outputLanguage)) {
+        assertTextProviderCanProcess(effectiveProviders);
+      }
+      text = await this.polish(transcript, effectiveSettings);
+    } catch (error) {
+      status = isTargetOutputLanguage(effectiveSettings.outputLanguage) ? "failed" : "partial";
+      if (status === "failed") {
+        text = "";
+      }
+      processingError = getErrorMessage(error);
+    }
+
+    return {
+      transcript,
+      text,
+      status,
+      processingError,
+      detectedLanguage,
+      providerMode: effectiveProviders.mode,
+      source: "dictation",
+      snippetId: ""
+    };
   }
 }
 
