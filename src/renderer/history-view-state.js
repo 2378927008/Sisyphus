@@ -9,9 +9,7 @@ function comparisonText(value) {
 function stableLegacySource(entry) {
   return JSON.stringify([
     asText(entry?.createdAt),
-    asText(entry?.transcript),
-    asText(entry?.text),
-    asText(entry?.status)
+    asText(entry?.transcript)
   ]);
 }
 
@@ -27,6 +25,25 @@ function shortStableHash(value) {
 export function resolveHistoryEntryId(entry) {
   const id = asText(entry?.id).trim();
   return id || `legacy-${shortStableHash(stableLegacySource(entry))}`;
+}
+
+export function resolveHistoryEntryIds(entries) {
+  if (!Array.isArray(entries)) return [];
+
+  const used = new Set();
+  const occurrences = new Map();
+  return entries.map((entry) => {
+    const baseId = resolveHistoryEntryId(entry);
+    let occurrence = (occurrences.get(baseId) || 0) + 1;
+    let candidate = occurrence === 1 ? baseId : `${baseId}-${occurrence}`;
+    while (used.has(candidate)) {
+      occurrence += 1;
+      candidate = `${baseId}-${occurrence}`;
+    }
+    occurrences.set(baseId, occurrence);
+    used.add(candidate);
+    return candidate;
+  });
 }
 
 function localDateKey(value) {
@@ -71,14 +88,16 @@ function compareHistoryGroups(left, right) {
 export function normalizeHistoryEntries(entries) {
   if (!Array.isArray(entries)) return [];
 
+  const ids = resolveHistoryEntryIds(entries);
   return entries
-    .filter((entry) => entry && typeof entry === "object")
-    .map((entry) => {
+    .map((entry, index) => ({ entry, id: ids[index] }))
+    .filter(({ entry }) => entry && typeof entry === "object")
+    .map(({ entry, id }) => {
       const text = asText(entry.text);
       const transcript = asText(entry.transcript);
       return {
         ...entry,
-        id: resolveHistoryEntryId(entry),
+        id,
         text,
         transcript,
         createdAt: asText(entry.createdAt),

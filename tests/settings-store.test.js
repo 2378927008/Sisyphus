@@ -726,6 +726,97 @@ test("history conditional updates reject stale text and timestamp versions", asy
   }
 });
 
+test("history reads persist unique ids before legacy records become editable", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-id-migration-"));
+  const historyPath = path.join(userDataPath, "history.json");
+  const duplicateLegacy = {
+    createdAt: "2026-07-27T09:00:00.000Z",
+    transcript: "same original speech",
+    text: "same output",
+    status: "complete"
+  };
+
+  try {
+    await writeFile(historyPath, JSON.stringify([
+      duplicateLegacy,
+      structuredClone(duplicateLegacy),
+      { id: "existing-id", createdAt: "2026-07-26T09:00:00.000Z", text: "first existing", status: "complete" },
+      { id: "existing-id", createdAt: "2026-07-25T09:00:00.000Z", text: "duplicate existing", status: "complete" }
+    ]), "utf8");
+    const store = createSettingsStore(userDataPath);
+
+    const migrated = await store.getHistory();
+    const ids = migrated.map((entry) => entry.id);
+    const persisted = JSON.parse(await readFile(historyPath, "utf8"));
+
+    assert.equal(ids.every((id) => typeof id === "string" && id.length > 0), true);
+    assert.equal(new Set(ids).size, migrated.length);
+    assert.equal(migrated[2].id, "existing-id");
+    assert.notEqual(migrated[3].id, "existing-id");
+    assert.deepEqual(persisted, migrated);
+
+    const stableId = migrated[0].id;
+    const updated = await store.updateHistory(stableId, { text: "edited output", status: "partial" });
+    const reloaded = await store.getHistoryEntry(stableId);
+
+    assert.equal(updated.id, stableId);
+    assert.equal(reloaded.id, stableId);
+    assert.equal(reloaded.text, "edited output");
+    assert.equal(reloaded.status, "partial");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("history additions persist an id when the caller omits one", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-add-id-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+    const added = await store.addHistory({
+      createdAt: "2026-07-27T09:00:00.000Z",
+      transcript: "source",
+      text: "output",
+      status: "complete"
+    });
+    const persisted = await store.getHistory();
+
+    assert.equal(typeof added[0].id, "string");
+    assert.equal(added[0].id.length > 0, true);
+    assert.equal(persisted[0].id, added[0].id);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("history additions never replace an existing record id on collision", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-add-collision-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+    await store.addHistory({
+      id: "existing-id",
+      createdAt: "2026-07-26T09:00:00.000Z",
+      text: "existing output",
+      status: "complete"
+    });
+    const added = await store.addHistory({
+      id: "existing-id",
+      createdAt: "2026-07-27T09:00:00.000Z",
+      text: "new output",
+      status: "complete"
+    });
+
+    const existing = added.find((entry) => entry.text === "existing output");
+    const newest = added.find((entry) => entry.text === "new output");
+    assert.equal(existing.id, "existing-id");
+    assert.notEqual(newest.id, "existing-id");
+    assert.equal(new Set(added.map((entry) => entry.id)).size, added.length);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("history replacement writes clean up temporary files when rename fails", async () => {
   const writes = [];
   const removed = [];

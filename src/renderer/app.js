@@ -19,6 +19,7 @@ import {
   normalizeViewPhase,
   projectHistory,
   replaceEditorText,
+  resolveHistoryEntryIds,
   restoreEditorText
 } from "./main-view-state.js";
 
@@ -93,6 +94,7 @@ let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
 let editorState = createEditorState();
+let allHistoryIds = [];
 let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
 let recentHistoryCompact = window.innerHeight < 650;
@@ -1279,6 +1281,7 @@ function fillSettings(settings, { fieldValuesAtSave } = {}) {
 async function renderHistory() {
   const history = await window.localFlow.listHistory();
   allHistory = Array.isArray(history) ? history : [];
+  allHistoryIds = resolveHistoryEntryIds(allHistory);
 
   if (!allHistory.length) {
     historyList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
@@ -1410,13 +1413,11 @@ function readFormFieldValue(field) {
 }
 
 function historyEntryId(entry, index) {
-  return typeof entry?.id === "string" && entry.id.trim() !== ""
-    ? entry.id
-    : `${typeof entry?.createdAt === "string" ? entry.createdAt : ""}:${index}`;
+  return allHistoryIds[index] || resolveHistoryEntryIds([entry])[0] || "";
 }
 
 function findHistoryEntryIndex(id) {
-  return allHistory.findIndex((entry, index) => historyEntryId(entry, index) === id);
+  return allHistoryIds.indexOf(id);
 }
 
 function singleLineText(text) {

@@ -154,3 +154,17 @@ test("projects the same legacy history id after input reordering", () => {
   assert.equal(reorderedId, firstId);
   assert.match(firstId, /^legacy-[a-f0-9]{8}$/);
 });
+
+test("projects unique legacy ids for duplicate records", () => {
+  const legacy = {
+    createdAt: "2026-07-27T09:00:00Z",
+    transcript: "same source",
+    status: "complete",
+    text: "same output"
+  };
+
+  const ids = projectHistory([legacy, structuredClone(legacy)], 2).map((entry) => entry.id);
+
+  assert.equal(new Set(ids).size, 2);
+  assert.equal(ids[1], `${ids[0]}-2`);
+});

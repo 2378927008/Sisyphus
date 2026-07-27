@@ -177,7 +177,11 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
     addHistory(entry, limit = defaultSettings.historyLimit) {
       return enqueueHistoryOperation(async () => {
         const history = await loadHistory(historyPath, io);
-        const next = [entry, ...history].slice(0, Math.max(1, Number(limit) || defaultSettings.historyLimit));
+        const withNewEntry = ensureStableHistoryIds([...history, entry], io.randomUUID).history;
+        const preparedEntry = withNewEntry.at(-1);
+        const existingHistory = withNewEntry.slice(0, -1);
+        const next = [preparedEntry, ...existingHistory]
+          .slice(0, Math.max(1, Number(limit) || defaultSettings.historyLimit));
         await writeJson(historyPath, next, io);
         return next;
       });
@@ -358,7 +362,51 @@ async function loadJson(filePath, fallback, io) {
 
 async function loadHistory(historyPath, io) {
   const history = await loadJson(historyPath, [], io);
-  return Array.isArray(history) ? history : [];
+  if (!Array.isArray(history)) return [];
+
+  const migrated = ensureStableHistoryIds(history, io.randomUUID);
+  if (migrated.changed) {
+    await writeJson(historyPath, migrated.history, io);
+  }
+  return migrated.history;
+}
+
+function ensureStableHistoryIds(history, createId) {
+  const used = new Set();
+  let changed = false;
+  const migratedHistory = history.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+
+    const currentId = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (currentId && !used.has(currentId)) {
+      used.add(currentId);
+      if (currentId === entry.id) return entry;
+      changed = true;
+      return { ...entry, id: currentId };
+    }
+
+    const id = createUniqueHistoryId(used, createId);
+    used.add(id);
+    changed = true;
+    return { ...entry, id };
+  });
+  return { history: migratedHistory, changed };
+}
+
+function createUniqueHistoryId(used, createId) {
+  let baseId = "";
+  try {
+    baseId = String(createId()).trim();
+  } catch {}
+  if (!baseId) baseId = `history-${Date.now().toString(36)}`;
+
+  let candidate = baseId;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 function normalizeHistoryPatch(patch) {

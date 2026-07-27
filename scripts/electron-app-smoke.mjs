@@ -84,6 +84,12 @@ let maxConcurrentSettingsSaveCalls = 0;
 const deferredSettingsSaveResolvers = [];
 const historyFixtures = [
   {
+    createdAt: "2026-07-11T04:00:00.000Z",
+    transcript: "Legacy history source",
+    status: "complete",
+    text: "Legacy history entry"
+  },
+  {
     id: "history-zh",
     createdAt: "2026-07-11T03:00:00.000Z",
     status: "complete",
@@ -865,6 +871,15 @@ app.whenReady().then(async () => {
       })()
     `);
     await waitForState(window, (state) => state.copyAttempts === 0, 5000);
+
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#recentHistoryList [data-history-action="select"]').click()
+    `);
+    await waitForState(
+      window,
+      (state) => state.resultText === "Legacy history entry" && state.dictationTabSelected,
+      5000
+    );
 
     await window.webContents.executeJavaScript("document.querySelector('#viewAllHistory').click()");
     await waitForState(

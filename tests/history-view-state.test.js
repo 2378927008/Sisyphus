@@ -131,8 +131,15 @@ test("keeps deterministic legacy ids when records are reordered", () => {
   const firstId = normalizeHistoryEntries([legacy, other]).find((entry) => entry.text === "edited output").id;
   const reorderedId = normalizeHistoryEntries([other, legacy]).find((entry) => entry.text === "edited output").id;
   const duplicateIds = normalizeHistoryEntries([legacy, structuredClone(legacy)]).map((entry) => entry.id);
+  const editedId = normalizeHistoryEntries([{
+    ...legacy,
+    text: "edited again",
+    status: "complete"
+  }])[0].id;
 
   assert.match(firstId, /^legacy-[a-f0-9]{8}$/);
   assert.equal(reorderedId, firstId);
-  assert.deepEqual(duplicateIds, [firstId, firstId]);
+  assert.equal(editedId, firstId);
+  assert.equal(new Set(duplicateIds).size, 2);
+  assert.deepEqual(duplicateIds, [firstId, `${firstId}-2`]);
 });

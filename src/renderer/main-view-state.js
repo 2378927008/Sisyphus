@@ -1,4 +1,4 @@
-import { resolveHistoryEntryId } from "./history-view-state.js";
+import { resolveHistoryEntryIds } from "./history-view-state.js";
 
 const VIEW_PHASES = new Set([
   "idle",
@@ -17,7 +17,8 @@ export {
   groupHistoryByDate,
   normalizeHistoryEntries,
   resolveHistorySelection,
-  resolveHistoryEntryId
+  resolveHistoryEntryId,
+  resolveHistoryEntryIds
 } from "./history-view-state.js";
 
 function normalizeText(text) {
@@ -68,20 +69,22 @@ export function projectHistory(entries, limit) {
     return [];
   }
 
+  const ids = resolveHistoryEntryIds(entries);
   return entries
-    .filter((entry) => (
+    .map((entry, index) => ({ entry, id: ids[index] }))
+    .filter(({ entry }) => (
       entry &&
       typeof entry === "object" &&
       entry.status === "complete" &&
       normalizeText(entry.text) !== ""
     ))
     .slice(0, normalizedLimit)
-    .map((entry) => {
+    .map(({ entry, id }) => {
       const text = normalizeText(entry.text);
       return {
         ...entry,
         text,
-        id: resolveHistoryEntryId(entry),
+        id,
         characterCount: characterCount(text)
       };
     });
