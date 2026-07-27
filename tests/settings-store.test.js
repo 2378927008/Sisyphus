@@ -156,6 +156,9 @@ test("createSettingsStore accepts optional settings I/O dependencies", async () 
       },
       writeFile: async () => {},
       mkdir: async () => {},
+      rename: async () => {},
+      rm: async () => {},
+      randomUUID: () => "test-id",
       stat: async () => {
         const error = new Error("missing asset");
         error.code = "ENOENT";
@@ -233,7 +236,10 @@ test("settings operation queue recovers after a rejected save", async () => {
         throw new Error("injected settings write failure");
       }
       content = nextContent;
-    }
+    },
+    rename: async () => {},
+    rm: async () => {},
+    randomUUID: () => "test-id"
   });
 
   await assert.rejects(
@@ -647,6 +653,49 @@ test("saveSettings uses an injected secret codec instead of persisting raw cloud
   }
 });
 
+test("history updates preserve transcript and serialize writes", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+    await store.addHistory({ id: "h1", transcript: "原文", text: "旧文本", status: "complete" });
+    const [first, second] = await Promise.all([
+      store.updateHistory("h1", { transcript: "篡改", text: "新文本", processingError: "x".repeat(300) }),
+      store.updateHistory("h1", { pasteStatus: "pasted" })
+    ]);
+    const persisted = await store.getHistoryEntry("h1");
+
+    assert.equal(first.transcript, "原文");
+    assert.equal(second.transcript, "原文");
+    assert.equal(persisted.transcript, "原文");
+    assert.equal(persisted.text, "新文本");
+    assert.equal(persisted.pasteStatus, "pasted");
+    assert.equal(persisted.processingError.length, 240);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("history replacement writes clean up temporary files when rename fails", async () => {
+  const writes = [];
+  const removed = [];
+  const io = {
+    mkdir: async () => {},
+    readFile: async () => "[]",
+    stat: async () => ({ isFile: () => true }),
+    writeFile: async (filePath, content) => writes.push({ filePath, content }),
+    rename: async () => { throw new Error("rename failed"); },
+    rm: async (filePath) => removed.push(filePath),
+    randomUUID: () => "test-id"
+  };
+  const store = createSettingsStore("C:/virtual-local-flow", defaultSettings, null, io);
+
+  await assert.rejects(store.addHistory({ id: "h1", transcript: "原文", text: "文本" }), /rename failed/);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].filePath, /history\.json\.\d+\.test-id\.tmp$/);
+  assert.deepEqual(removed, [writes[0].filePath]);
+});
+
 function createFirstWriteBarrierIo() {
   let content = null;
   let readCalls = 0;
@@ -688,7 +737,10 @@ function createFirstWriteBarrierIo() {
           await firstWriteRelease;
         }
         content = nextContent;
-      }
+      },
+      rename: async () => {},
+      rm: async () => {},
+      randomUUID: () => "test-id"
     }
   };
 }

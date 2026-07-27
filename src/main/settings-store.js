@@ -1,5 +1,7 @@
-import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat as fsStat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeDictionary, normalizeSnippets } from "../shared/personalization.js";
 import {
   defaultInterfaceLanguage,
   defaultOutputLanguage,
@@ -46,6 +48,7 @@ export const defaultSettings = {
   qwenModelUrl: "",
   qwenModelMirrorUrls: "",
   dictionary: [],
+  snippets: [],
   historyLimit: 20
 };
 
@@ -103,6 +106,7 @@ export function mergeSettings(input = {}, baseSettings = defaultSettings) {
   }
 
   merged.dictionary = normalizeDictionary(merged.dictionary);
+  merged.snippets = normalizeSnippets(merged.snippets);
   merged.historyLimit = Number.isFinite(Number(merged.historyLimit))
     ? Math.max(1, Math.min(100, Number(merged.historyLimit)))
     : defaults.historyLimit;
@@ -134,9 +138,15 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
   const historyPath = path.join(userDataPath, "history.json");
   const io = resolveFileIo(ioOverrides);
   let settingsOperationQueue = Promise.resolve();
+  let historyOperationQueue = Promise.resolve();
   const enqueueSettingsOperation = (operation) => {
     const pending = settingsOperationQueue.then(operation);
     settingsOperationQueue = pending.catch(() => {});
+    return pending;
+  };
+  const enqueueHistoryOperation = (operation) => {
+    const pending = historyOperationQueue.then(operation);
+    historyOperationQueue = pending.catch(() => {});
     return pending;
   };
 
@@ -155,29 +165,38 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
         return options.includeSecrets ? next : redactSecrets(next);
       });
     },
-    async getHistory() {
-      const history = await loadJson(historyPath, [], io);
-      return Array.isArray(history) ? history : [];
+    getHistory() {
+      return enqueueHistoryOperation(() => loadHistory(historyPath, io));
     },
-    async addHistory(entry, limit = defaultSettings.historyLimit) {
-      const history = await this.getHistory();
-      const next = [entry, ...history].slice(0, limit);
-      await writeJson(historyPath, next, io);
-      return next;
+    getHistoryEntry(id) {
+      return enqueueHistoryOperation(async () => {
+        const history = await loadHistory(historyPath, io);
+        return history.find((entry) => entry?.id === id) || null;
+      });
+    },
+    addHistory(entry, limit = defaultSettings.historyLimit) {
+      return enqueueHistoryOperation(async () => {
+        const history = await loadHistory(historyPath, io);
+        const next = [entry, ...history].slice(0, Math.max(1, Number(limit) || defaultSettings.historyLimit));
+        await writeJson(historyPath, next, io);
+        return next;
+      });
+    },
+    updateHistory(id, patch) {
+      return enqueueHistoryOperation(async () => {
+        const history = await loadHistory(historyPath, io);
+        const index = history.findIndex((entry) => entry?.id === id);
+        if (index < 0) {
+          return null;
+        }
+        const updated = { ...history[index], ...normalizeHistoryPatch(patch), updatedAt: new Date().toISOString() };
+        const next = [...history];
+        next[index] = updated;
+        await writeJson(historyPath, next, io);
+        return updated;
+      });
     }
   };
-}
-
-function normalizeDictionary(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
-  }
-
-  return [];
 }
 
 function normalizePolishMode(value) {
@@ -334,9 +353,39 @@ async function loadJson(filePath, fallback, io) {
   }
 }
 
+async function loadHistory(historyPath, io) {
+  const history = await loadJson(historyPath, [], io);
+  return Array.isArray(history) ? history : [];
+}
+
+function normalizeHistoryPatch(patch) {
+  const next = {};
+  const fields = ["status", "pasteStatus", "source", "snippetId"];
+  for (const key of fields) {
+    if (Object.hasOwn(patch || {}, key)) {
+      next[key] = String(patch[key] ?? "").trim();
+    }
+  }
+  if (Object.hasOwn(patch || {}, "text")) {
+    next.text = String(patch.text ?? "").slice(0, 100000);
+  }
+  for (const key of ["processingError", "pasteError"]) {
+    if (Object.hasOwn(patch || {}, key)) {
+      next[key] = String(patch[key] ?? "").slice(0, 240);
+    }
+  }
+  return next;
+}
+
 async function writeJson(filePath, value, io) {
   await io.mkdir(path.dirname(filePath), { recursive: true });
-  await io.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const temporaryPath = `${filePath}.${process.pid}.${io.randomUUID()}.tmp`;
+  try {
+    await io.writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await io.rename(temporaryPath, filePath);
+  } finally {
+    await io.rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 function resolveFileIo(overrides) {
@@ -344,6 +393,9 @@ function resolveFileIo(overrides) {
     mkdir: overrides.mkdir || mkdir,
     readFile: overrides.readFile || readFile,
     stat: overrides.stat || fsStat,
-    writeFile: overrides.writeFile || writeFile
+    writeFile: overrides.writeFile || writeFile,
+    rename: overrides.rename || rename,
+    rm: overrides.rm || rm,
+    randomUUID: overrides.randomUUID || randomUUID
   };
 }
