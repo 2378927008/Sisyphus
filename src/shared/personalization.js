@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export const PERSONALIZATION_LIMITS = Object.freeze({
   dictionaryEntries: 500,
   dictionaryTermLength: 120,
@@ -18,7 +16,7 @@ export function normalizeDictionary(value) {
 }
 
 export function normalizeSnippets(value, options = {}) {
-  const createId = options.createId || randomUUID;
+  const createId = options.createId || createRandomId;
   const snippets = Array.isArray(value) ? value : [];
   const seen = new Set();
   const normalized = [];
@@ -27,15 +25,16 @@ export function normalizeSnippets(value, options = {}) {
     if (!candidate || typeof candidate !== "object") {
       continue;
     }
-    const trigger = normalizeText(candidate.trigger, PERSONALIZATION_LIMITS.snippetTriggerLength);
+    const trigger = normalizeVisibleText(candidate.trigger, PERSONALIZATION_LIMITS.snippetTriggerLength);
     const text = String(candidate.text ?? "").trim().slice(0, PERSONALIZATION_LIMITS.snippetTextLength);
     const key = comparisonKey(trigger);
     if (!trigger || !text || seen.has(key)) {
       continue;
     }
     seen.add(key);
+    const id = String(candidate.id ?? "").trim() || String(createId()).trim();
     normalized.push({
-      id: String(candidate.id || createId()).trim() || createId(),
+      id,
       trigger,
       text
     });
@@ -59,7 +58,7 @@ function normalizeEntries(entries, limit, itemLength) {
   const seen = new Set();
   const normalized = [];
   for (const entry of entries) {
-    const text = normalizeText(entry, itemLength);
+    const text = normalizeVisibleText(entry, itemLength);
     const key = comparisonKey(text);
     if (!text || seen.has(key)) {
       continue;
@@ -73,10 +72,18 @@ function normalizeEntries(entries, limit, itemLength) {
   return normalized;
 }
 
-function normalizeText(value, limit) {
-  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, limit);
+function normalizeVisibleText(value, limit) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
 function comparisonKey(value) {
-  return normalizeText(value, Number.MAX_SAFE_INTEGER).toLocaleLowerCase();
+  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+function createRandomId() {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID !== "function") {
+    throw new Error("Secure random ID generation is unavailable");
+  }
+  return cryptoApi.randomUUID();
 }

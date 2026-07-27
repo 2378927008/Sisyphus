@@ -183,6 +183,9 @@ test("saveSettings serializes full user settings with detected setup paths", asy
   });
   await controlledIo.firstWriteStarted;
 
+  assert.equal(controlledIo.readCommitted(), null);
+  assert.equal(controlledIo.temporaryCount, 1);
+
   const setupPathSave = store.saveSettings({
     whisperCliPath: "C:/local-flow/whisper-cli.exe",
     whisperModelPath: "C:/local-flow/ggml-base.bin"
@@ -193,6 +196,7 @@ test("saveSettings serializes full user settings with detected setup paths", asy
   await Promise.all([fullUserSave, setupPathSave]);
   const persisted = controlledIo.readPersisted();
 
+  assert.equal(controlledIo.temporaryCount, 0);
   assert.equal(readsBeforeFirstWriteCompleted, 1);
   assert.equal(persisted.hotkey, "CommandOrControl+Shift+Space");
   assert.equal(persisted.outputLanguage, "fr");
@@ -697,9 +701,10 @@ test("history replacement writes clean up temporary files when rename fails", as
 });
 
 function createFirstWriteBarrierIo() {
-  let content = null;
+  let committedContent = null;
   let readCalls = 0;
   let writeCalls = 0;
+  const temporaryFiles = new Map();
   let releaseFirstWrite;
   let markFirstWriteStarted;
   const firstWriteStarted = new Promise((resolve) => {
@@ -715,31 +720,47 @@ function createFirstWriteBarrierIo() {
     get readCalls() {
       return readCalls;
     },
+    get temporaryCount() {
+      return temporaryFiles.size;
+    },
+    readCommitted() {
+      return committedContent === null ? null : JSON.parse(committedContent);
+    },
     readPersisted() {
-      return JSON.parse(content);
+      return JSON.parse(committedContent);
     },
     io: {
       mkdir: async () => {},
       readFile: async () => {
         readCalls += 1;
-        if (content === null) {
+        if (committedContent === null) {
           const error = new Error("missing settings");
           error.code = "ENOENT";
           throw error;
         }
-        return content;
+        return committedContent;
       },
       stat: async () => ({ isFile: () => true }),
-      writeFile: async (_filePath, nextContent) => {
+      writeFile: async (filePath, nextContent) => {
         writeCalls += 1;
+        temporaryFiles.set(filePath, nextContent);
         if (writeCalls === 1) {
           markFirstWriteStarted();
           await firstWriteRelease;
         }
-        content = nextContent;
       },
-      rename: async () => {},
-      rm: async () => {},
+      rename: async (temporaryPath) => {
+        if (!temporaryFiles.has(temporaryPath)) {
+          const error = new Error("missing temporary file");
+          error.code = "ENOENT";
+          throw error;
+        }
+        committedContent = temporaryFiles.get(temporaryPath);
+        temporaryFiles.delete(temporaryPath);
+      },
+      rm: async (filePath) => {
+        temporaryFiles.delete(filePath);
+      },
       randomUUID: () => "test-id"
     }
   };

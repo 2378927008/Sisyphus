@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   PERSONALIZATION_LIMITS,
   expandExactSnippet,
@@ -7,27 +8,54 @@ import {
   normalizeSnippets
 } from "../src/shared/personalization.js";
 
-test("dictionary normalization trims, NFKC-deduplicates, and caps entries", () => {
+test("dictionary normalization preserves the first visible spelling while NFKC-deduplicating", () => {
   assert.deepEqual(
-    normalizeDictionary([" Qwen ", "qwen", "", "Local   Flow", "Ｑｗｅｎ"]),
-    ["Qwen", "Local Flow"]
+    normalizeDictionary([" \uFF31\uFF57\uFF45\uFF4E ", "Qwen", "", "Local   Flow"]),
+    ["\uFF31\uFF57\uFF45\uFF4E", "Local Flow"]
   );
+});
+
+test("dictionary normalization caps entries", () => {
   assert.equal(
     normalizeDictionary(Array.from({ length: PERSONALIZATION_LIMITS.dictionaryEntries + 1 }, (_, index) => `term-${index}`)).length,
     PERSONALIZATION_LIMITS.dictionaryEntries
   );
 });
 
-test("snippet normalization assigns ids, preserves the first spelling, and caps fields", () => {
-  const createId = () => "generated-id";
+test("snippet normalization preserves the first visible trigger while NFKC-deduplicating", () => {
   const snippets = normalizeSnippets([
-    { trigger: "  Meeting   Notes ", text: "first" },
+    { id: "first", trigger: "  \uFF2D\uFF45\uFF45\uFF54\uFF49\uFF4E\uFF47\u3000\uFF2E\uFF4F\uFF54\uFF45\uFF53  ", text: "first" },
     { id: "duplicate", trigger: "meeting notes", text: "second" },
     { trigger: "", text: "ignored" },
     { trigger: "keep", text: "" }
-  ], { createId });
+  ]);
 
-  assert.deepEqual(snippets, [{ id: "generated-id", trigger: "Meeting Notes", text: "first" }]);
+  assert.deepEqual(snippets, [{
+    id: "first",
+    trigger: "\uFF2D\uFF45\uFF45\uFF54\uFF49\uFF4E\uFF47 \uFF2E\uFF4F\uFF54\uFF45\uFF53",
+    text: "first"
+  }]);
+});
+
+test("snippet normalization uses an injected stable id generator", () => {
+  let calls = 0;
+  const snippets = normalizeSnippets([
+    { trigger: "meeting notes", text: "first" }
+  ], {
+    createId() {
+      calls += 1;
+      return "stable-id";
+    }
+  });
+
+  assert.deepEqual(snippets, [{ id: "stable-id", trigger: "meeting notes", text: "first" }]);
+  assert.equal(calls, 1);
+});
+
+test("shared personalization source has no Node-only imports", async () => {
+  const source = await readFile(new URL("../src/shared/personalization.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /(?:from\s+|import\s*\()\s*["']node:/);
 });
 
 test("snippet expansion requires a complete normalized match", () => {
