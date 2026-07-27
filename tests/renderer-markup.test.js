@@ -381,6 +381,21 @@ test("localized Windows UI v4 structure preserves icon controls and dynamic cont
   assert.doesNotMatch(appSource, /footerHealth/);
 });
 
+test("history editor exposes autosave, recovery, and reusable result actions", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="editorSaveState"[^>]*role="status"/);
+  assert.match(html, /id="reprocessResult"/);
+  assert.match(html, /id="editorContextText"/);
+  assert.match(html, /data-i18n="action\.reprocess"/);
+  assert.match(appSource, /createVersionedAutosave/);
+  assert.match(appSource, /window\.localFlow\.updateHistory/);
+  assert.match(appSource, /window\.localFlow\.reprocessHistory/);
+  assert.match(appSource, /historyAutosave\.schedule/);
+  assert.match(appSource, /historyAutosave\.flush/);
+});
+
 test("Windows UI v4 styles enforce the approved visual and responsive system", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
 

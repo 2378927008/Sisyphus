@@ -585,6 +585,10 @@ body.recording #recordButton {
   margin-right: 9px;
 }
 
+.editor-status[data-state="error"] {
+  color: var(--error);
+}
+
 .button-row {
   display: flex;
   min-width: 0;
@@ -629,6 +633,14 @@ body.recording #recordButton {
 
 .editor-footer svg {
   color: var(--accent);
+}
+
+.editor-footer[data-state="recovery"] {
+  color: var(--warning);
+}
+
+.editor-footer[data-state="recovery"] svg {
+  color: var(--warning);
 }
 
 @media (min-width: 900px) {

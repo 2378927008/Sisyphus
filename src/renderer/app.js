@@ -14,6 +14,7 @@ import {
 } from "../shared/languages.js";
 import { getUiText } from "./i18n.js";
 import { renderIcons } from "./icons.js";
+import { createVersionedAutosave } from "./versioned-autosave.js";
 import {
   createEditorState,
   normalizeViewPhase,
@@ -40,6 +41,8 @@ const resultText = document.querySelector("#resultText");
 const resultCharacterCount = document.querySelector("#resultCharacterCount");
 const editorCreatedAt = document.querySelector("#editorCreatedAt");
 const editorSaveState = document.querySelector("#editorSaveState");
+const editorFooter = document.querySelector("#editorFooter");
+const editorContextText = document.querySelector("#editorContextText");
 const editorBack = document.querySelector("#editorBack");
 const historyList = document.querySelector("#historyList");
 const historySearch = document.querySelector("#historySearch");
@@ -82,6 +85,7 @@ const setupOutput = document.querySelector("#setupOutput");
 const copyResult = document.querySelector("#copyResult");
 const insertResult = document.querySelector("#insertResult");
 const restoreResult = document.querySelector("#restoreResult");
+const reprocessResult = document.querySelector("#reprocessResult");
 const shortcutCaptureButtons = [...document.querySelectorAll("[data-shortcut-target]")];
 const WAVEFORM_BAR_COUNT = 24;
 
@@ -101,6 +105,8 @@ let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
 let historyQuery = "";
 let selectedHistoryId = "";
+let editorSavePhase = "saved";
+let editorReprocessPhase = "idle";
 let activePrimaryView = "home";
 let settingsSaveQueue = Promise.resolve();
 let processingLanguageErrorOwner = null;
@@ -127,6 +133,10 @@ const settingsFocusTrap = createFocusTrap({
   container: drawerPanel,
   onEscape: closeSettingsDrawer
 });
+const historyAutosave = createVersionedAutosave({
+  save: ({ id, text }) => window.localFlow.updateHistory(id, text),
+  onState: handleHistoryAutosaveState
+});
 
 prepareWindowsUiV4Markup();
 init();
@@ -139,6 +149,7 @@ function prepareWindowsUiV4Markup() {
   attachTranslationToIconLabel(restoreResult, "action.restore");
   attachTranslationToIconLabel(copyResult, "action.copy");
   attachTranslationToIconLabel(insertResult, "action.insert");
+  attachTranslationToIconLabel(reprocessResult, "action.reprocess");
 
   recordButton.removeAttribute("aria-live");
   phaseStatus.setAttribute("role", "status");
@@ -228,6 +239,7 @@ async function init() {
   copyResult.addEventListener("click", copyLatestResult);
   insertResult.addEventListener("click", insertLatestResult);
   restoreResult.addEventListener("click", restoreLatestResult);
+  reprocessResult.addEventListener("click", reprocessSelectedHistory);
   resultText.addEventListener("blur", () => renderEditorState());
   resultText.addEventListener("input", updateEditorFromInput);
   form.interfaceLanguage.addEventListener("change", changeInterfaceLanguage);
@@ -913,20 +925,33 @@ async function insertText(text) {
 }
 
 function restoreLatestResult() {
-  if (!editorState.dirty || editorState.empty) return;
+  if (!editorState.dirty) return;
+  historyAutosave.cancel();
   editorState = restoreEditorText(editorState);
+  setEditorSavePhase("saved");
   renderEditorState();
 }
 
 function updateEditorFromInput() {
   emptyEditorMessageKey = "empty.result";
   editorState = replaceEditorText(editorState, resultText.textContent || "");
+  if (editorReprocessPhase === "error") {
+    setEditorReprocessPhase("idle");
+  }
+  if (selectedHistoryId) {
+    historyAutosave.schedule({
+      id: selectedHistoryId,
+      text: editorState.currentText
+    });
+  }
   renderEditorState({ syncText: false });
 }
 
 function replaceEditorBaseline(text, emptyMessageKey = "empty.result") {
   emptyEditorMessageKey = emptyMessageKey;
   editorState = replaceEditorText(editorState, text, { asBaseline: true });
+  setEditorSavePhase("saved");
+  setEditorReprocessPhase("idle");
   renderEditorState();
 }
 
@@ -944,9 +969,80 @@ function renderEditorState({ syncText = true } = {}) {
   resultCharacterCount.textContent = t("label.characterCount", {
     count: editorState.characterCount
   });
-  restoreResult.disabled = !editorState.dirty || editorState.empty;
+  restoreResult.disabled = !editorState.dirty;
   copyResult.disabled = editorState.empty;
   insertResult.disabled = editorState.empty;
+}
+
+function handleHistoryAutosaveState(state) {
+  if (!state || state.id !== selectedHistoryId) return;
+
+  if (state.phase === "saved") {
+    editorState = replaceEditorText(editorState, state.text, { asBaseline: true });
+    updateCachedHistoryText(state.id, state.text);
+    setEditorSavePhase("saved");
+    renderEditorState({ syncText: false });
+    renderHistoryProjection();
+    return;
+  }
+
+  setEditorSavePhase(state.phase === "error" ? "error" : "saving");
+}
+
+function setEditorSavePhase(phase) {
+  editorSavePhase = phase === "error" ? "error" : phase === "saving" ? "saving" : "saved";
+  editorSaveState.dataset.state = editorSavePhase;
+  const key = editorSavePhase === "error"
+    ? "editor.saveRetry"
+    : editorSavePhase === "saving"
+      ? "editor.saving"
+      : "editor.saved";
+  editorSaveState.textContent = t(key);
+}
+
+function updateCachedHistoryText(id, text) {
+  allHistory = normalizeHistoryEntries(allHistory.map((entry) => (
+    entry.id === id ? { ...entry, text } : entry
+  )));
+}
+
+async function reprocessSelectedHistory() {
+  const entry = getSelectedHistoryEntry();
+  if (!entry || !hasHistoryTranscript(entry) || editorReprocessPhase === "running") return;
+
+  await historyAutosave.flush();
+  setEditorReprocessPhase("running");
+  try {
+    const result = await window.localFlow.reprocessHistory(selectedHistoryId);
+    if (result?.ok !== true || !result.entry || typeof result.entry !== "object") {
+      setEditorReprocessPhase("error");
+      return;
+    }
+
+    const updatedEntry = normalizeHistoryEntries([{
+      ...entry,
+      ...result.entry,
+      id: selectedHistoryId
+    }])[0];
+    allHistory = allHistory.map((item) => (
+      item.id === selectedHistoryId ? updatedEntry : item
+    ));
+    editorState = createEditorState(updatedEntry.text || updatedEntry.transcript || "");
+    emptyEditorMessageKey = updatedEntry.status === "failed" ? "result.outputFailed" : "empty.result";
+    setEditorSavePhase("saved");
+    setEditorReprocessPhase("idle");
+    renderHistoryProjection();
+    renderSelectedHistory({ syncEditor: false });
+    renderEditorState();
+  } catch {
+    setEditorReprocessPhase("error");
+  }
+}
+
+function setEditorReprocessPhase(phase) {
+  editorReprocessPhase = phase === "running" ? "running" : phase === "error" ? "error" : "idle";
+  reprocessResult.dataset.state = editorReprocessPhase;
+  renderEditorContext();
 }
 
 async function writeClipboardText(text) {
@@ -1284,13 +1380,21 @@ function fillSettings(settings, { fieldValuesAtSave } = {}) {
 }
 
 async function renderHistory() {
+  await historyAutosave.flush();
+  const selectionBeforeRefresh = selectedHistoryId;
+  const preserveFailedEditor = editorSavePhase === "error";
   const history = await window.localFlow.listHistory();
   allHistory = normalizeHistoryEntries(Array.isArray(history) ? history : []);
+  const selectedEntry = allHistory.find((entry) => entry.id === selectedHistoryId);
   selectedHistoryId = activePrimaryView === "home"
     ? resolveHistorySelection(allHistory, "")
-    : resolveHistorySelection(allHistory, selectedHistoryId);
+    : isSelectableHistoryEntry(selectedEntry)
+      ? selectedHistoryId
+      : resolveHistorySelection(allHistory, selectedHistoryId);
   renderHistoryProjection();
-  renderSelectedHistory();
+  renderSelectedHistory({
+    syncEditor: !(preserveFailedEditor && selectedHistoryId === selectionBeforeRefresh)
+  });
 }
 
 function renderHistoryProjection() {
@@ -1310,8 +1414,9 @@ function renderHistoryProjection() {
 
 function renderHistoryItem(item) {
   const text = typeof item?.text === "string" ? item.text : "";
-  const usable = hasDisplayableHistoryText(item);
-  const preview = usable
+  const displayable = hasDisplayableHistoryText(item);
+  const selectable = isSelectableHistoryEntry(item);
+  const preview = displayable
     ? singleLineText(text)
     : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");
   const selected = item.id === selectedHistoryId;
@@ -1327,13 +1432,13 @@ function renderHistoryItem(item) {
         aria-label="${escapeHtml(preview)}"
         aria-selected="${selected}"
         tabindex="${selected ? "0" : "-1"}"
-        ${usable ? "" : "disabled"}
+        ${selectable ? "" : "disabled"}
       >
         <time>${escapeHtml(formatHistoryTimeOnly(item.createdAt))}</time>
         <span class="history-copy">
           <p>${escapeHtml(preview)}</p>
           <span data-history-character-count>${escapeHtml(t("label.characterCount", {
-            count: usable ? item.characterCount : 0
+            count: displayable ? item.characterCount : 0
           }))}</span>
         </span>
         <span data-lucide="ChevronRight" aria-hidden="true"></span>
@@ -1349,7 +1454,7 @@ function handleHistorySearchInput(event) {
   renderHistoryProjection();
 }
 
-function handleHistoryKeydown(event) {
+async function handleHistoryKeydown(event) {
   const current = event.target.closest?.('[data-history-action="select"]');
   if (!current) return;
 
@@ -1369,7 +1474,7 @@ function handleHistoryKeydown(event) {
   const nextEntry = allHistory.find((item) => item.id === nextId);
   if (!nextEntry) return;
 
-  selectHistoryEntry(nextEntry, { focusRow: true });
+  await selectHistoryEntry(nextEntry, { focusRow: true });
 }
 
 async function handleHistoryAction(event) {
@@ -1380,11 +1485,15 @@ async function handleHistoryAction(event) {
   if (!entry) return;
 
   if (actionButton.dataset.historyAction === "select") {
-    selectHistoryEntry(entry);
+    await selectHistoryEntry(entry);
   }
 }
 
-function selectHistoryEntry(entry, { focusRow = false } = {}) {
+async function selectHistoryEntry(entry, { focusRow = false } = {}) {
+  if (!isSelectableHistoryEntry(entry)) return;
+  if (entry.id !== selectedHistoryId) {
+    await historyAutosave.flush();
+  }
   selectedHistoryId = entry.id;
   renderSelectedHistory();
   renderHistoryProjection();
@@ -1396,13 +1505,57 @@ function selectHistoryEntry(entry, { focusRow = false } = {}) {
   document.body.dataset.workspacePane = "editor";
 }
 
-function renderSelectedHistory() {
-  const entry = allHistory.find((item) => item.id === selectedHistoryId);
-  const text = typeof entry?.text === "string" ? entry.text : "";
-  replaceEditorBaseline(text);
-  editorCreatedAt.textContent = entry ? formatHistoryTime(entry.createdAt) : "";
+function renderSelectedHistory({ syncEditor = true } = {}) {
+  const entry = getSelectedHistoryEntry();
+  if (syncEditor) {
+    emptyEditorMessageKey = entry?.status === "failed" ? "result.outputFailed" : "empty.result";
+    editorState = createEditorState(entry?.text || entry?.transcript || "");
+    setEditorSavePhase("saved");
+    setEditorReprocessPhase("idle");
+    renderEditorState();
+  } else {
+    renderEditorContext();
+  }
+  editorCreatedAt.textContent = formatEditorMetadata(entry);
   editorCreatedAt.dateTime = entry?.createdAt || "";
-  editorSaveState.textContent = t("editor.saved");
+}
+
+function getSelectedHistoryEntry() {
+  return allHistory.find((item) => item.id === selectedHistoryId);
+}
+
+function isSelectableHistoryEntry(entry) {
+  return hasDisplayableHistoryText(entry) || entry?.status === "failed";
+}
+
+function hasHistoryTranscript(entry) {
+  return typeof entry?.transcript === "string" && entry.transcript.trim() !== "";
+}
+
+function renderEditorContext() {
+  const entry = getSelectedHistoryEntry();
+  let key = "hint.autoKeepsLanguage";
+  let contextState = "default";
+
+  if (editorReprocessPhase === "running") {
+    key = "editor.reprocessing";
+  } else if (editorReprocessPhase === "error") {
+    key = "editor.reprocessFailed";
+    contextState = "recovery";
+  } else if (entry?.status === "failed") {
+    key = hasHistoryTranscript(entry)
+      ? "history.recoveryAvailable"
+      : "history.recoveryUnavailable";
+    contextState = "recovery";
+  }
+
+  editorFooter.dataset.state = contextState;
+  editorContextText.textContent = t(key);
+  reprocessResult.disabled = !hasHistoryTranscript(entry) || editorReprocessPhase === "running";
+}
+
+function formatEditorMetadata(entry) {
+  return entry ? formatHistoryTime(entry.createdAt) : "";
 }
 
 function formatHistoryGroupLabel(group) {
@@ -1435,7 +1588,7 @@ function formatHistoryTimeOnly(createdAt) {
     : date.toLocaleTimeString(currentLanguage, { hour: "2-digit", minute: "2-digit" });
 }
 
-function activatePrimaryView(view, { focus = false } = {}) {
+async function activatePrimaryView(view, { focus = false } = {}) {
   if (view === "settings") {
     openSettingsDrawer();
     return;
@@ -1444,7 +1597,11 @@ function activatePrimaryView(view, { focus = false } = {}) {
   document.body.dataset.primaryView = activePrimaryView;
   syncPrimaryNavigation({ focus });
   if (activePrimaryView === "home") {
-    selectedHistoryId = resolveHistorySelection(allHistory, "");
+    const nextSelection = resolveHistorySelection(allHistory, "");
+    if (nextSelection !== selectedHistoryId) {
+      await historyAutosave.flush();
+    }
+    selectedHistoryId = nextSelection;
     renderSelectedHistory();
     renderHistoryProjection();
     document.body.dataset.workspacePane = "editor";
@@ -1469,7 +1626,7 @@ function syncPrimaryNavigation({ focus = false } = {}) {
   }
 }
 
-function handlePrimaryNavigationKeydown(event) {
+async function handlePrimaryNavigationKeydown(event) {
   const currentIndex = primaryNavigationButtons.indexOf(event.currentTarget);
   if (currentIndex < 0) return;
 
@@ -1487,7 +1644,7 @@ function handlePrimaryNavigationKeydown(event) {
   if (nextIndex === null) return;
   event.preventDefault();
   const nextButton = primaryNavigationButtons[nextIndex];
-  activatePrimaryView(nextButton.dataset.primaryView, { focus: true });
+  await activatePrimaryView(nextButton.dataset.primaryView, { focus: true });
 }
 
 function showHistoryListPane() {
@@ -1524,6 +1681,7 @@ function applyInterfaceLanguage(language) {
   populateLanguageSelects(selectedValues);
 
   applyTranslations();
+  setEditorSavePhase(editorSavePhase);
   renderShortcutHint();
   renderIcons();
 
@@ -1534,7 +1692,7 @@ function applyInterfaceLanguage(language) {
 
   renderEditorState();
   renderHistoryProjection();
-  renderSelectedHistory();
+  renderSelectedHistory({ syncEditor: false });
 }
 
 async function changeCommandPolishMode() {

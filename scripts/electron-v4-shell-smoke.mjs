@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, session } from "electron";
+import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
@@ -48,6 +49,13 @@ let settings = mergeSettings({
   whisperModelPath: "C:\\smoke\\ggml-base.bin"
 });
 let historyListCalls = 0;
+const historyUpdateCalls = [];
+const historyReprocessCalls = [];
+const insertTextCalls = [];
+const interactionOrder = [];
+let historyUpdateResult = null;
+let historyReprocessResult = null;
+let insertTextResult = { ok: true };
 let whisperDiagnosticsResult = {
   ready: true,
   checks: [{ label: "Whisper", status: "pass", message: "Whisper diagnostics stubbed." }]
@@ -116,7 +124,16 @@ const historyFixtures = [
     createdAt: localFixtureDate(-6, 6),
     transcript: "",
     status: "failed",
-    text: ""
+    text: "",
+    processingError: unsafeDiagnostic
+  },
+  {
+    id: "history-failed-recoverable",
+    createdAt: localFixtureDate(-6, 5),
+    transcript: "Recoverable original transcript",
+    status: "failed",
+    text: "",
+    processingError: unsafeDiagnostic
   }
 ];
 
@@ -164,15 +181,44 @@ function wireIpc() {
     historyListCalls += 1;
     return historyFixtures;
   });
-  registerSmokeIpcHandler("history:update", (_event, payload = {}) => ({
-    ok: true,
-    entry: { id: payload.id, text: payload.text, status: "complete" }
-  }));
-  registerSmokeIpcHandler("history:reprocess", (_event, id) => ({
-    ok: true,
-    entry: { id, text: "reprocessed smoke transcript", status: "complete" }
-  }));
-  registerSmokeIpcHandler("dictation:insert-text", () => ({ ok: true }));
+  registerSmokeIpcHandler("history:update", (_event, payload = {}) => {
+    historyUpdateCalls.push({ id: payload.id, text: payload.text });
+    interactionOrder.push(`update:${payload.id}:${payload.text}`);
+    if (historyUpdateResult) {
+      const result = historyUpdateResult;
+      historyUpdateResult = null;
+      return result;
+    }
+    const fixture = historyFixtures.find((entry) => entry.id === payload.id);
+    if (!fixture) return { ok: false, reason: "not_found" };
+    fixture.text = payload.text;
+    fixture.status = fixture.status === "failed" ? "partial" : fixture.status;
+    return { ok: true, entry: { ...fixture } };
+  });
+  registerSmokeIpcHandler("history:reprocess", (_event, id) => {
+    historyReprocessCalls.push(id);
+    interactionOrder.push(`reprocess:${id}`);
+    if (historyReprocessResult) {
+      const result = historyReprocessResult;
+      historyReprocessResult = null;
+      return result;
+    }
+    const fixture = historyFixtures.find((entry) => entry.id === id);
+    return {
+      ok: true,
+      entry: {
+        ...fixture,
+        id,
+        text: "重新处理后的文本",
+        status: "complete",
+        processingError: ""
+      }
+    };
+  });
+  registerSmokeIpcHandler("dictation:insert-text", (_event, text) => {
+    insertTextCalls.push(text);
+    return insertTextResult;
+  });
   registerSmokeIpcHandler("diagnostics:whisper", () => whisperDiagnosticsResult);
   registerSmokeIpcHandler("diagnostics:text", () => ({
     ready: true,
@@ -515,6 +561,185 @@ app.whenReady().then(async () => {
       5000
     );
 
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-today-newest\"]').click()"
+    );
+    await editSelectedHistory(window, "用户编辑后的文本");
+    await waitForState(window, (state) => state.editorSaveState === "saved", 5000);
+    assert.deepEqual(historyUpdateCalls.at(-1), {
+      id: "history-today-newest",
+      text: "用户编辑后的文本"
+    });
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText(text) {
+              window.__copyAttempts.push(text);
+              return Promise.resolve();
+            }
+          }
+        });
+        document.querySelector('#copyResult').click();
+        document.querySelector('#insertResult').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.copyAttemptTexts.includes("用户编辑后的文本") &&
+        insertTextCalls.at(-1) === "用户编辑后的文本"
+      ),
+      5000
+    );
+
+    const updatesBeforeRestore = historyUpdateCalls.length;
+    await editSelectedHistory(window, "尚未保存且应恢复的草稿");
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    await waitForState(
+      window,
+      (state) => state.resultText === "用户编辑后的文本" && state.editorSaveState === "saved",
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    assert.equal(historyUpdateCalls.length, updatesBeforeRestore);
+
+    historyUpdateResult = {
+      ok: false,
+      reason: "save_failed",
+      message: unsafeDiagnostic
+    };
+    await editSelectedHistory(window, "保存失败仍保留的文本");
+    const saveFailureState = await waitForState(
+      window,
+      (state) => state.editorSaveState === "error" && state.resultText === "保存失败仍保留的文本",
+      5000
+    );
+    assertNoUnsafeDiagnostic(saveFailureState.visibleMainText, "History save failure");
+
+    const historyCallsBeforeFailedSaveRefresh = historyListCalls;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const language = document.querySelector('#interfaceLanguage');
+        language.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      () => historyListCalls > historyCallsBeforeFailedSaveRefresh,
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const failedSaveRefreshState = await readRendererState(window);
+    assert.equal(failedSaveRefreshState.editorSaveState, "error");
+    assert.equal(failedSaveRefreshState.resultText, "保存失败仍保留的文本");
+
+    await editSelectedHistory(window, "保存重试后的文本");
+    await waitForState(window, (state) => state.editorSaveState === "saved", 5000);
+
+    const updatesBeforeSelectionFlush = historyUpdateCalls.length;
+    await editSelectedHistory(window, "切换前刷新的文本");
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(historyUpdateCalls.length, updatesBeforeSelectionFlush + 1);
+    assert.deepEqual(historyUpdateCalls.at(-1), {
+      id: "history-today-newest",
+      text: "切换前刷新的文本"
+    });
+    await waitForState(
+      window,
+      (state) => state.selectedHistoryId === "history-yesterday",
+      5000
+    );
+
+    insertTextResult = {
+      ok: false,
+      reason: "paste_failed",
+      message: unsafeDiagnostic
+    };
+    const textBeforeFailedInsert = (await readRendererState(window)).resultText;
+    await window.webContents.executeJavaScript("document.querySelector('#insertResult').click()");
+    const failedInsertState = await waitForState(
+      window,
+      (state) => insertTextCalls.at(-1) === textBeforeFailedInsert && state.resultText === textBeforeFailedInsert,
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedInsertState.visibleMainText, "History insert failure");
+    insertTextResult = { ok: true };
+
+    const orderBeforeReprocess = interactionOrder.length;
+    await editSelectedHistory(window, "重新处理前必须保存的文本");
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    const reprocessedState = await waitForState(
+      window,
+      (state) => (
+        state.resultText === "重新处理后的文本" &&
+        state.editorSaveState === "saved" &&
+        state.reprocessState === "idle"
+      ),
+      5000
+    );
+    const reprocessOrder = interactionOrder.slice(orderBeforeReprocess);
+    assert.deepEqual(reprocessOrder.slice(0, 2), [
+      "update:history-yesterday:重新处理前必须保存的文本",
+      "reprocess:history-yesterday"
+    ]);
+    assert.equal(historyReprocessCalls.at(-1), "history-yesterday");
+    assertNoUnsafeDiagnostic(reprocessedState.visibleMainText, "Successful history reprocess");
+
+    historyReprocessResult = {
+      ok: false,
+      reason: "processing_failed",
+      message: unsafeDiagnostic
+    };
+    await editSelectedHistory(window, "重新处理失败时保留的文本");
+    await waitForState(window, (state) => state.editorSaveState === "saved", 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    const failedReprocessState = await waitForState(
+      window,
+      (state) => (
+        state.reprocessState === "error" &&
+        state.resultText === "重新处理失败时保留的文本"
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedReprocessState.visibleMainText, "Failed history reprocess");
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-failed-recoverable\"]').click()"
+    );
+    const recoverableFailureState = await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-failed-recoverable" &&
+        state.resultText === "Recoverable original transcript" &&
+        !state.reprocessDisabled &&
+        state.editorContextText.length > 0
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(recoverableFailureState.visibleMainText, "Recoverable failed history");
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-failed\"]').click()"
+    );
+    const unrecoverableFailureState = await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-failed" &&
+        state.resultText === "" &&
+        state.reprocessDisabled &&
+        state.editorContextText.length > 0
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(unrecoverableFailureState.visibleMainText, "Unrecoverable failed history");
+
     await window.webContents.executeJavaScript(`
       (() => {
         const trigger = document.querySelector('#navSettings');
@@ -687,6 +912,12 @@ function readRendererState(window) {
           document.querySelector('[data-history-id="history-today-older"]')?.disabled ?? false,
         activeHistoryId: document.activeElement?.dataset?.historyId || '',
         resultText: document.querySelector('#resultText')?.textContent || '',
+        editorSaveState: document.querySelector('#editorSaveState')?.dataset?.state || '',
+        reprocessState: document.querySelector('#reprocessResult')?.dataset?.state || '',
+        reprocessDisabled: document.querySelector('#reprocessResult')?.disabled ?? true,
+        editorContextText: document.querySelector('#editorContextText')?.textContent?.trim() || '',
+        statusText: document.querySelector('#statusText')?.textContent || '',
+        copyAttemptTexts: window.__copyAttempts || [],
         workspacePane: document.body.dataset.workspacePane || '',
         historyPaneVisible: isVisible(document.querySelector('#historyPane')),
         editorVisible: isVisible(document.querySelector('#editorPane')),
@@ -705,6 +936,19 @@ function readRendererState(window) {
         viewportHeight: window.innerHeight,
         visibleMainText: document.querySelector('main')?.innerText || ''
       };
+    })()
+  `);
+}
+
+function editSelectedHistory(window, text) {
+  return window.webContents.executeJavaScript(`
+    (() => {
+      const editor = document.querySelector('#resultText');
+      editor.textContent = ${JSON.stringify(text)};
+      editor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText'
+      }));
     })()
   `);
 }

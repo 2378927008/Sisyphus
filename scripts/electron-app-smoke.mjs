@@ -425,7 +425,7 @@ app.whenReady().then(async () => {
         !state.resultEmpty &&
         state.editorCharacterCount === Array.from("Legacy history entry").length &&
         state.fullHistoryCount === historyFixtures.length &&
-        state.failedHistoryActionsDisabled &&
+        state.failedHistoryEntriesSelectable &&
         state.dictationTabSelected &&
         !state.historyTabSelected &&
         state.dictationPanelHidden === false &&
@@ -1901,11 +1901,11 @@ function readRendererState(window) {
       restoreResultDisabled: Boolean(document.querySelector('#restoreResult')?.disabled),
       recentHistoryCount: document.querySelectorAll('#historyList [data-history-item]').length,
       fullHistoryCount: document.querySelectorAll('#historyList [data-history-item]').length,
-      failedHistoryActionsDisabled: (() => {
+      failedHistoryEntriesSelectable: (() => {
         const actions = [...document.querySelectorAll(
           '#historyList [data-history-status="failed"] [data-history-action]'
         )];
-        return actions.length > 0 && actions.every((action) => action.disabled);
+        return actions.length > 0 && actions.every((action) => !action.disabled);
       })(),
       dictationTabSelected: document.querySelector('#navHome')?.getAttribute('aria-current') === 'page',
       historyTabSelected: document.querySelector('#navHistory')?.getAttribute('aria-current') === 'page',

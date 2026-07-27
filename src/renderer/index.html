@@ -144,7 +144,14 @@
               <div class="editor-meta">
                 <h2 id="resultHeading" class="visually-hidden" data-i18n="label.latestResult">最新结果</h2>
                 <time id="editorCreatedAt"></time>
-                <span id="editorSaveState" class="editor-status" data-i18n="editor.saved">已保存</span>
+                <span
+                  id="editorSaveState"
+                  class="editor-status"
+                  role="status"
+                  aria-live="polite"
+                  data-state="saved"
+                  data-i18n="editor.saved"
+                >已保存</span>
               </div>
               <div class="button-row" aria-label="结果操作">
                 <span id="resultCharacterCount" class="result-character-count">0 个字符</span>
@@ -160,6 +167,10 @@
                   <span data-lucide="CornerDownLeft"></span>
                   <span class="button-label">插入到光标</span>
                 </button>
+                <button id="reprocessResult" type="button" class="ghost" data-state="idle">
+                  <span data-lucide="WandSparkles"></span>
+                  <span class="button-label" data-i18n="action.reprocess">重新处理</span>
+                </button>
               </div>
             </header>
             <div id="resultEditor" class="result-editor">
@@ -173,9 +184,9 @@
                 data-i18n="empty.result"
               >还没有转写结果。</p>
             </div>
-            <footer class="editor-footer">
+            <footer id="editorFooter" class="editor-footer">
               <span data-lucide="CheckCircle2"></span>
-              <span data-i18n="hint.autoKeepsLanguage">自动输出保持原语言</span>
+              <span id="editorContextText" data-i18n="hint.autoKeepsLanguage">自动输出保持原语言</span>
             </footer>
           </section>
         </section>
