@@ -10,6 +10,13 @@ const VIEW_PHASES = new Set([
   "error"
 ]);
 
+export {
+  filterHistory,
+  groupHistoryByDate,
+  normalizeHistoryEntries,
+  resolveHistorySelection
+} from "./history-view-state.js";
+
 function normalizeText(text) {
   return typeof text === "string" ? text : "";
 }

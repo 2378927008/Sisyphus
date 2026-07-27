@@ -8,6 +8,7 @@ import {
   projectHistory,
   normalizeViewPhase
 } from "../src/renderer/main-view-state.js";
+import { normalizeHistoryEntries } from "../src/renderer/history-view-state.js";
 
 test("creates an empty editor state", () => {
   const state = createEditorState();
@@ -132,4 +133,13 @@ test("handles invalid inputs without throwing and normalizes the limit", () => {
   assert.equal(restoreEditorText(null).currentText, "");
   assert.deepEqual(projectHistory("not history", -2), []);
   assert.deepEqual(projectHistory([{ status: "complete", text: "a" }], 1.9).length, 1);
+});
+
+test("keeps full history normalization in the browser-safe history view module", () => {
+  const [entry] = normalizeHistoryEntries([
+    { id: "partial", status: "partial", text: "draft", transcript: "draft" }
+  ]);
+
+  assert.equal(entry.id, "partial");
+  assert.equal(entry.characterCount, 5);
 });
