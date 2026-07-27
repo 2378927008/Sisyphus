@@ -12,12 +12,55 @@
   </head>
   <body class="hud-body">
     <main id="hudRoot" class="hud-shell" data-phase="idle">
-      <span id="hudDot" class="hud-dot"></span>
-      <div class="hud-copy">
-        <strong id="hudTitle">Local Flow</strong>
-        <p id="hudMessage">按快捷键开始或停止录音</p>
+      <div class="hud-status-region">
+        <div id="hudWaveform" class="hud-waveform" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="hud-copy">
+          <strong id="hudTitle">Local Flow</strong>
+          <p id="hudMessage">按快捷键开始或停止录音</p>
+        </div>
       </div>
       <time id="hudTimer" class="hud-timer" aria-live="off"></time>
+      <div class="hud-actions">
+        <div class="hud-recording-actions">
+          <button
+            id="hudCancel"
+            class="hud-icon-button"
+            type="button"
+            title="取消录音"
+            aria-label="取消录音"
+            hidden
+          >
+            <i data-lucide="X"></i>
+          </button>
+          <button
+            id="hudStop"
+            class="hud-icon-button hud-stop-button"
+            type="button"
+            title="停止录音"
+            aria-label="停止录音"
+            hidden
+          >
+            <i data-lucide="Square"></i>
+          </button>
+        </div>
+        <button
+          id="hudOpenMain"
+          class="hud-open-button"
+          type="button"
+          title="打开 Local Flow"
+          aria-label="打开 Local Flow"
+          hidden
+        >
+          <i data-lucide="ExternalLink"></i>
+          <span id="hudOpenMainLabel">打开 Local Flow</span>
+        </button>
+      </div>
     </main>
     <script type="module" src="./hud.js"></script>
   </body>

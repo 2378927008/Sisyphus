@@ -4,6 +4,7 @@ const validPhases = new Set([
   "recording",
   "stopping",
   "transcribing",
+  "polishing",
   "pasting",
   "done",
   "error",
@@ -32,6 +33,7 @@ export function createSystemInputController({
     updatedAt: now()
   };
   let startRecordingPending = false;
+  let stopRecordingPending = false;
   let commandTimeout = null;
   let terminalAutoIdleTimeout = null;
 
@@ -91,11 +93,25 @@ export function createSystemInputController({
   }
 
   async function stop() {
-    if (state.phase !== "recording") {
+    if (state.phase !== "recording" || stopRecordingPending) {
       return;
     }
 
-    await stopRecording();
+    stopRecordingPending = true;
+    try {
+      await stopRecording();
+    } finally {
+      stopRecordingPending = false;
+    }
+  }
+
+  async function cancel() {
+    if (state.phase !== "starting" && state.phase !== "recording") {
+      return;
+    }
+
+    requestRendererReset();
+    setPhase("idle");
   }
 
   async function toggle() {
@@ -183,6 +199,7 @@ export function createSystemInputController({
     setPhase,
     start,
     stop,
+    cancel,
     toggle,
     handleRendererStatus
   };
@@ -196,12 +213,19 @@ function normalizeRendererPhase(phase) {
   if (phase === "error") return "error";
   if (phase === "warning") return "warning";
   if (phase === "pasting") return "pasting";
-  if (phase === "transcribing" || phase === "polishing") return "transcribing";
+  if (phase === "transcribing") return "transcribing";
+  if (phase === "polishing") return "polishing";
   return "idle";
 }
 
 function isBusyPhase(phase) {
-  return phase === "starting" || phase === "stopping" || phase === "transcribing" || phase === "pasting";
+  return (
+    phase === "starting" ||
+    phase === "stopping" ||
+    phase === "transcribing" ||
+    phase === "polishing" ||
+    phase === "pasting"
+  );
 }
 
 function unrefTimeout(timeout) {

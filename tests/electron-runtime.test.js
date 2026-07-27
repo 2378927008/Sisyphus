@@ -584,10 +584,11 @@ test("preload exposes settings open listener without raw IPC event access", asyn
   assert.deepEqual(calls, [[]]);
 });
 
-test("HUD preload exposes only system input status subscription", async () => {
+test("HUD preload exposes only status and the three approved actions", async () => {
   const preloadSource = await readFile(new URL("../src/hud-preload.cjs", import.meta.url), "utf8");
   let exposedApi = null;
   const channels = [];
+  const sent = [];
 
   const sandbox = {
     require: (moduleName) => {
@@ -602,7 +603,8 @@ test("HUD preload exposes only system input status subscription", async () => {
           on: (channel, callback) => {
             channels.push(channel);
             callback({ sender: "main" }, { phase: "warning" });
-          }
+          },
+          send: (channel) => sent.push(channel)
         }
       };
     }
@@ -612,10 +614,19 @@ test("HUD preload exposes only system input status subscription", async () => {
 
   const states = [];
   exposedApi.onSystemInputStatus((state) => states.push(state));
+  exposedApi.stop();
+  exposedApi.cancel();
+  exposedApi.openMainWindow();
 
-  assert.deepEqual(Object.keys(exposedApi), ["onSystemInputStatus"]);
+  assert.deepEqual(Object.keys(exposedApi), [
+    "onSystemInputStatus",
+    "stop",
+    "cancel",
+    "openMainWindow"
+  ]);
   assert.deepEqual(channels, ["system-input:status"]);
   assert.deepEqual(states, [{ phase: "warning" }]);
+  assert.deepEqual(sent, ["hud:stop", "hud:cancel", "hud:open-main-window"]);
 });
 
 test("HUD view model names warning lifecycle states", async () => {

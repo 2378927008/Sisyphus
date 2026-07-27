@@ -137,6 +137,21 @@ test("getHudViewState rejects provider and model diagnostics from non-terminal p
   }
 });
 
+test("getHudViewState rejects URLs and stderr from non-terminal phases", () => {
+  for (const message of [
+    "See https://example.invalid/private-log for details",
+    "stderr: microphone initialization failed"
+  ]) {
+    const view = getHudViewState({
+      phase: "starting",
+      message,
+      language: "en"
+    });
+
+    assert.equal(view.message, "Preparing microphone.", message);
+  }
+});
+
 test("getHudViewState ignores safe short warning messages without known reasons", () => {
   const view = getHudViewState({
     phase: "warning",
@@ -200,14 +215,56 @@ test("getHudViewState maps every known reason without showing unsafe raw message
   }
 });
 
-test("getHudViewState falls back to Simplified Chinese for unsupported languages", () => {
-  const view = getHudViewState({
-    phase: "recording",
-    language: "ja"
-  });
+test("getHudViewState localizes actions for every exact interface language", () => {
+  const expected = {
+    en: ["Recording", "Cancel recording", "Stop recording", "Open Local Flow"],
+    "zh-Hans": ["正在录音", "取消录音", "停止录音", "打开 Local Flow"],
+    ja: ["録音中", "録音をキャンセル", "録音を停止", "Local Flow を開く"],
+    ko: ["녹음 중", "녹음 취소", "녹음 중지", "Local Flow 열기"],
+    "zh-Hant": ["正在錄音", "取消錄音", "停止錄音", "開啟 Local Flow"],
+    fr: ["Enregistrement", "Annuler l'enregistrement", "Arrêter l'enregistrement", "Ouvrir Local Flow"],
+    ru: ["Запись", "Отменить запись", "Остановить запись", "Открыть Local Flow"],
+    es: ["Grabando", "Cancelar grabación", "Detener grabación", "Abrir Local Flow"]
+  };
 
-  assert.equal(view.title, "正在录音");
-  assert.equal(view.message, "再次按快捷键停止");
+  for (const [language, [title, cancel, stop, open]] of Object.entries(expected)) {
+    const recording = getHudViewState({ phase: "recording", language });
+    const warning = getHudViewState({ phase: "warning", language });
+
+    assert.equal(recording.title, title, language);
+    assert.equal(recording.actions.cancel.label, cancel, language);
+    assert.equal(recording.actions.stop.label, stop, language);
+    assert.equal(warning.actions.openMainWindow.label, open, language);
+  }
+});
+
+test("getHudViewState falls back to English only for an unknown language", () => {
+  const view = getHudViewState({ phase: "recording", language: "unknown" });
+
+  assert.equal(view.title, "Recording");
+  assert.equal(view.message, "Press shortcut again to stop.");
+});
+
+test("getHudViewState exposes phase-safe HUD actions", () => {
+  const starting = getHudViewState({ phase: "starting", language: "en" });
+  const recording = getHudViewState({ phase: "recording", language: "en" });
+  const polishing = getHudViewState({ phase: "polishing", language: "en" });
+  const warning = getHudViewState({ phase: "warning", language: "en" });
+  const error = getHudViewState({ phase: "error", language: "en" });
+
+  assert.deepEqual(starting.actions, {
+    cancel: { visible: true, disabled: false, label: "Cancel recording" },
+    stop: { visible: true, disabled: true, label: "Stop recording" },
+    openMainWindow: { visible: false, disabled: false, label: "Open Local Flow" }
+  });
+  assert.equal(recording.actions.cancel.visible, true);
+  assert.equal(recording.actions.stop.disabled, false);
+  assert.equal(polishing.phase, "polishing");
+  assert.equal(polishing.title, "Polishing");
+  assert.equal(polishing.actions.cancel.visible, false);
+  assert.equal(polishing.actions.stop.visible, false);
+  assert.equal(warning.actions.openMainWindow.visible, true);
+  assert.equal(error.actions.openMainWindow.visible, true);
 });
 
 test("getHudViewState uses updatedAt as recording elapsed fallback", () => {
@@ -259,6 +316,7 @@ test("getHudViewState has non-empty title and message for every phase", () => {
     "recording",
     "stopping",
     "transcribing",
+    "polishing",
     "pasting",
     "done",
     "warning",

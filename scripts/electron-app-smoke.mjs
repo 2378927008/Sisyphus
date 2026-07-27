@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
+import { createHudActions, wireHudIpc } from "../src/main/hud-actions.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
@@ -11,6 +12,7 @@ const projectRoot = path.join(__dirname, "..");
 const htmlPath = path.join(projectRoot, "src", "renderer", "index.html");
 const hudHtmlPath = path.join(projectRoot, "src", "renderer", "hud.html");
 const preloadPath = path.join(projectRoot, "src", "preload.cjs");
+const hudPreloadPath = path.join(projectRoot, "src", "hud-preload.cjs");
 const unsafeDiagnostic = "3221225477 spawn C:\\private\\provider-helper.exe ENOENT stderr";
 
 applyElectronRuntimeSwitches(app);
@@ -40,6 +42,9 @@ const smokeIpcChannelRegistry = [
   "dictation:wav"
 ];
 const registeredSmokeIpcChannels = new Set();
+const hudActionCalls = [];
+let smokeHudWindow = null;
+let hudActions = null;
 
 function registerSmokeIpcHandler(channel, handler) {
   if (!smokeIpcChannelRegistry.includes(channel)) {
@@ -296,10 +301,23 @@ function wireIpc() {
   ipcMain.on("recording:status", (_event, payload) => {
     recordingStatusReports.push(payload);
   });
+  wireHudIpc({
+    ipcMain,
+    getHudWindow: () => smokeHudWindow,
+    hudActions
+  });
 }
 
 app.whenReady().then(async () => {
   configureMediaPermissions(session.defaultSession);
+  hudActions = createHudActions({
+    globalShortcut,
+    systemInputController: {
+      stop: async () => hudActionCalls.push("stop"),
+      cancel: async () => hudActionCalls.push("cancel")
+    },
+    revealMainWindow: () => hudActionCalls.push("open")
+  });
   wireIpc();
   assertSmokeIpcCoverage();
 
@@ -317,14 +335,15 @@ app.whenReady().then(async () => {
   });
   const hudWindow = new BrowserWindow({
     show: false,
-    width: 360,
-    height: 112,
+    width: 460,
+    height: 72,
     webPreferences: {
-      preload: preloadPath,
+      preload: hudPreloadPath,
       contextIsolation: true,
       nodeIntegration: false
     }
   });
+  smokeHudWindow = hudWindow;
 
   window.webContents.on("console-message", (_event, details) => {
     rendererMessages.push({
@@ -375,7 +394,14 @@ app.whenReady().then(async () => {
     await hudWindow.loadFile(hudHtmlPath);
     const hudState = await waitForHudState(
       hudWindow,
-      (state) => state.ready && state.hasSystemInputStatusListener && state.hasHudRoot,
+      (state) => (
+        state.ready &&
+        state.hasSystemInputStatusListener &&
+        state.hasStopAction &&
+        state.hasCancelAction &&
+        state.hasOpenMainWindowAction &&
+        state.hasHudRoot
+      ),
       5000
     );
     const hudErrors = hudMessages.filter((item) => item.level >= 3);
@@ -384,6 +410,72 @@ app.whenReady().then(async () => {
     }
 
     await window.loadFile(htmlPath);
+
+    const unauthorizedActionCount = hudActionCalls.length;
+    for (const channel of ["hud:stop", "hud:cancel", "hud:open-main-window"]) {
+      ipcMain.emit(channel, { sender: window.webContents });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (hudActionCalls.length !== unauthorizedActionCount) {
+      throw new Error("Main-window sender was allowed to invoke a HUD action.");
+    }
+
+    hudActions.syncPhase("recording");
+    if (!globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be registered while recording.");
+    }
+    hudWindow.webContents.send("system-input:status", {
+      phase: "recording",
+      language: "en",
+      recordingStartedAt: new Date().toISOString()
+    });
+    await waitForHudState(
+      hudWindow,
+      (state) => state.phase === "recording" && !state.cancelHidden && !state.stopHidden && !state.stopDisabled,
+      5000
+    );
+    await hudWindow.webContents.executeJavaScript("document.querySelector('#hudStop').click()");
+    await waitForHudAction("stop", 5000);
+
+    hudActions.syncPhase("polishing");
+    if (globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be released while polishing.");
+    }
+
+    hudActions.syncPhase("starting");
+    if (!globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be registered while starting.");
+    }
+    hudWindow.webContents.send("system-input:status", {
+      phase: "starting",
+      language: "en"
+    });
+    await waitForHudState(
+      hudWindow,
+      (state) => state.phase === "starting" && !state.cancelHidden && !state.stopHidden && state.stopDisabled,
+      5000
+    );
+    await hudWindow.webContents.executeJavaScript("document.querySelector('#hudCancel').click()");
+    await waitForHudAction("cancel", 5000);
+
+    hudActions.syncPhase("warning");
+    if (globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be released for warning.");
+    }
+    hudWindow.webContents.send("system-input:status", {
+      phase: "warning",
+      language: "en",
+      reason: "paste_failed",
+      message: unsafeDiagnostic
+    });
+    const warningHudState = await waitForHudState(
+      hudWindow,
+      (state) => state.phase === "warning" && !state.openMainHidden,
+      5000
+    );
+    assertNoDiagnosticLeak(warningHudState.visibleText, "HUD warning");
+    await hudWindow.webContents.executeJavaScript("document.querySelector('#hudOpenMain').click()");
+    await waitForHudAction("open", 5000);
 
     const initialState = await waitForState(
       window,
@@ -1774,10 +1866,16 @@ app.whenReady().then(async () => {
       completedState,
       failedTargetOutputState,
       hudState,
+      warningHudState,
+      hudActionCalls,
       settingsAtDictation,
       rendererMessages: rendererMessages.filter((item) => item.level >= 2)
     }, null, 2));
     clearTimeout(timeout);
+    hudActions.dispose();
+    if (globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be released after HUD actions dispose.");
+    }
     app.exit(0);
   } catch (error) {
     const state = await readRendererState(window).catch((stateError) => ({
@@ -1792,6 +1890,7 @@ app.whenReady().then(async () => {
       hudMessages
     }, null, 2));
     clearTimeout(timeout);
+    hudActions?.dispose();
     app.exit(1);
   }
 });
@@ -1824,6 +1923,19 @@ async function waitForHudState(window, predicate, timeoutMs) {
   }
 
   throw new Error(`Timed out waiting for HUD state. Last state: ${JSON.stringify(lastState)}`);
+}
+
+async function waitForHudAction(action, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (hudActionCalls.includes(action)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error(`Timed out waiting for HUD action: ${action}`);
 }
 
 function readRendererState(window) {
@@ -1953,7 +2065,16 @@ function readHudState(window) {
     (() => ({
       ready: Boolean(window.localFlow),
       hasSystemInputStatusListener: typeof window.localFlow?.onSystemInputStatus === 'function',
-      hasHudRoot: Boolean(document.querySelector('#hudRoot'))
+      hasStopAction: typeof window.localFlow?.stop === 'function',
+      hasCancelAction: typeof window.localFlow?.cancel === 'function',
+      hasOpenMainWindowAction: typeof window.localFlow?.openMainWindow === 'function',
+      hasHudRoot: Boolean(document.querySelector('#hudRoot')),
+      phase: document.querySelector('#hudRoot')?.dataset.phase || '',
+      cancelHidden: Boolean(document.querySelector('#hudCancel')?.hidden),
+      stopHidden: Boolean(document.querySelector('#hudStop')?.hidden),
+      stopDisabled: Boolean(document.querySelector('#hudStop')?.disabled),
+      openMainHidden: Boolean(document.querySelector('#hudOpenMain')?.hidden),
+      visibleText: document.querySelector('#hudRoot')?.innerText || ''
     }))()
   `);
 }

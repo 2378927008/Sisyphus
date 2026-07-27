@@ -1258,18 +1258,26 @@ body[data-primary-view="snippets"] #commandStrip {
 
 .hud-shell {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 48px 160px;
   width: 100vw;
   height: 100vh;
   min-width: 0;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 8px 10px;
   overflow: hidden;
   border: 1px solid #43504C;
   border-radius: 8px;
   background: #17211E;
   color: #FFFFFF;
+}
+
+.hud-status-region {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
 }
 
 .hud-copy {
@@ -1296,7 +1304,7 @@ body[data-primary-view="snippets"] #commandStrip {
 }
 
 .hud-timer {
-  min-width: 44px;
+  width: 48px;
   color: #DCE3E0;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1304,31 +1312,148 @@ body[data-primary-view="snippets"] #commandStrip {
   text-align: right;
 }
 
-.hud-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--muted);
+.hud-waveform {
+  display: flex;
+  width: 42px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--muted);
 }
 
-.hud-shell[data-phase="starting"] .hud-dot,
-.hud-shell[data-phase="stopping"] .hud-dot,
-.hud-shell[data-phase="transcribing"] .hud-dot,
-.hud-shell[data-phase="pasting"] .hud-dot,
-.hud-shell[data-phase="done"] .hud-dot {
-  background: var(--accent);
+.hud-waveform span {
+  width: 4px;
+  height: 22px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleY(0.3);
 }
 
-.hud-shell[data-phase="recording"] .hud-dot {
-  background: var(--recording);
+.hud-waveform span:nth-child(2),
+.hud-waveform span:nth-child(4) {
+  height: 16px;
 }
 
-.hud-shell[data-phase="warning"] .hud-dot {
-  background: var(--warning);
+.hud-waveform span:nth-child(3) {
+  height: 26px;
 }
 
-.hud-shell[data-phase="error"] .hud-dot {
-  background: var(--error);
+.hud-shell[data-phase="starting"] .hud-waveform,
+.hud-shell[data-phase="stopping"] .hud-waveform,
+.hud-shell[data-phase="transcribing"] .hud-waveform,
+.hud-shell[data-phase="polishing"] .hud-waveform,
+.hud-shell[data-phase="pasting"] .hud-waveform,
+.hud-shell[data-phase="done"] .hud-waveform {
+  color: var(--accent);
+}
+
+.hud-shell[data-phase="recording"] .hud-waveform {
+  color: var(--recording);
+}
+
+.hud-shell[data-phase="warning"] .hud-waveform {
+  color: var(--warning);
+}
+
+.hud-shell[data-phase="error"] .hud-waveform {
+  color: var(--error);
+}
+
+.hud-shell[data-phase="starting"] .hud-waveform span,
+.hud-shell[data-phase="recording"] .hud-waveform span {
+  animation: waveform-pulse 600ms ease-in-out infinite alternate;
+}
+
+.hud-shell[data-phase="starting"] .hud-waveform span:nth-child(2),
+.hud-shell[data-phase="recording"] .hud-waveform span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.hud-shell[data-phase="starting"] .hud-waveform span:nth-child(3),
+.hud-shell[data-phase="recording"] .hud-waveform span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.hud-shell[data-phase="starting"] .hud-waveform span:nth-child(4),
+.hud-shell[data-phase="recording"] .hud-waveform span:nth-child(4) {
+  animation-delay: 360ms;
+}
+
+.hud-shell[data-phase="starting"] .hud-waveform span:nth-child(5),
+.hud-shell[data-phase="recording"] .hud-waveform span:nth-child(5) {
+  animation-delay: 480ms;
+}
+
+.hud-actions {
+  width: 160px;
+  height: 40px;
+}
+
+.hud-actions [hidden] {
+  display: none;
+}
+
+.hud-recording-actions {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hud-icon-button,
+.hud-open-button {
+  height: 40px;
+  border: 1px solid #5C6965;
+  border-radius: 6px;
+  background: #25302D;
+  color: #FFFFFF;
+}
+
+.hud-icon-button {
+  display: inline-flex;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.hud-open-button {
+  display: inline-flex;
+  width: 160px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hud-stop-button {
+  border-color: #C94B46;
+  background: #A93D39;
+}
+
+.hud-icon-button:hover:not(:disabled),
+.hud-open-button:hover:not(:disabled) {
+  background: #34413D;
+}
+
+.hud-stop-button:hover:not(:disabled) {
+  background: #BD4843;
+}
+
+.hud-icon-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.hud-icon-button:focus-visible,
+.hud-open-button:focus-visible {
+  outline: 2px solid #7EB2FF;
+  outline-offset: 1px;
 }
 
 @keyframes waveform-pulse {

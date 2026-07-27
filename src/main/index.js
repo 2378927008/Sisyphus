@@ -16,6 +16,7 @@ import { buildSetupDownloadEnv, createModelSetupService } from "./model-setup.js
 import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
 import { createSystemInputController } from "./system-input-controller.js";
+import { createHudActions, wireHudIpc } from "./hud-actions.js";
 import { buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath } from "./hud-window.js";
 import { getRuntimeRoot, getVendorRoot, getAppRoot } from "./runtime-root.js";
 import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.js";
@@ -41,6 +42,7 @@ const rendererRecordingPhases = new Set([
   "recording",
   "stopping",
   "transcribing",
+  "polishing",
   "pasting",
   "done",
   "error",
@@ -59,6 +61,7 @@ let historyActions;
 let modelSetupService;
 let hudWindow;
 let systemInputController;
+let hudActions;
 let runtimeRoot;
 let vendorRoot;
 let appRoot;
@@ -264,6 +267,7 @@ function sendSystemInputStatus(state) {
     language: lastSettings?.interfaceLanguage || "zh-Hans"
   };
   refreshTrayMenu();
+  hudActions?.syncPhase(lastSystemInputState.phase);
   sendWindowMessage(mainWindow, "system-input:status", state);
   sendWindowMessage(hudWindow, "system-input:status", hudState);
 
@@ -345,6 +349,11 @@ function getErrorMessage(error) {
 }
 
 function wireIpc() {
+  wireHudIpc({
+    ipcMain,
+    getHudWindow: () => hudWindow,
+    hudActions
+  });
   ipcMain.on("recording:status", (_event, payload) => {
     if (_event.sender !== mainWindow?.webContents) {
       return;
@@ -466,6 +475,11 @@ if (ownsSingleInstance) {
     isReadyToRecord: () => true,
     requestRendererReset: () => sendWindowMessage(mainWindow, "recording:reset")
   });
+  hudActions = createHudActions({
+    globalShortcut,
+    systemInputController,
+    revealMainWindow: () => mainWindowReveal.request()
+  });
   nativeShortcut = await createNativeInputShortcutFromPackage({
     platform: process.platform,
     onError: (error) => {
@@ -506,6 +520,7 @@ if (ownsSingleInstance) {
   });
 
   app.on("will-quit", () => {
+    hudActions?.dispose();
     hotkeyManager?.unregister();
     globalShortcut.unregisterAll?.();
     nativeShortcut?.unregisterAll?.();

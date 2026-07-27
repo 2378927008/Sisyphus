@@ -1,8 +1,8 @@
 import path from "node:path";
 
 const hudSize = {
-  width: 360,
-  height: 112
+  width: 460,
+  height: 72
 };
 const hudBottomOffset = 48;
 

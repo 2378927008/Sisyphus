@@ -595,6 +595,24 @@ test("HUD fallback markup uses readable Chinese copy", async () => {
   assert.doesNotMatch(html, mojibakePattern);
 });
 
+test("HUD exposes local-icon recording controls and a recovery action", async () => {
+  const html = await readFile(new URL("../src/renderer/hud.html", import.meta.url), "utf8");
+
+  for (const [id, icon, label] of [
+    ["hudCancel", "X", "取消录音"],
+    ["hudStop", "Square", "停止录音"],
+    ["hudOpenMain", "ExternalLink", "打开 Local Flow"]
+  ]) {
+    const button = getElementMarkup(html, "button", id);
+    assert.match(button, new RegExp(`data-lucide="${icon}"`), id);
+    assert.match(button, new RegExp(`aria-label="${label}"`), id);
+    assert.match(button, new RegExp(`title="${label}"`), id);
+  }
+
+  assert.match(html, /id="hudWaveform"/);
+  assert.doesNotMatch(html, /<svg\b|[\u{1F300}-\u{1FAFF}]/u);
+});
+
 test("setup failures render localized failure reasons instead of raw diagnostics", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
 

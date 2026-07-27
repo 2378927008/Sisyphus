@@ -8,10 +8,10 @@ test("buildHudWindowOptions creates a compact non-disruptive HUD", () => {
     workArea: { x: 0, y: 0, width: 1920, height: 1080 }
   });
 
-  assert.equal(options.width, 360);
-  assert.equal(options.height, 112);
-  assert.equal(options.x, 780);
-  assert.equal(options.y, 920);
+  assert.equal(options.width, 460);
+  assert.equal(options.height, 72);
+  assert.equal(options.x, 730);
+  assert.equal(options.y, 960);
   assert.equal(options.frame, false);
   assert.equal(options.resizable, false);
   assert.equal(options.skipTaskbar, true);

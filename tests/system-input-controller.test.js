@@ -46,6 +46,84 @@ test("system input controller exposes explicit start and stop commands", async (
   assert.deepEqual(calls, ["start", "stop"]);
 });
 
+test("system input controller keeps polishing distinct and busy", async () => {
+  const calls = [];
+  const controller = createSystemInputController({
+    startRecording: async () => calls.push("start"),
+    stopRecording: async () => calls.push("stop")
+  });
+
+  controller.handleRendererStatus({ phase: "polishing", message: "Polishing" });
+  await controller.start();
+  await controller.stop();
+
+  assert.equal(controller.getState().phase, "polishing");
+  assert.equal(controller.getState().message, "Polishing");
+  assert.deepEqual(calls, []);
+});
+
+test("cancel resets the renderer and returns directly to idle", async () => {
+  for (const phase of ["starting", "recording"]) {
+    const resets = [];
+    const controller = createSystemInputController({
+      requestRendererReset: () => resets.push("reset")
+    });
+
+    controller.setPhase(phase);
+    await controller.cancel();
+
+    assert.deepEqual(resets, ["reset"], phase);
+    assert.equal(controller.getState().phase, "idle", phase);
+  }
+});
+
+test("cancel ignores every non-cancellable phase", async () => {
+  const resets = [];
+  const controller = createSystemInputController({
+    requestRendererReset: () => resets.push("reset")
+  });
+
+  for (const phase of [
+    "idle",
+    "stopping",
+    "transcribing",
+    "polishing",
+    "pasting",
+    "done",
+    "warning",
+    "error"
+  ]) {
+    controller.setPhase(phase);
+    await controller.cancel();
+    assert.equal(controller.getState().phase, phase);
+  }
+
+  assert.deepEqual(resets, []);
+});
+
+test("stop remains idempotent while a stop command is pending", async () => {
+  let releaseStop;
+  const calls = [];
+  const pendingStop = new Promise((resolve) => {
+    releaseStop = resolve;
+  });
+  const controller = createSystemInputController({
+    stopRecording: async () => {
+      calls.push("stop");
+      await pendingStop;
+    }
+  });
+
+  controller.setPhase("recording");
+  const firstStop = controller.stop();
+  const secondStop = controller.stop();
+
+  assert.deepEqual(calls, ["stop"]);
+  releaseStop();
+  await Promise.all([firstStop, secondStop]);
+  assert.deepEqual(calls, ["stop"]);
+});
+
 test("system input controller explicit commands ignore invalid lifecycle states", async () => {
   const calls = [];
   const controller = createSystemInputController({
@@ -104,6 +182,8 @@ test("system input controller ignores toggles while renderer is processing audio
   controller.setPhase("transcribing");
   await controller.toggle();
   controller.setPhase("pasting");
+  await controller.toggle();
+  controller.setPhase("polishing");
   await controller.toggle();
 
   assert.deepEqual(calls, []);
