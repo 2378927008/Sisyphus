@@ -18,8 +18,8 @@ export function normalizeDictionary(value) {
 export function normalizeSnippets(value, options = {}) {
   const createId = options.createId || createRandomId;
   const snippets = Array.isArray(value) ? value : [];
-  const seen = new Set();
-  const normalized = [];
+  const seenTriggers = new Set();
+  const candidates = [];
 
   for (const candidate of snippets) {
     if (!candidate || typeof candidate !== "object") {
@@ -27,31 +27,41 @@ export function normalizeSnippets(value, options = {}) {
     }
     const trigger = normalizeVisibleText(candidate.trigger, PERSONALIZATION_LIMITS.snippetTriggerLength);
     const text = String(candidate.text ?? "").trim().slice(0, PERSONALIZATION_LIMITS.snippetTextLength);
-    const key = comparisonKey(trigger);
-    if (!trigger || !text || seen.has(key)) {
+    const key = personalizationComparisonKey(trigger);
+    if (!trigger || !text || seenTriggers.has(key)) {
       continue;
     }
-    seen.add(key);
-    const id = String(candidate.id ?? "").trim() || String(createId()).trim();
-    normalized.push({
-      id,
+    seenTriggers.add(key);
+    candidates.push({
+      requestedId: String(candidate.id ?? "").trim(),
       trigger,
       text
     });
-    if (normalized.length >= PERSONALIZATION_LIMITS.snippets) {
+    if (candidates.length >= PERSONALIZATION_LIMITS.snippets) {
       break;
     }
   }
 
-  return normalized;
+  const reservedIds = new Set(candidates.map(({ requestedId }) => requestedId).filter(Boolean));
+  const assignedIds = new Set();
+  return candidates.map(({ requestedId, trigger, text }) => ({
+    id: claimUniqueSnippetId(requestedId || String(createId()).trim(), reservedIds, assignedIds),
+    trigger,
+    text
+  }));
 }
 
 export function expandExactSnippet(transcript, snippets) {
-  const key = comparisonKey(transcript);
-  const snippet = normalizeSnippets(snippets).find((candidate) => comparisonKey(candidate.trigger) === key);
+  const key = personalizationComparisonKey(transcript);
+  const snippet = normalizeSnippets(snippets)
+    .find((candidate) => personalizationComparisonKey(candidate.trigger) === key);
   return snippet
     ? { matched: true, text: snippet.text, snippetId: snippet.id }
     : { matched: false, text: String(transcript ?? ""), snippetId: null };
+}
+
+export function personalizationComparisonKey(value) {
+  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 
 function normalizeEntries(entries, limit, itemLength) {
@@ -59,7 +69,7 @@ function normalizeEntries(entries, limit, itemLength) {
   const normalized = [];
   for (const entry of entries) {
     const text = normalizeVisibleText(entry, itemLength);
-    const key = comparisonKey(text);
+    const key = personalizationComparisonKey(text);
     if (!text || seen.has(key)) {
       continue;
     }
@@ -76,8 +86,24 @@ function normalizeVisibleText(value, limit) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
-function comparisonKey(value) {
-  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+function claimUniqueSnippetId(requestedId, reservedIds, assignedIds) {
+  const baseId = String(requestedId ?? "").trim();
+  if (!baseId) {
+    throw new Error("Snippet ID generation returned an empty value");
+  }
+  if (!assignedIds.has(baseId)) {
+    assignedIds.add(baseId);
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}~${suffix}`;
+  while (reservedIds.has(candidate) || assignedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}~${suffix}`;
+  }
+  assignedIds.add(candidate);
+  return candidate;
 }
 
 function createRandomId() {

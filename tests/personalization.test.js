@@ -5,7 +5,8 @@ import {
   PERSONALIZATION_LIMITS,
   expandExactSnippet,
   normalizeDictionary,
-  normalizeSnippets
+  normalizeSnippets,
+  personalizationComparisonKey
 } from "../src/shared/personalization.js";
 
 test("dictionary normalization preserves the first visible spelling while NFKC-deduplicating", () => {
@@ -50,6 +51,51 @@ test("snippet normalization uses an injected stable id generator", () => {
 
   assert.deepEqual(snippets, [{ id: "stable-id", trigger: "meeting notes", text: "first" }]);
   assert.equal(calls, 1);
+});
+
+test("snippet normalization deterministically deconflicts duplicate and colliding ids", () => {
+  const legacy = [
+    { id: "same", trigger: "alpha", text: "A" },
+    { id: "same", trigger: "beta", text: "B" },
+    { id: "same~2", trigger: "gamma", text: "C" },
+    { trigger: "delta", text: "D" }
+  ];
+  const normalized = normalizeSnippets(legacy, {
+    createId() {
+      return "same";
+    }
+  });
+
+  assert.deepEqual(
+    normalized.map(({ id, trigger }) => ({ id, trigger })),
+    [
+      { id: "same", trigger: "alpha" },
+      { id: "same~3", trigger: "beta" },
+      { id: "same~2", trigger: "gamma" },
+      { id: "same~4", trigger: "delta" }
+    ]
+  );
+  assert.deepEqual(normalizeSnippets(normalized), normalized);
+});
+
+test("reordering normalized snippets preserves each stable unique id", () => {
+  const normalized = normalizeSnippets([
+    { id: "same", trigger: "alpha", text: "A" },
+    { id: "same", trigger: "beta", text: "B" }
+  ]);
+  const reordered = normalizeSnippets([...normalized].reverse());
+
+  assert.deepEqual(
+    Object.fromEntries(reordered.map((snippet) => [snippet.trigger, snippet.id])),
+    Object.fromEntries(normalized.map((snippet) => [snippet.trigger, snippet.id]))
+  );
+});
+
+test("personalization comparison collapses whitespace with NFKC and case folding", () => {
+  assert.equal(
+    personalizationComparisonKey("  Ｌｏｃａｌ \n\t Ｆｌｏｗ  "),
+    personalizationComparisonKey("local   flow")
+  );
 });
 
 test("shared personalization source has no Node-only imports", async () => {

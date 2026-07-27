@@ -48,14 +48,27 @@ let settings = mergeSettings({
   whisperCliPath: "C:\\smoke\\whisper-cli.exe",
   whisperModelPath: "C:\\smoke\\ggml-base.bin",
   dictionary: ["Qwen", "Local Flow"],
-  snippets: [{
-    id: "snippet-existing",
-    trigger: "meeting notes",
-    text: "Summarize the meeting notes."
-  }]
+  snippets: [
+    {
+      id: "snippet-existing",
+      trigger: "meeting notes",
+      text: "Summarize the meeting notes."
+    },
+    {
+      id: "snippet-duplicate",
+      trigger: "alpha shortcut",
+      text: "Alpha expansion."
+    },
+    {
+      id: "snippet-duplicate",
+      trigger: "beta shortcut",
+      text: "Beta expansion."
+    }
+  ]
 });
 const settingsSaveCalls = [];
 let settingsSaveError = "";
+const settingsSavePlans = [];
 let historyListCalls = 0;
 const historyUpdateCalls = [];
 const historyReprocessCalls = [];
@@ -86,6 +99,17 @@ function createDeferred() {
     resolve = settle;
   });
   return { promise, resolve };
+}
+
+function delayNextSettingsSave() {
+  const started = createDeferred();
+  const release = createDeferred();
+  settingsSavePlans.push({ started, release });
+  return { started: started.promise, release: release.resolve };
+}
+
+function failNextSettingsSave(error) {
+  settingsSavePlans.push({ error });
 }
 
 function delayNextHistoryList(snapshot = structuredClone(historyFixtures)) {
@@ -219,8 +243,16 @@ function assertSmokeIpcCoverage() {
 
 function wireIpc() {
   registerSmokeIpcHandler("settings:get", () => settings);
-  registerSmokeIpcHandler("settings:save", (_event, next) => {
+  registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(structuredClone(next));
+    const plan = settingsSavePlans.shift();
+    plan?.started?.resolve();
+    if (plan?.release) {
+      await plan.release.promise;
+    }
+    if (plan?.error) {
+      throw new Error(plan.error);
+    }
     if (settingsSaveError) {
       throw new Error(settingsSaveError);
     }
@@ -493,6 +525,27 @@ app.whenReady().then(async () => {
     );
     assertNoUnsafeDiagnostic(dictionaryView.visibleMainText, "Dictionary page");
 
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#dictionarySearch');
+        search.value = 'Local   Flow';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.dictionarySearchValue === "Local   Flow" && state.dictionaryRowCount === 1,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#dictionarySearch');
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    await waitForState(window, (state) => state.dictionaryRowCount === 2, 5000);
+
     const dictionarySaveStart = settingsSaveCalls.length;
     await window.webContents.executeJavaScript(`
       (() => {
@@ -514,7 +567,12 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      (state) => settings.dictionary.includes("Codex Desktop") && state.dictionaryRowCount === 3,
+      (state) => (
+        settings.dictionary.includes("Codex Desktop") &&
+        state.dictionaryRowCount === 3 &&
+        state.activePersonalizationAction === "edit" &&
+        state.activeDictionaryRowIndex === "2"
+      ),
       5000
     );
     assert.deepEqual(settingsSaveCalls.at(-1), {
@@ -533,7 +591,12 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      () => settings.dictionary.includes("Codex Windows") && !settings.dictionary.includes("Codex Desktop"),
+      (state) => (
+        settings.dictionary.includes("Codex Windows") &&
+        !settings.dictionary.includes("Codex Desktop") &&
+        state.activePersonalizationAction === "edit" &&
+        state.activeDictionaryRowIndex === "2"
+      ),
       5000
     );
 
@@ -566,7 +629,125 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      (state) => !state.visibleMainText.includes("Recoverable local term"),
+      (state) => (
+        !state.visibleMainText.includes("Recoverable local term") &&
+        state.activeElementId === "dictionaryAdd"
+      ),
+      5000
+    );
+
+    const dictionaryDraftSave = delayNextSettingsSave();
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#dictionaryAdd').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = 'Response anchor';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    await dictionaryDraftSave.started;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#dictionaryAdd').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = 'Second unsaved draft';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        input.setSelectionRange(7, 14);
+        const search = document.querySelector('#dictionarySearch');
+        search.value = 'Local   Flow';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.dictionaryDraftValue === "Second unsaved draft" &&
+        state.activeSelectionStart === 7 &&
+        state.activeSelectionEnd === 14
+      ),
+      5000
+    );
+    dictionaryDraftSave.release();
+    await waitForState(
+      window,
+      (state) => (
+        settings.dictionary.includes("Response anchor") &&
+        state.dictionaryDraftValue === "Second unsaved draft" &&
+        state.activeSelectionStart === 7 &&
+        state.activeSelectionEnd === 14
+      ),
+      5000
+    );
+    await window.webContents.sendInputEvent({ type: "keyDown", keyCode: "TAB" });
+    await window.webContents.sendInputEvent({ type: "keyUp", keyCode: "TAB" });
+    await waitForState(
+      window,
+      (state) => state.activePersonalizationAction === "save",
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-personalization-form="dictionary"] [data-personalization-action="cancel"]').click()
+    `);
+    await waitForState(window, (state) => state.activeElementId === "dictionaryAdd", 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#dictionarySearch');
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+
+    await window.webContents.executeJavaScript("document.querySelector('#navSettings').click()");
+    await waitForState(window, (state) => state.settingsDrawerOpen, 5000);
+    const staleFullSaveStart = settingsSaveCalls.length;
+    const staleFullSave = delayNextSettingsSave();
+    await window.webContents.executeJavaScript("document.querySelector('#settingsForm').requestSubmit()");
+    await staleFullSave.started;
+    await window.webContents.executeJavaScript("document.querySelector('#manageDictionary').click()");
+    failNextSettingsSave(unsafeDiagnostic);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#dictionaryAdd').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = 'Stale-safe D1';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    staleFullSave.release();
+    const staleFailureState = await waitForState(
+      window,
+      (state) => (
+        settingsSaveCalls.length >= staleFullSaveStart + 2 &&
+        state.dictionaryStatus.length > 0 &&
+        state.visibleMainText.includes("Stale-safe D1")
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(staleFailureState.visibleMainText, "Stale full settings response");
+
+    const languageSaveStart = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const field = document.querySelector('#outputLanguage');
+        field.value = field.value === 'en' ? 'zh-Hans' : 'en';
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(window, () => settingsSaveCalls.length > languageSaveStart, 5000);
+    await window.webContents.executeJavaScript("document.querySelector('#navSettings').click()");
+    await waitForState(window, (state) => state.settingsDrawerOpen, 5000);
+    const retryFullSaveStart = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript("document.querySelector('#settingsForm').requestSubmit()");
+    await waitForState(window, () => settingsSaveCalls.length > retryFullSaveStart, 5000);
+    assert.ok(
+      settingsSaveCalls.at(-1).dictionary.includes("Stale-safe D1"),
+      "A later full save dropped the failed optimistic dictionary value."
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#manageDictionary').click()");
+    await waitForState(
+      window,
+      (state) => state.dictionaryCurrent && state.visibleMainText.includes("Stale-safe D1"),
       5000
     );
 
@@ -577,11 +758,105 @@ app.whenReady().then(async () => {
         state.snippetsCurrent &&
         state.snippetsPageVisible &&
         !state.workspacePageVisible &&
-        state.snippetRowCount === 1
+        state.snippetRowCount === 3 &&
+        state.snippetExactMatchHintVisible &&
+        state.snippetExactMatchHintText.length > 0
       ),
       5000
     );
     assertNoUnsafeDiagnostic(snippetsView.visibleMainText, "Quick snippets page");
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#snippetSearch');
+        search.value = 'meeting   notes';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.snippetSearchValue === "meeting   notes" && state.snippetRowCount === 1,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#snippetSearch');
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    const duplicateSnippetIds = await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('[data-snippet-row]')].map((row) => ({
+        id: row.dataset.snippetId,
+        text: row.textContent
+      }))
+    `);
+    assert.equal(new Set(duplicateSnippetIds.map(({ id }) => id)).size, 3);
+    const alphaSnippetId = duplicateSnippetIds.find(({ text }) => text.includes("alpha shortcut"))?.id;
+    const betaSnippetId = duplicateSnippetIds.find(({ text }) => text.includes("beta shortcut"))?.id;
+    assert.ok(alphaSnippetId && betaSnippetId && alphaSnippetId !== betaSnippetId);
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('alpha shortcut'));
+        row.querySelector('[data-personalization-action="edit"]').click();
+      })()
+    `);
+    await window.webContents.sendInputEvent({ type: "keyDown", keyCode: "TAB" });
+    await window.webContents.sendInputEvent({ type: "keyUp", keyCode: "TAB" });
+    await window.webContents.sendInputEvent({ type: "keyDown", keyCode: "TAB" });
+    await window.webContents.sendInputEvent({ type: "keyUp", keyCode: "TAB" });
+    await waitForState(window, (state) => state.activePersonalizationAction === "save", 5000);
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-personalization-form="snippet"] [data-personalization-action="cancel"]').click()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.activePersonalizationAction === "edit" &&
+        state.activeSnippetRowId === alphaSnippetId
+      ),
+      5000
+    );
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('beta shortcut'));
+        row.querySelector('[data-personalization-action="edit"]').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'beta shortcut revised';
+        form.querySelector('[name="text"]').value = 'Beta expansion revised.';
+        form.requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        settings.snippets.some((item) => item.id === alphaSnippetId && item.trigger === "alpha shortcut") &&
+        settings.snippets.some((item) => item.id === betaSnippetId && item.trigger === "beta shortcut revised") &&
+        state.activePersonalizationAction === "edit" &&
+        state.activeSnippetRowId === betaSnippetId
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.dataset.snippetId === ${JSON.stringify(betaSnippetId)});
+        row.querySelector('[data-personalization-action="delete"]').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        settings.snippets.some((item) => item.id === alphaSnippetId) &&
+        !settings.snippets.some((item) => item.id === betaSnippetId) &&
+        state.activeElementId === "snippetAdd"
+      ),
+      5000
+    );
 
     await window.webContents.executeJavaScript(`
       (() => {
@@ -594,7 +869,7 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      (state) => settings.snippets.some((item) => item.trigger === "daily brief") && state.snippetRowCount === 2,
+      (state) => settings.snippets.some((item) => item.trigger === "daily brief") && state.snippetRowCount === 3,
       5000
     );
     const addedSnippet = settings.snippets.find((item) => item.trigger === "daily brief");
@@ -653,7 +928,145 @@ app.whenReady().then(async () => {
     `);
     await waitForState(
       window,
-      () => !settings.snippets.some((item) => item.id === addedSnippet.id),
+      (state) => (
+        !settings.snippets.some((item) => item.id === addedSnippet.id) &&
+        state.activeElementId === "snippetAdd"
+      ),
+      5000
+    );
+
+    failNextSettingsSave(unsafeDiagnostic);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'recoverable snippet';
+        form.querySelector('[name="text"]').value = 'Recoverable local expansion.';
+        form.requestSubmit();
+      })()
+    `);
+    const failedSnippetSave = await waitForState(
+      window,
+      (state) => (
+        state.snippetStatus.length > 0 &&
+        state.visibleMainText.includes("recoverable snippet")
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedSnippetSave.visibleMainText, "Snippet save failure");
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('recoverable snippet'));
+        row.querySelector('[data-personalization-action="delete"]').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => !state.visibleMainText.includes("recoverable snippet"),
+      5000
+    );
+
+    const snippetDraftSave = delayNextSettingsSave();
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'response anchor snippet';
+        form.querySelector('[name="text"]').value = 'Response anchor expansion.';
+        form.requestSubmit();
+      })()
+    `);
+    await snippetDraftSave.started;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        const trigger = form.querySelector('[name="trigger"]');
+        const text = form.querySelector('[name="text"]');
+        trigger.value = 'second snippet draft';
+        trigger.dispatchEvent(new Event('input', { bubbles: true }));
+        text.value = 'Second unsaved expansion.';
+        text.dispatchEvent(new Event('input', { bubbles: true }));
+        text.focus();
+        text.setSelectionRange(7, 14);
+        const search = document.querySelector('#snippetSearch');
+        search.value = 'meeting   notes';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.snippetDraftTrigger === "second snippet draft" &&
+        state.snippetDraftText === "Second unsaved expansion." &&
+        state.activeSelectionStart === 7 &&
+        state.activeSelectionEnd === 14
+      ),
+      5000
+    );
+    snippetDraftSave.release();
+    await waitForState(
+      window,
+      (state) => (
+        settings.snippets.some((item) => item.trigger === "response anchor snippet") &&
+        state.snippetDraftTrigger === "second snippet draft" &&
+        state.snippetDraftText === "Second unsaved expansion." &&
+        state.activeSelectionStart === 7 &&
+        state.activeSelectionEnd === 14
+      ),
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      document.querySelector('[data-personalization-form="snippet"] [data-personalization-action="cancel"]').click()
+    `);
+    await waitForState(window, (state) => state.activeElementId === "snippetAdd", 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const search = document.querySelector('#snippetSearch');
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      })()
+    `);
+
+    const olderSnippetSave = delayNextSettingsSave();
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'queued first';
+        form.querySelector('[name="text"]').value = 'Queued first expansion.';
+        form.requestSubmit();
+      })()
+    `);
+    await olderSnippetSave.started;
+    const newerSnippetSave = delayNextSettingsSave();
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'queued second';
+        form.querySelector('[name="text"]').value = 'Queued second expansion.';
+        form.requestSubmit();
+      })()
+    `);
+    olderSnippetSave.release();
+    await newerSnippetSave.started;
+    await waitForState(
+      window,
+      (state) => (
+        state.visibleMainText.includes("queued first") &&
+        state.visibleMainText.includes("queued second")
+      ),
+      5000
+    );
+    newerSnippetSave.release();
+    await waitForState(
+      window,
+      () => (
+        settings.snippets.some((item) => item.trigger === "queued first") &&
+        settings.snippets.some((item) => item.trigger === "queued second")
+      ),
       5000
     );
 
@@ -1599,6 +2012,29 @@ function readRendererState(window) {
         snippetsPageVisible: isVisible(document.querySelector('#snippetsPage')),
         dictionaryRowCount: document.querySelectorAll('[data-dictionary-row]').length,
         snippetRowCount: document.querySelectorAll('[data-snippet-row]').length,
+        snippetRowIds: [...document.querySelectorAll('[data-snippet-row]')]
+          .map((row) => row.dataset.snippetId),
+        dictionarySearchValue: document.querySelector('#dictionarySearch')?.value || '',
+        snippetSearchValue: document.querySelector('#snippetSearch')?.value || '',
+        snippetExactMatchHintVisible: isVisible(document.querySelector('#snippetExactMatchHint')),
+        snippetExactMatchHintText: document.querySelector('#snippetExactMatchHint')?.textContent?.trim() || '',
+        dictionaryDraftValue:
+          document.querySelector('[data-personalization-form="dictionary"] [name="term"]')?.value || '',
+        snippetDraftTrigger:
+          document.querySelector('[data-personalization-form="snippet"] [name="trigger"]')?.value || '',
+        snippetDraftText:
+          document.querySelector('[data-personalization-form="snippet"] [name="text"]')?.value || '',
+        activePersonalizationAction: document.activeElement?.dataset?.personalizationAction || '',
+        activePersonalizationValue: document.activeElement?.dataset?.personalizationValue || '',
+        activeSnippetRowId: document.activeElement?.closest?.('[data-snippet-row]')?.dataset.snippetId || '',
+        activeDictionaryRowIndex:
+          document.activeElement?.closest?.('[data-dictionary-row]')?.dataset.index || '',
+        activeSelectionStart: Number.isInteger(document.activeElement?.selectionStart)
+          ? document.activeElement.selectionStart
+          : -1,
+        activeSelectionEnd: Number.isInteger(document.activeElement?.selectionEnd)
+          ? document.activeElement.selectionEnd
+          : -1,
         dictionaryStatus: document.querySelector('#dictionaryStatus')?.textContent?.trim() || '',
         snippetStatus: document.querySelector('#snippetStatus')?.textContent?.trim() || '',
         settingsDrawerOpen: document.querySelector('#settingsDrawer')?.classList.contains('open') || false,

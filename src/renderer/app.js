@@ -33,7 +33,8 @@ import {
 import {
   PERSONALIZATION_LIMITS,
   normalizeDictionary,
-  normalizeSnippets
+  normalizeSnippets,
+  personalizationComparisonKey
 } from "../shared/personalization.js";
 
 const form = document.querySelector("#settingsForm");
@@ -138,10 +139,14 @@ let historySelectionVersion = 0;
 let historyCommitVersion = 0;
 let dictionaryQuery = "";
 let snippetQuery = "";
-let dictionaryEditorIndex = null;
-let snippetEditorId = null;
+let dictionaryEditor = null;
+let snippetEditor = null;
 let dictionaryStatusKey = "";
 let snippetStatusKey = "";
+const pendingPersonalizationFocus = {
+  dictionary: null,
+  snippets: null
+};
 const historyEditorSessions = new Map();
 const historyReprocessVersions = new Map();
 let settingsSaveQueue = Promise.resolve();
@@ -281,8 +286,10 @@ async function init() {
   dictionaryAdd.addEventListener("click", beginDictionaryAdd);
   snippetAdd.addEventListener("click", beginSnippetAdd);
   dictionaryList.addEventListener("click", handleDictionaryAction);
+  dictionaryList.addEventListener("input", syncDictionaryDraft);
   dictionaryList.addEventListener("submit", handleDictionarySubmit);
   snippetList.addEventListener("click", handleSnippetAction);
+  snippetList.addEventListener("input", syncSnippetDraft);
   snippetList.addEventListener("submit", handleSnippetSubmit);
   manageDictionary.addEventListener("click", () => {
     closeSettingsDrawer();
@@ -351,9 +358,12 @@ function changeProcessingLanguage(event) {
   const requestedValue = field.value;
   const requestVersion = processingLanguageRequestVersions[settingName] + 1;
   processingLanguageRequestVersions[settingName] = requestVersion;
+  const saveOperation = createSettingsSaveOperation({
+    [settingName]: requestedValue
+  });
 
   enqueueSettingsOperation(() => (
-    saveProcessingLanguage(field, settingName, requestedValue, requestVersion)
+    saveProcessingLanguage(field, settingName, requestedValue, requestVersion, saveOperation)
   ));
 }
 
@@ -363,11 +373,56 @@ function enqueueSettingsOperation(operation) {
   return pending;
 }
 
-async function saveProcessingLanguage(field, settingName, requestedValue, requestVersion) {
+function createSettingsSaveOperation(next) {
+  const responseContext = {
+    versions: {
+      ...personalizationSaveVersions
+    },
+    writes: {
+      dictionary: Object.hasOwn(next, "dictionary"),
+      snippets: Object.hasOwn(next, "snippets")
+    }
+  };
+  return async () => {
+    const response = await window.localFlow.saveSettings(next);
+    return reconcileSettingsResponse(response, responseContext);
+  };
+}
+
+function reconcileSettingsResponse(response, responseContext) {
+  const responseSettings = response && typeof response === "object" ? response : {};
+  const reconciled = {
+    ...currentSettings,
+    ...responseSettings
+  };
+
+  for (const settingName of ["dictionary", "snippets"]) {
+    const normalizer = settingName === "dictionary" ? normalizeDictionary : normalizeSnippets;
+    const hasNewerLocalValue = (
+      personalizationSaveVersions[settingName] > (responseContext?.versions?.[settingName] || 0)
+    );
+    const preservesLocalValue = !responseContext?.writes?.[settingName] || hasNewerLocalValue;
+    const value = preservesLocalValue
+      ? currentSettings?.[settingName]
+      : Object.hasOwn(responseSettings, settingName)
+        ? responseSettings[settingName]
+        : currentSettings?.[settingName];
+    reconciled[settingName] = normalizer(value);
+  }
+
+  currentSettings = reconciled;
+  return currentSettings;
+}
+
+async function saveProcessingLanguage(
+  field,
+  settingName,
+  requestedValue,
+  requestVersion,
+  saveOperation
+) {
   try {
-    currentSettings = await window.localFlow.saveSettings({
-      [settingName]: requestedValue
-    });
+    await saveOperation();
     await refreshProviderStatus();
     await refreshSetupStatusView({ updateStatus: false });
     renderHeaderHealth();
@@ -803,8 +858,9 @@ async function saveDetectedSetupPaths() {
 
   if (Object.keys(next).length) {
     const fieldValuesAtSave = captureFormFieldValues();
+    const saveOperation = createSettingsSaveOperation(next);
     await enqueueSettingsOperation(async () => {
-      currentSettings = await window.localFlow.saveSettings(next);
+      await saveOperation();
       fillSettings(currentSettings, { fieldValuesAtSave });
     });
   }
@@ -1598,9 +1654,10 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     snippets: normalizeSnippets(currentSettings?.snippets)
   };
   const fieldValuesAtSave = captureFormFieldValues(Object.keys(next));
+  const saveOperation = createSettingsSaveOperation(next);
 
   return enqueueSettingsOperation(async () => {
-    currentSettings = await window.localFlow.saveSettings(next);
+    await saveOperation();
     fillSettings(currentSettings, { fieldValuesAtSave });
     currentLanguage = normalizeInterfaceLanguage(form.interfaceLanguage.value);
     applyInterfaceLanguage(currentLanguage);
@@ -1637,6 +1694,7 @@ function renderPersonalizationPages() {
 }
 
 function renderDictionaryPage() {
+  const focusTarget = capturePersonalizationFocus("dictionary");
   const dictionary = normalizeDictionary(currentSettings?.dictionary);
   if (currentSettings) currentSettings = { ...currentSettings, dictionary };
   const query = normalizeSearchQuery(dictionaryQuery);
@@ -1644,13 +1702,16 @@ function renderDictionaryPage() {
     .map((term, index) => ({ term, index }))
     .filter(({ term }) => !query || normalizeSearchQuery(term).includes(query));
   const markup = [];
+  let editorRendered = false;
 
-  if (dictionaryEditorIndex === -1) {
-    markup.push(renderDictionaryEditor("", -1));
+  if (dictionaryEditor?.index === -1) {
+    markup.push(renderDictionaryEditor(dictionaryEditor));
+    editorRendered = true;
   }
   for (const { term, index } of rows) {
-    if (dictionaryEditorIndex === index) {
-      markup.push(renderDictionaryEditor(term, index));
+    if (dictionaryEditor?.index === index) {
+      markup.push(renderDictionaryEditor(dictionaryEditor));
+      editorRendered = true;
       continue;
     }
     markup.push(`
@@ -1663,6 +1724,9 @@ function renderDictionaryPage() {
       </article>
     `);
   }
+  if (dictionaryEditor && !editorRendered) {
+    markup.unshift(renderDictionaryEditor(dictionaryEditor));
+  }
 
   dictionaryList.innerHTML = markup.length
     ? markup.join("")
@@ -1670,30 +1734,32 @@ function renderDictionaryPage() {
   applyTranslations(dictionaryList);
   renderIcons(dictionaryList);
   renderPersonalizationStatus("dictionary");
+  restorePersonalizationFocus("dictionary", focusTarget);
 }
 
-function renderDictionaryEditor(term, index) {
+function renderDictionaryEditor(editor) {
   return `
-    <form class="personalization-editor" data-personalization-form="dictionary" data-index="${index}">
+    <form class="personalization-editor" data-personalization-form="dictionary" data-index="${editor.index}">
       <label>
         <span data-i18n="dictionary.term">${escapeHtml(t("dictionary.term"))}</span>
         <input
           name="term"
-          value="${escapeHtml(term)}"
+          value="${escapeHtml(editor.value)}"
           maxlength="${PERSONALIZATION_LIMITS.dictionaryTermLength}"
           autocomplete="off"
           required
         />
       </label>
       <div class="personalization-actions">
-        ${renderIconAction("save", index, "CheckCircle2", "dictionary.save")}
-        ${renderIconAction("cancel", index, "X", "dictionary.cancel")}
+        ${renderIconAction("save", editor.index, "CheckCircle2", "dictionary.save")}
+        ${renderIconAction("cancel", editor.index, "X", "dictionary.cancel")}
       </div>
     </form>
   `;
 }
 
 function renderSnippetsPage() {
+  const focusTarget = capturePersonalizationFocus("snippets");
   const snippets = normalizeSnippets(currentSettings?.snippets);
   if (currentSettings) currentSettings = { ...currentSettings, snippets };
   const query = normalizeSearchQuery(snippetQuery);
@@ -1703,13 +1769,16 @@ function renderSnippetsPage() {
     normalizeSearchQuery(snippet.text).includes(query)
   ));
   const markup = [];
+  let editorRendered = false;
 
-  if (snippetEditorId === "") {
-    markup.push(renderSnippetEditor(null));
+  if (snippetEditor?.id === "") {
+    markup.push(renderSnippetEditor(snippetEditor));
+    editorRendered = true;
   }
   for (const snippet of rows) {
-    if (snippetEditorId === snippet.id) {
-      markup.push(renderSnippetEditor(snippet));
+    if (snippetEditor?.id === snippet.id) {
+      markup.push(renderSnippetEditor(snippetEditor));
+      editorRendered = true;
       continue;
     }
     markup.push(`
@@ -1726,6 +1795,9 @@ function renderSnippetsPage() {
       </article>
     `);
   }
+  if (snippetEditor && !editorRendered) {
+    markup.unshift(renderSnippetEditor(snippetEditor));
+  }
 
   snippetList.innerHTML = markup.length
     ? markup.join("")
@@ -1733,18 +1805,18 @@ function renderSnippetsPage() {
   applyTranslations(snippetList);
   renderIcons(snippetList);
   renderPersonalizationStatus("snippets");
+  restorePersonalizationFocus("snippets", focusTarget);
 }
 
-function renderSnippetEditor(snippet) {
-  const id = snippet?.id || "";
+function renderSnippetEditor(editor) {
   return `
-    <form class="personalization-editor" data-personalization-form="snippet" data-snippet-id="${escapeHtml(id)}">
+    <form class="personalization-editor" data-personalization-form="snippet" data-snippet-id="${escapeHtml(editor.id)}">
       <div class="snippet-editor-fields">
         <label>
           <span data-i18n="snippets.trigger">${escapeHtml(t("snippets.trigger"))}</span>
           <input
             name="trigger"
-            value="${escapeHtml(snippet?.trigger || "")}"
+            value="${escapeHtml(editor.trigger)}"
             maxlength="${PERSONALIZATION_LIMITS.snippetTriggerLength}"
             autocomplete="off"
             required
@@ -1756,12 +1828,12 @@ function renderSnippetEditor(snippet) {
             name="text"
             maxlength="${PERSONALIZATION_LIMITS.snippetTextLength}"
             required
-          >${escapeHtml(snippet?.text || "")}</textarea>
+          >${escapeHtml(editor.text)}</textarea>
         </label>
       </div>
       <div class="personalization-actions">
-        ${renderIconAction("save", id, "CheckCircle2", "snippets.save")}
-        ${renderIconAction("cancel", id, "X", "snippets.cancel")}
+        ${renderIconAction("save", editor.id, "CheckCircle2", "snippets.save")}
+        ${renderIconAction("cancel", editor.id, "X", "snippets.cancel")}
       </div>
     </form>
   `;
@@ -1785,21 +1857,119 @@ function renderIconAction(action, value, icon, labelKey, extraClass = "") {
 }
 
 function beginDictionaryAdd() {
-  dictionaryEditorIndex = -1;
+  dictionaryEditor = {
+    index: -1,
+    value: "",
+    revision: 0
+  };
+  requestPersonalizationFocus("dictionary", {
+    kind: "editor",
+    field: "term"
+  });
   setPersonalizationStatus("dictionary", "");
   renderDictionaryPage();
-  focusPersonalizationEditor(dictionaryList);
 }
 
 function beginSnippetAdd() {
-  snippetEditorId = "";
+  snippetEditor = {
+    id: "",
+    trigger: "",
+    text: "",
+    revision: 0
+  };
+  requestPersonalizationFocus("snippets", {
+    kind: "editor",
+    field: "trigger"
+  });
   setPersonalizationStatus("snippets", "");
   renderSnippetsPage();
-  focusPersonalizationEditor(snippetList);
 }
 
-function focusPersonalizationEditor(list) {
-  queueMicrotask(() => list.querySelector("[data-personalization-form] input")?.focus());
+function syncDictionaryDraft(event) {
+  const editor = event.target.closest?.('[data-personalization-form="dictionary"]');
+  if (!editor || !dictionaryEditor || Number(editor.dataset.index) !== dictionaryEditor.index) return;
+  dictionaryEditor = {
+    ...dictionaryEditor,
+    value: editor.elements.term.value,
+    revision: dictionaryEditor.revision + 1
+  };
+}
+
+function syncSnippetDraft(event) {
+  const editor = event.target.closest?.('[data-personalization-form="snippet"]');
+  if (!editor || !snippetEditor || editor.dataset.snippetId !== snippetEditor.id) return;
+  snippetEditor = {
+    ...snippetEditor,
+    trigger: editor.elements.trigger.value,
+    text: editor.elements.text.value,
+    revision: snippetEditor.revision + 1
+  };
+}
+
+function capturePersonalizationFocus(settingName) {
+  const list = settingName === "dictionary" ? dictionaryList : snippetList;
+  const active = document.activeElement;
+  if (!active || !list.contains(active)) return null;
+
+  const editor = active.closest?.("[data-personalization-form]");
+  if (editor && active.name) {
+    return {
+      kind: "editor",
+      field: active.name,
+      selectionStart: active.selectionStart,
+      selectionEnd: active.selectionEnd,
+      selectionDirection: active.selectionDirection
+    };
+  }
+
+  if (active.dataset?.personalizationAction) {
+    return {
+      kind: "action",
+      action: active.dataset.personalizationAction,
+      value: active.dataset.personalizationValue
+    };
+  }
+  return null;
+}
+
+function requestPersonalizationFocus(settingName, target) {
+  pendingPersonalizationFocus[settingName] = target;
+}
+
+function restorePersonalizationFocus(settingName, capturedTarget) {
+  const target = pendingPersonalizationFocus[settingName] || capturedTarget;
+  pendingPersonalizationFocus[settingName] = null;
+  if (!target) return;
+
+  queueMicrotask(() => {
+    const list = settingName === "dictionary" ? dictionaryList : snippetList;
+    const addButton = settingName === "dictionary" ? dictionaryAdd : snippetAdd;
+    let element = null;
+    if (target.kind === "add") {
+      element = addButton;
+    } else if (target.kind === "editor") {
+      element = list.querySelector(`[data-personalization-form] [name="${target.field}"]`);
+    } else if (target.kind === "action") {
+      element = [...list.querySelectorAll("[data-personalization-action]")].find((candidate) => (
+        candidate.dataset.personalizationAction === target.action &&
+        candidate.dataset.personalizationValue === target.value
+      ));
+    }
+
+    (element || addButton).focus();
+    if (
+      element &&
+      Number.isInteger(target.selectionStart) &&
+      Number.isInteger(target.selectionEnd) &&
+      typeof element.setSelectionRange === "function"
+    ) {
+      element.setSelectionRange(
+        target.selectionStart,
+        target.selectionEnd,
+        target.selectionDirection || "none"
+      );
+    }
+  });
 }
 
 function handleDictionaryAction(event) {
@@ -1810,15 +1980,30 @@ function handleDictionaryAction(event) {
   const dictionary = normalizeDictionary(currentSettings?.dictionary);
 
   if (action === "edit" && dictionary[index] !== undefined) {
-    dictionaryEditorIndex = index;
+    dictionaryEditor = {
+      index,
+      value: dictionary[index],
+      revision: 0
+    };
+    requestPersonalizationFocus("dictionary", {
+      kind: "editor",
+      field: "term"
+    });
     setPersonalizationStatus("dictionary", "");
     renderDictionaryPage();
-    focusPersonalizationEditor(dictionaryList);
   } else if (action === "cancel") {
-    dictionaryEditorIndex = null;
+    const cancelledIndex = dictionaryEditor?.index ?? index;
+    dictionaryEditor = null;
+    requestPersonalizationFocus(
+      "dictionary",
+      cancelledIndex >= 0
+        ? { kind: "action", action: "edit", value: String(cancelledIndex) }
+        : { kind: "add" }
+    );
     renderDictionaryPage();
   } else if (action === "delete" && dictionary[index] !== undefined) {
-    dictionaryEditorIndex = null;
+    dictionaryEditor = null;
+    requestPersonalizationFocus("dictionary", { kind: "add" });
     persistPersonalization("dictionary", dictionary.filter((_, itemIndex) => itemIndex !== index));
   }
 }
@@ -1830,6 +2015,11 @@ function handleDictionarySubmit(event) {
   const dictionary = normalizeDictionary(currentSettings?.dictionary);
   const index = Number(editor.dataset.index);
   const value = editor.elements.term.value;
+  dictionaryEditor = {
+    index,
+    value,
+    revision: (dictionaryEditor?.revision || 0) + 1
+  };
   const candidate = normalizeDictionary([value])[0];
 
   if (
@@ -1854,7 +2044,12 @@ function handleDictionarySubmit(event) {
     return;
   }
 
-  dictionaryEditorIndex = null;
+  dictionaryEditor = null;
+  requestPersonalizationFocus("dictionary", {
+    kind: "action",
+    action: "edit",
+    value: String(index === -1 ? next.length - 1 : index)
+  });
   persistPersonalization("dictionary", next);
 }
 
@@ -1867,17 +2062,33 @@ function handleSnippetAction(event) {
   const snippet = snippets.find((item) => item.id === id);
 
   if (action === "edit" && snippet) {
-    snippetEditorId = id;
+    snippetEditor = {
+      id,
+      trigger: snippet.trigger,
+      text: snippet.text,
+      revision: 0
+    };
+    requestPersonalizationFocus("snippets", {
+      kind: "editor",
+      field: "trigger"
+    });
     setPersonalizationStatus("snippets", "");
     renderSnippetsPage();
-    focusPersonalizationEditor(snippetList);
   } else if (action === "cancel") {
-    snippetEditorId = null;
+    const cancelledId = snippetEditor?.id || id;
+    snippetEditor = null;
+    requestPersonalizationFocus(
+      "snippets",
+      cancelledId
+        ? { kind: "action", action: "edit", value: cancelledId }
+        : { kind: "add" }
+    );
     renderSnippetsPage();
   } else if (action === "copy" && snippet) {
     copySnippetText(snippet.text);
   } else if (action === "delete" && snippet) {
-    snippetEditorId = null;
+    snippetEditor = null;
+    requestPersonalizationFocus("snippets", { kind: "add" });
     persistPersonalization("snippets", snippets.filter((item) => item.id !== id));
   }
 }
@@ -1889,17 +2100,24 @@ function handleSnippetSubmit(event) {
   const snippets = normalizeSnippets(currentSettings?.snippets);
   const triggerInput = editor.elements.trigger;
   const expansionInput = editor.elements.text;
-  const existing = snippets.find((item) => item.id === editor.dataset.snippetId);
+  const editorId = editor.dataset.snippetId;
+  snippetEditor = {
+    id: editorId,
+    trigger: triggerInput.value,
+    text: expansionInput.value,
+    revision: (snippetEditor?.revision || 0) + 1
+  };
+  const existing = snippets.find((item) => item.id === editorId);
   const candidate = existing
     ? {
         id: existing.id,
-        trigger: triggerInput.value,
-        text: expansionInput.value
+        trigger: snippetEditor.trigger,
+        text: snippetEditor.text
       }
     : {
         id: crypto.randomUUID(),
-        trigger: triggerInput.value,
-        text: expansionInput.value
+        trigger: snippetEditor.trigger,
+        text: snippetEditor.text
       };
 
   if (
@@ -1925,7 +2143,12 @@ function handleSnippetSubmit(event) {
     return;
   }
 
-  snippetEditorId = null;
+  snippetEditor = null;
+  requestPersonalizationFocus("snippets", {
+    kind: "action",
+    action: "edit",
+    value: candidate.id
+  });
   persistPersonalization("snippets", next);
 }
 
@@ -1949,17 +2172,12 @@ async function persistPersonalization(settingName, value) {
     [settingName]: next
   };
   renderPersonalizationPages();
+  const saveOperation = createSettingsSaveOperation({
+    [settingName]: next
+  });
 
   try {
-    const savedSettings = await enqueueSettingsOperation(() => window.localFlow.saveSettings({
-      [settingName]: next
-    }));
-    const localSnapshot = currentSettings;
-    currentSettings = {
-      ...savedSettings,
-      dictionary: normalizeDictionary(localSnapshot?.dictionary),
-      snippets: normalizeSnippets(localSnapshot?.snippets)
-    };
+    await enqueueSettingsOperation(saveOperation);
     renderPersonalizationPages();
     if (personalizationSaveVersions[settingName] === version) {
       setPersonalizationStatus(settingName, "personalization.saved");
@@ -1991,7 +2209,7 @@ function normalizedVisibleLength(value) {
 }
 
 function normalizeSearchQuery(value) {
-  return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
+  return personalizationComparisonKey(value);
 }
 
 async function renderHistory() {

@@ -80,11 +80,16 @@ test("sidebar exposes functional dictionary and quick snippet management pages",
     "snippetSearch",
     "snippetList",
     "snippetAdd",
+    "snippetExactMatchHint",
     "manageDictionary"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.doesNotMatch(html, /<textarea[^>]*id="dictionary"/);
+  assert.match(
+    html,
+    /id="snippetExactMatchHint"[^>]*data-i18n="snippets\.exactMatchHint"(?![^>]*\bhidden\b)/
+  );
 });
 
 test("sidebar renders the existing Local Flow icon as decorative brand artwork", async () => {
