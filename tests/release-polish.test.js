@@ -52,3 +52,16 @@ test("release verifier checks installer executable and icon config", async () =>
   assert.match(script, /assets\/local-flow-icon\.ico/);
   assert.match(script, /git check-ignore/);
 });
+
+test("main process retains recoverable main-window and tray lifecycle wiring", async () => {
+  const main = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const lifecycle = await readFile(new URL("../src/main/main-window.js", import.meta.url), "utf8");
+
+  assert.match(main, /onFirstHide: showBackgroundNotice/);
+  assert.match(main, /onLoadFailure: handleMainFrameLoadFailure/);
+  assert.match(main, /tray\?\.displayBalloon\?\.\(/);
+  assert.match(main, /globalShortcut\.unregisterAll\?\.\(\)/);
+  assert.match(main, /nativeShortcut\?\.unregisterAll\?\.\(\)/);
+  assert.match(lifecycle, /window\.hide\(\)/);
+  assert.match(lifecycle, /if \(!isMainFrame\)/);
+});

@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTrayMenuTemplate, getTrayTooltip } from "../src/main/tray-menu.js";
+import { buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip } from "../src/main/tray-menu.js";
+
+test("getBackgroundNotice returns a localized one-time background notice", () => {
+  assert.equal(
+    getBackgroundNotice(),
+    "Local Flow is still running in the background. Use the tray icon to reopen it."
+  );
+  assert.equal(
+    getBackgroundNotice("zh-Hans"),
+    "Local Flow \u4ecd\u5728\u540e\u53f0\u8fd0\u884c\uff0c\u53ef\u4ee5\u901a\u8fc7\u6258\u76d8\u56fe\u6807\u91cd\u65b0\u6253\u5f00\u3002"
+  );
+});
 
 test("buildTrayMenuTemplate returns product tray actions in order", () => {
   const handlers = {

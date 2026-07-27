@@ -113,6 +113,14 @@ export function getTrayTooltip({ language = "en", state = {} } = {}) {
   return `Local Flow - ${phaseLabel}`;
 }
 
+export function getBackgroundNotice(language = "en") {
+  if (language === "zh-Hans") {
+    return "Local Flow \u4ecd\u5728\u540e\u53f0\u8fd0\u884c\uff0c\u53ef\u4ee5\u901a\u8fc7\u6258\u76d8\u56fe\u6807\u91cd\u65b0\u6253\u5f00\u3002";
+  }
+
+  return "Local Flow is still running in the background. Use the tray icon to reopen it.";
+}
+
 function getLabels(labelSets, language) {
   return labelSets[language] || labelSets.en;
 }

@@ -673,8 +673,9 @@ test("main process imports Windows productization modules", async () => {
   assert.match(mainSource, /import \{ getRuntimeRoot, getVendorRoot, getAppRoot \} from "\.\/runtime-root\.js";/);
   assert.match(mainSource, /import \{ applyStartupSettings, shouldStartMinimized \} from "\.\/startup-settings\.js";/);
   assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
-  assert.match(mainSource, /import \{ buildTrayMenuTemplate, getTrayTooltip \} from "\.\/tray-menu\.js";/);
+  assert.match(mainSource, /import \{ buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip \} from "\.\/tray-menu\.js";/);
   assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
+  assert.match(mainSource, /import \{ bindMainWindowLifecycle, buildMainWindowOptions, revealMainWindow \} from "\.\/main-window\.js";/);
   assert.match(mainSource, /import \{ createNativeInputShortcutFromPackage \} from "\.\/native-input-shortcut\.js";/);
   assert.match(mainSource, /import \{ createShortcutBackend \} from "\.\/shortcut-backend\.js";/);
 });
@@ -865,14 +866,16 @@ test("main process creates HUD with dedicated least-privilege preload", async ()
 
 test("main process can suppress primary window display for hidden startup", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const mainWindowSource = await readFile(new URL("../src/main/main-window.js", import.meta.url), "utf8");
   const createWindowMatch = mainSource.match(/function createWindow\(\{ showOnReady = true \} = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(createWindowMatch, "createWindow should be defined");
-  assert.match(createWindowMatch.groups.body, /show: false/);
-  assert.match(createWindowMatch.groups.body, /mainWindow\.once\("ready-to-show"/);
-  assert.match(createWindowMatch.groups.body, /if \(!showOnReady\) \{\s*return;\s*\}/);
-  assert.match(createWindowMatch.groups.body, /mainWindow\.show\(\)/);
-  assert.match(createWindowMatch.groups.body, /mainWindow\.focus\(\)/);
+  assert.match(createWindowMatch.groups.body, /new BrowserWindow\(buildMainWindowOptions\(\{/);
+  assert.match(createWindowMatch.groups.body, /bindMainWindowLifecycle\(\{/);
+  assert.match(createWindowMatch.groups.body, /showOnReady,/);
+  assert.match(mainWindowSource, /show: false/);
+  assert.match(mainWindowSource, /window\?\.once\?\.\("ready-to-show", revealInitially\)/);
+  assert.match(mainWindowSource, /window\?\.webContents\?\.once\?\.\("did-finish-load", revealInitially\)/);
   assert.match(mainSource, /const startHidden = shouldStartMinimized\(process\.argv\)/);
   assert.match(mainSource, /createWindow\(\{ showOnReady: !startHidden \}\)/);
 });
