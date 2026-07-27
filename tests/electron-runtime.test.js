@@ -735,7 +735,7 @@ test("main process delegates hotkeys startup settings and tray state to product 
   assert.match(mainSource, /buildTrayMenuTemplate\(\{/);
   assert.match(mainSource, /getTrayTooltip\(\{/);
   assert.match(mainSource, /applyStartupSettings\(app, lastSettings\)/);
-  assert.match(mainSource, /shouldStartMinimized\(process\.argv, lastSettings\)/);
+  assert.match(mainSource, /shouldStartMinimized\(process\.argv\)/);
   assert.match(mainSource, /hotkeyManager = createHotkeyManager\(\{/);
   assert.match(mainSource, /const shortcutBackend = createShortcutBackend\(\{/);
   assert.match(mainSource, /globalShortcut: shortcutBackend/);
@@ -873,7 +873,7 @@ test("main process can suppress primary window display for hidden startup", asyn
   assert.match(createWindowMatch.groups.body, /if \(!showOnReady\) \{\s*return;\s*\}/);
   assert.match(createWindowMatch.groups.body, /mainWindow\.show\(\)/);
   assert.match(createWindowMatch.groups.body, /mainWindow\.focus\(\)/);
-  assert.match(mainSource, /const startHidden = shouldStartMinimized\(process\.argv, lastSettings\)/);
+  assert.match(mainSource, /const startHidden = shouldStartMinimized\(process\.argv\)/);
   assert.match(mainSource, /createWindow\(\{ showOnReady: !startHidden \}\)/);
 });
 

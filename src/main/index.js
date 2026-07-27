@@ -17,6 +17,7 @@ import { createSystemInputController } from "./system-input-controller.js";
 import { buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath } from "./hud-window.js";
 import { getRuntimeRoot, getVendorRoot, getAppRoot } from "./runtime-root.js";
 import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.js";
+import { createDeferredReveal, registerSingleInstance } from "./single-instance.js";
 import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
@@ -59,6 +60,7 @@ let saveSettingsWithSystemEffects;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
 let lastDictationEntry;
+const mainWindowReveal = createDeferredReveal(showMainWindow);
 
 function createWindow({ showOnReady = true } = {}) {
   mainWindow = new BrowserWindow({
@@ -94,6 +96,7 @@ function createWindow({ showOnReady = true } = {}) {
       mainWindow.hide();
     }
   });
+  mainWindowReveal.flush();
 }
 
 function createHudWindow() {
@@ -109,7 +112,7 @@ function createTray() {
   const trayIcon = nativeImage.createFromPath(getTrayIconPath(appRoot));
   tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
   refreshTrayMenu();
-  tray.on("click", () => showMainWindow());
+  tray.on("click", () => mainWindowReveal.request());
 }
 
 function refreshTrayMenu() {
@@ -127,7 +130,7 @@ function refreshTrayMenu() {
     state: lastSystemInputState,
     settings: lastSettings || {},
     handlers: {
-      showMainWindow,
+      showMainWindow: () => mainWindowReveal.request(),
       toggleDictation: () => systemInputController?.toggle(),
       toggleShortcutPaused: () => updateSettingsFromTray({
         globalShortcutPaused: !lastSettings?.globalShortcutPaused
@@ -139,7 +142,7 @@ function refreshTrayMenu() {
         startMinimizedToTray: !lastSettings?.startMinimizedToTray
       }),
       openSettings: () => {
-        showMainWindow();
+        mainWindowReveal.request();
         sendWindowMessage(mainWindow, "settings:open");
       },
       quit: () => {
@@ -152,7 +155,7 @@ function refreshTrayMenu() {
 
 function showMainWindow() {
   if (!isUsableWindow(mainWindow)) {
-    return;
+    return false;
   }
 
   if (typeof mainWindow.restore === "function" && mainWindow.isMinimized?.()) {
@@ -161,6 +164,7 @@ function showMainWindow() {
 
   mainWindow.show();
   mainWindow.focus();
+  return true;
 }
 
 async function registerHotkey(settings = lastSettings) {
@@ -410,7 +414,12 @@ function wireIpc() {
   });
 }
 
-app.whenReady().then(async () => {
+const ownsSingleInstance = registerSingleInstance(app, {
+  onSecondInstance: () => mainWindowReveal.request()
+});
+
+if (ownsSingleInstance) {
+  app.whenReady().then(async () => {
   configureMediaPermissions(session.defaultSession);
   runtimeRoot = getRuntimeRoot({ app });
   vendorRoot = getVendorRoot(runtimeRoot);
@@ -485,7 +494,7 @@ app.whenReady().then(async () => {
   });
 
   wireIpc();
-  const startHidden = shouldStartMinimized(process.argv, lastSettings);
+  const startHidden = shouldStartMinimized(process.argv);
   createWindow({ showOnReady: !startHidden });
   createHudWindow();
   createTray();
@@ -493,16 +502,16 @@ app.whenReady().then(async () => {
     reportSystemError(startupSettingsError, "startup_settings_failed");
   }
   await registerHotkey(lastSettings);
-});
+  });
 
-app.on("will-quit", () => {
-  hotkeyManager?.unregister();
-});
+  app.on("will-quit", () => {
+    hotkeyManager?.unregister();
+  });
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  } else {
-    showMainWindow();
-  }
-});
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow({ showOnReady: false });
+    }
+    mainWindowReveal.request();
+  });
+}

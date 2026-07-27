@@ -1,3 +1,5 @@
+import { isHiddenLaunch } from "./single-instance.js";
+
 export function getStartupLaunchArgs(settings = {}) {
   return settings.startMinimizedToTray ? ["--hidden"] : [];
 }
@@ -20,6 +22,6 @@ export function applyStartupSettings(app, settings = {}, deps = {}) {
   return options;
 }
 
-export function shouldStartMinimized(argv = process.argv, settings = {}) {
-  return argv.includes("--hidden") || Boolean(settings.startMinimizedToTray);
+export function shouldStartMinimized(argv = process.argv) {
+  return isHiddenLaunch(argv);
 }

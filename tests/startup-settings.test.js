@@ -46,8 +46,8 @@ test("applyStartupSettings wraps Electron login item API failures with startup c
   );
 });
 
-test("shouldStartMinimized respects hidden argv and user setting", () => {
-  assert.equal(shouldStartMinimized(["node", "app"], { startMinimizedToTray: false }), false);
-  assert.equal(shouldStartMinimized(["node", "app", "--hidden"], { startMinimizedToTray: false }), true);
-  assert.equal(shouldStartMinimized(["node", "app"], { startMinimizedToTray: true }), true);
+test("shouldStartMinimized only respects an explicit hidden launch argument", () => {
+  assert.equal(shouldStartMinimized(["node", "app"]), false);
+  assert.equal(shouldStartMinimized(["node", "app", "--hidden"]), true);
+  assert.equal(shouldStartMinimized(["node", "app"], { startMinimizedToTray: true }), false);
 });
