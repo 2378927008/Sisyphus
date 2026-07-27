@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import * as mainViewState from "../src/renderer/main-view-state.js";
 import {
   createEditorState,
   replaceEditorText,
@@ -167,4 +168,38 @@ test("projects unique legacy ids for duplicate records", () => {
 
   assert.equal(new Set(ids).size, 2);
   assert.equal(ids[1], `${ids[0]}-2`);
+});
+
+test("updates the successful baseline without replacing a newer local draft", () => {
+  assert.equal(typeof mainViewState.updateEditorBaseline, "function");
+
+  const state = replaceEditorText(createEditorState("saved A"), "failed C");
+  const updated = mainViewState.updateEditorBaseline(state, "saved B");
+
+  assert.deepEqual(updated, {
+    baselineText: "saved B",
+    currentText: "failed C",
+    characterCount: 8,
+    dirty: true,
+    empty: false
+  });
+  assert.equal(restoreEditorText(updated).currentText, "saved B");
+});
+
+test("extracts multiline contenteditable text without trimming Unicode or edge whitespace", () => {
+  assert.equal(typeof mainViewState.readContentEditableText, "function");
+
+  const text = (value) => ({ nodeType: 3, nodeValue: value });
+  const element = (tagName, ...childNodes) => ({ nodeType: 1, tagName, childNodes });
+  const editor = element(
+    "DIV",
+    text("  alpha"),
+    element("DIV", text("β😀")),
+    element("DIV", text("gamma"), element("BR"), text("delta  "))
+  );
+
+  assert.equal(
+    mainViewState.readContentEditableText(editor),
+    "  alpha\nβ😀\ngamma\ndelta  "
+  );
 });

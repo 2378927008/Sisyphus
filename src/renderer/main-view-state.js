@@ -57,10 +57,68 @@ export function replaceEditorText(state, text, options = {}) {
   return editorState(baselineText, nextText);
 }
 
+export function updateEditorBaseline(state, text) {
+  const currentState = state && typeof state === "object" ? state : createEditorState();
+  return editorState(normalizeText(text), normalizeText(currentState.currentText));
+}
+
 export function restoreEditorText(state) {
   const currentState = state && typeof state === "object" ? state : createEditorState();
   const baselineText = normalizeText(currentState.baselineText);
   return editorState(baselineText, baselineText);
+}
+
+const CONTENTEDITABLE_BLOCK_TAGS = new Set([
+  "ADDRESS",
+  "ARTICLE",
+  "ASIDE",
+  "BLOCKQUOTE",
+  "DIV",
+  "FIGCAPTION",
+  "FIGURE",
+  "FOOTER",
+  "HEADER",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "LI",
+  "MAIN",
+  "NAV",
+  "OL",
+  "P",
+  "PRE",
+  "SECTION",
+  "UL"
+]);
+
+function contenteditableNodeText(node) {
+  if (!node || typeof node !== "object") return "";
+  if (node.nodeType === 3) {
+    return typeof node.nodeValue === "string" ? node.nodeValue : "";
+  }
+  if (node.nodeType !== 1) return "";
+  if (String(node.tagName).toUpperCase() === "BR") return "\n";
+
+  let output = "";
+  const children = Array.from(node.childNodes || []);
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const block = (
+      child?.nodeType === 1 &&
+      CONTENTEDITABLE_BLOCK_TAGS.has(String(child.tagName).toUpperCase())
+    );
+    if (block && output !== "" && !output.endsWith("\n")) output += "\n";
+    output += contenteditableNodeText(child);
+    if (block && index < children.length - 1 && !output.endsWith("\n")) output += "\n";
+  }
+  return output;
+}
+
+export function readContentEditableText(element) {
+  return contenteditableNodeText(element);
 }
 
 export function projectHistory(entries, limit) {

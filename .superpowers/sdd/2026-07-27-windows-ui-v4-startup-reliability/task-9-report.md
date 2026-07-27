@@ -28,11 +28,13 @@ Tests and smoke interactions were added before production changes.
 - Selection creates a fresh editor baseline from text or recoverable transcript,
   updates localized metadata, and opens the editor pane.
 - Task 7 versioned autosave delays and serializes writes. Only the latest
-  successful version updates the baseline and cached history text.
+  version controls the visible save state, while every real successful commit
+  advances that record's persisted baseline.
 - Save failures retain current text and show fixed localized retry copy.
   Refreshing history after a failed save also preserves the local editor state.
 - Selection changes and reprocessing flush pending saves first.
-- Restore cancels pending work and returns to the latest successful baseline.
+- Restore cancels pending timers, waits for any started write, and then
+  serially persists the latest successful baseline.
 - Copy and insert use current editor text. Insert failures retain that text.
 - Reprocessing replaces cache, editor text, and baseline only for
   `{ ok: true, entry }`; resolved failures and exceptions retain current text.
@@ -52,6 +54,10 @@ Tests and smoke interactions were added before production changes.
 - `tests/i18n.test.js`
 - `scripts/electron-app-smoke.mjs`
 - `scripts/electron-v4-shell-smoke.mjs`
+- `src/renderer/main-view-state.js`
+- `src/renderer/versioned-autosave.js`
+- `tests/main-view-state.test.js`
+- `tests/versioned-autosave.test.js`
 - `.superpowers/sdd/2026-07-27-windows-ui-v4-startup-reliability/task-9-report.md`
 
 ## Verification
@@ -75,3 +81,93 @@ No functional blocker remains. Electron still emits host-profile OS crypt and
 disk/GPU cache warnings during smoke runs. Deliberate regression fixtures also
 emit raw process errors to the test console, but smoke assertions confirm those
 diagnostics do not enter visible product text.
+
+## Fix Round 1
+
+### Review Verification And Root Causes
+
+All findings in `task-9-review.md` were reproduced or traced before changing
+production code.
+
+- Reprocess read mutable `selectedHistoryId` after awaiting IPC, so an A result
+  could be rebound to B.
+- Autosave suppressed stale UI notifications correctly but did not separately
+  expose real successful persistence. `cancel()` only removed pending work and
+  could not stop an already-started write.
+- History refresh had no request generation or editor/selection version check.
+- One global editor state discarded failed drafts when selection or Home
+  changed.
+- Chromium block elements and `br` do not preserve visual newlines through
+  `textContent`.
+- A successful whitespace save updated the row before reconciling selection,
+  producing selected + disabled + `tabindex="0"`.
+
+### RED
+
+- Autosave focused tests: 7 passed, 2 failed.
+  - No commit was reported for older B when newer C failed.
+  - `replace()` did not exist for ordered restore persistence.
+- Main view state focused tests: 13 passed, 2 failed.
+  - Baseline-only advancement was missing.
+  - Tested block/`br` plain-text extraction was missing.
+- Delayed V4 reprocess smoke:
+  - A was reprocessed, B was selected while IPC waited, and A's returned text
+    appeared in B's editor.
+- Delayed stale-failure smoke:
+  - Returning to A after a delayed failed operation left reprocess permanently
+    in `running`.
+
+### GREEN And Closure
+
+- Reprocess captures an immutable record ID plus per-record operation version
+  and UI interaction token. Cache updates remain bound to the original ID;
+  stale UI success/failure cannot replace the current editor.
+- Autosave now reports actual successful commits separately from latest UI
+  state. Restore uses ordered `replace()` after any in-flight write, and an
+  older B success remains the restore baseline when newer C fails.
+- Refresh uses a request generation and validates selection/editor versions.
+  Local pending, saving, failed, or unconfirmed committed state is merged
+  without overwriting the active editor; stale concurrent refreshes are
+  discarded.
+- Editor sessions are retained per history ID, including failed drafts and
+  localized save/reprocess state, across selection and Home navigation.
+- Autosave, copy, and insert all use one DOM-tree plain-text reader. Electron
+  coverage creates real text nodes, block elements, and `br`, preserving
+  newlines, Unicode, and leading/trailing whitespace without reading HTML.
+- Successful blank and Unicode-whitespace saves reconcile selection before
+  projection. The saved row is disabled, unselected, and `tabindex="-1"`.
+- The V4 smoke now controls list/update/reprocess delays and failures and checks
+  request order, renderer/cache behavior, fixture persistence, restored
+  baselines, navigation retention, multiline reuse, accessibility state, and
+  safe visible text. The complete legacy smoke remains unchanged in the dual
+  gate.
+
+### Fix Round Changed Files
+
+- `scripts/electron-v4-shell-smoke.mjs`
+- `src/renderer/app.js`
+- `src/renderer/main-view-state.js`
+- `src/renderer/versioned-autosave.js`
+- `tests/main-view-state.test.js`
+- `tests/versioned-autosave.test.js`
+- `.superpowers/sdd/2026-07-27-windows-ui-v4-startup-reliability/task-9-report.md`
+
+### Fix Round Verification
+
+- Focused Task 9 tests:
+  - 81 passed, 0 failed.
+  - Includes autosave, main view state, markup, eight-language i18n, and
+    history display/selection rules.
+- `npm.cmd test`:
+  - 533 tests, 530 passed, 0 failed, 3 skipped.
+- Two consecutive `npm.cmd run check:app` runs:
+  - Run 1: retained regression smoke `ok: true`; V4 shell smoke `ok: true`.
+  - Run 2: retained regression smoke `ok: true`; V4 shell smoke `ok: true`.
+- `git diff --check`:
+  - Passed.
+
+### Fix Round Concerns
+
+No known functional blocker. Electron host-profile OS crypt and disk/GPU cache
+warnings remain expected test-environment noise. Deliberate unsafe diagnostics
+remain confined to process/test output and are asserted absent from visible UI.

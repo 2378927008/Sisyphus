@@ -7,6 +7,7 @@ function createAutosaveHarness({ save } = {}) {
   const timers = [];
   const saved = [];
   const states = [];
+  const commits = [];
   let activeSaves = 0;
   let maxConcurrentSaves = 0;
 
@@ -32,6 +33,9 @@ function createAutosaveHarness({ save } = {}) {
     },
     onState(state) {
       states.push(state);
+    },
+    onCommit(commit) {
+      commits.push(commit);
     }
   });
 
@@ -39,6 +43,7 @@ function createAutosaveHarness({ save } = {}) {
     autosave,
     saved,
     states,
+    commits,
     get maxConcurrentSaves() {
       return maxConcurrentSaves;
     },
@@ -191,4 +196,71 @@ test("replaces diagnostic business reasons with a safe fallback", async () => {
   assert.equal(harness.states.at(-1).error.code, "history_save_failed");
   assert.equal(harness.states.at(-1).error.reason, "save_failed");
   assert.doesNotMatch(harness.states.at(-1).error.message, /private|history\.json/i);
+});
+
+test("tracks an older successful commit when the newer draft fails", async () => {
+  let resolveFirst;
+  const harness = createAutosaveHarness({
+    save: ({ version }) => {
+      if (version === 1) {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false, reason: "save_failed" });
+    }
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "saved B" });
+  harness.flushTimer();
+  await Promise.resolve();
+  harness.autosave.schedule({ id: "h1", text: "failed C" });
+  harness.flushTimer();
+
+  resolveFirst({ ok: true });
+  const outcome = await harness.autosave.flush();
+
+  assert.deepEqual(harness.commits.map(({ id, text, version }) => ({ id, text, version })), [
+    { id: "h1", text: "saved B", version: 1 }
+  ]);
+  assert.equal(harness.states.at(-1).phase, "error");
+  assert.equal(harness.states.at(-1).text, "failed C");
+  assert.deepEqual(
+    { ok: outcome.ok, id: outcome.id, text: outcome.text, version: outcome.version },
+    { ok: false, id: "h1", text: "failed C", version: 2 }
+  );
+});
+
+test("replace waits for an in-flight draft before persisting the restored baseline", async () => {
+  const calls = [];
+  let resolveDraft;
+  const harness = createAutosaveHarness({
+    save: (payload) => {
+      calls.push(payload);
+      if (payload.text === "draft") {
+        return new Promise((resolve) => {
+          resolveDraft = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true });
+    }
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "draft" });
+  harness.flushTimer();
+  await Promise.resolve();
+
+  const replacePromise = harness.autosave.replace({ id: "h1", text: "baseline" });
+  await Promise.resolve();
+  assert.deepEqual(calls.map((call) => call.text), ["draft"]);
+
+  resolveDraft({ ok: true });
+  const outcome = await replacePromise;
+
+  assert.deepEqual(calls.map((call) => call.text), ["draft", "baseline"]);
+  assert.deepEqual(harness.commits.map((commit) => commit.text), ["draft", "baseline"]);
+  assert.deepEqual(
+    { ok: outcome.ok, id: outcome.id, text: outcome.text },
+    { ok: true, id: "h1", text: "baseline" }
+  );
 });

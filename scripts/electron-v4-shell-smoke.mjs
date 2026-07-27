@@ -56,6 +56,9 @@ const interactionOrder = [];
 let historyUpdateResult = null;
 let historyReprocessResult = null;
 let insertTextResult = { ok: true };
+const historyListPlans = [];
+const historyUpdatePlans = [];
+const historyReprocessPlans = [];
 let whisperDiagnosticsResult = {
   ready: true,
   checks: [{ label: "Whisper", status: "pass", message: "Whisper diagnostics stubbed." }]
@@ -67,6 +70,41 @@ function localFixtureDate(dayOffset, hour) {
   date.setHours(hour, 0, 0, 0);
   date.setDate(date.getDate() + dayOffset);
   return date.toISOString();
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function delayNextHistoryList(snapshot = structuredClone(historyFixtures)) {
+  const started = createDeferred();
+  const release = createDeferred();
+  historyListPlans.push({ snapshot, started, release });
+  return { started: started.promise, release: release.resolve };
+}
+
+function delayNextHistoryUpdate(result) {
+  const started = createDeferred();
+  const release = createDeferred();
+  const plan = { started, release };
+  if (arguments.length > 0) plan.result = result;
+  historyUpdatePlans.push(plan);
+  return { started: started.promise, release: release.resolve };
+}
+
+function queueHistoryUpdateResult(result) {
+  historyUpdatePlans.push({ result });
+}
+
+function delayNextHistoryReprocess(result) {
+  const started = createDeferred();
+  const release = createDeferred();
+  historyReprocessPlans.push({ result, started, release });
+  return { started: started.promise, release: release.resolve };
 }
 
 const historyFixtures = [
@@ -177,13 +215,31 @@ function wireIpc() {
     settings = mergeSettings(next, settings);
     return settings;
   });
-  registerSmokeIpcHandler("history:list", () => {
+  registerSmokeIpcHandler("history:list", async () => {
     historyListCalls += 1;
-    return historyFixtures;
+    const plan = historyListPlans.shift();
+    if (plan) {
+      plan.started.resolve();
+      await plan.release.promise;
+      return plan.snapshot;
+    }
+    return structuredClone(historyFixtures);
   });
-  registerSmokeIpcHandler("history:update", (_event, payload = {}) => {
+  registerSmokeIpcHandler("history:update", async (_event, payload = {}) => {
     historyUpdateCalls.push({ id: payload.id, text: payload.text });
     interactionOrder.push(`update:${payload.id}:${payload.text}`);
+    const plan = historyUpdatePlans.shift();
+    if (plan?.started) {
+      plan.started.resolve();
+      await plan.release.promise;
+    }
+    if (plan && Object.hasOwn(plan, "result")) {
+      if (plan.result?.ok === true && plan.result.entry) {
+        const fixture = historyFixtures.find((entry) => entry.id === payload.id);
+        if (fixture) Object.assign(fixture, plan.result.entry, { id: payload.id });
+      }
+      return plan.result;
+    }
     if (historyUpdateResult) {
       const result = historyUpdateResult;
       historyUpdateResult = null;
@@ -195,16 +251,28 @@ function wireIpc() {
     fixture.status = fixture.status === "failed" ? "partial" : fixture.status;
     return { ok: true, entry: { ...fixture } };
   });
-  registerSmokeIpcHandler("history:reprocess", (_event, id) => {
+  registerSmokeIpcHandler("history:reprocess", async (_event, id) => {
     historyReprocessCalls.push(id);
     interactionOrder.push(`reprocess:${id}`);
+    const plan = historyReprocessPlans.shift();
+    if (plan?.started) {
+      plan.started.resolve();
+      await plan.release.promise;
+    }
+    if (plan && Object.hasOwn(plan, "result")) {
+      if (plan.result?.ok === true && plan.result.entry) {
+        const fixture = historyFixtures.find((entry) => entry.id === id);
+        if (fixture) Object.assign(fixture, plan.result.entry, { id });
+      }
+      return plan.result;
+    }
     if (historyReprocessResult) {
       const result = historyReprocessResult;
       historyReprocessResult = null;
       return result;
     }
     const fixture = historyFixtures.find((entry) => entry.id === id);
-    return {
+    const result = {
       ok: true,
       entry: {
         ...fixture,
@@ -214,6 +282,8 @@ function wireIpc() {
         processingError: ""
       }
     };
+    Object.assign(fixture, result.entry, { id });
+    return result;
   });
   registerSmokeIpcHandler("dictation:insert-text", (_event, text) => {
     insertTextCalls.push(text);
@@ -605,7 +675,11 @@ app.whenReady().then(async () => {
       5000
     );
     await new Promise((resolve) => setTimeout(resolve, 650));
-    assert.equal(historyUpdateCalls.length, updatesBeforeRestore);
+    assert.equal(historyUpdateCalls.length, updatesBeforeRestore + 1);
+    assert.deepEqual(historyUpdateCalls.at(-1), {
+      id: "history-today-newest",
+      text: "用户编辑后的文本"
+    });
 
     historyUpdateResult = {
       ok: false,
@@ -709,6 +783,225 @@ app.whenReady().then(async () => {
       5000
     );
     assertNoUnsafeDiagnostic(failedReprocessState.visibleMainText, "Failed history reprocess");
+
+    const delayedReprocessText = "A 延迟重处理结果";
+    const delayedReprocess = delayNextHistoryReprocess({
+      ok: true,
+      entry: {
+        ...historyFixtures.find((entry) => entry.id === "history-yesterday"),
+        id: "history-yesterday",
+        text: delayedReprocessText,
+        status: "complete",
+        processingError: ""
+      }
+    });
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    await delayedReprocess.started;
+    const historyOlderText = historyFixtures.find((entry) => entry.id === "history-older").text;
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(
+      window,
+      (state) => state.selectedHistoryId === "history-older" && state.resultText === historyOlderText,
+      5000
+    );
+    delayedReprocess.release();
+    await waitForState(
+      window,
+      () => historyFixtures.find((entry) => entry.id === "history-yesterday").text === delayedReprocessText,
+      5000
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const switchedDuringReprocessState = await readRendererState(window);
+    assert.equal(switchedDuringReprocessState.selectedHistoryId, "history-older");
+    assert.equal(switchedDuringReprocessState.resultText, historyOlderText);
+    assert.equal(historyFixtures.find((entry) => entry.id === "history-older").text, historyOlderText);
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await waitForState(
+      window,
+      (state) => state.selectedHistoryId === "history-yesterday" && state.resultText === delayedReprocessText,
+      5000
+    );
+
+    const delayedReprocessFailure = delayNextHistoryReprocess({
+      ok: false,
+      reason: "processing_failed",
+      message: unsafeDiagnostic
+    });
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    await delayedReprocessFailure.started;
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
+    delayedReprocessFailure.release();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === delayedReprocessText &&
+        state.reprocessState === "idle"
+      ),
+      5000
+    );
+
+    const restoreBaseline = delayedReprocessText;
+    const updatesBeforeInFlightRestore = historyUpdateCalls.length;
+    const inFlightRestoreSave = delayNextHistoryUpdate();
+    await editSelectedHistory(window, "恢复前已开始写入的旧草稿");
+    await inFlightRestoreSave.started;
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    inFlightRestoreSave.release();
+    await waitForState(
+      window,
+      () => historyUpdateCalls.length >= updatesBeforeInFlightRestore + 2,
+      5000
+    );
+    const inFlightRestoreState = await waitForState(
+      window,
+      (state) => state.resultText === restoreBaseline && state.editorSaveState === "saved",
+      5000
+    );
+    assert.equal(historyFixtures.find((entry) => entry.id === "history-yesterday").text, restoreBaseline);
+    assert.deepEqual(
+      historyUpdateCalls.slice(updatesBeforeInFlightRestore).map((call) => call.text),
+      ["恢复前已开始写入的旧草稿", restoreBaseline]
+    );
+    assertNoUnsafeDiagnostic(inFlightRestoreState.visibleMainText, "In-flight restore");
+
+    const saveBGate = delayNextHistoryUpdate();
+    await editSelectedHistory(window, "最近成功保存 B");
+    await saveBGate.started;
+    queueHistoryUpdateResult({ ok: false, reason: "save_failed", message: unsafeDiagnostic });
+    await editSelectedHistory(window, "较新但保存失败 C");
+    saveBGate.release();
+    await waitForState(
+      window,
+      (state) => state.resultText === "较新但保存失败 C" && state.editorSaveState === "error",
+      5000
+    );
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    const restoredToLatestCommit = await waitForState(
+      window,
+      (state) => state.resultText === "最近成功保存 B" && state.editorSaveState === "saved",
+      5000
+    );
+    await waitForState(
+      window,
+      () => historyFixtures.find((entry) => entry.id === "history-yesterday").text === "最近成功保存 B",
+      5000
+    );
+    assertNoUnsafeDiagnostic(restoredToLatestCommit.visibleMainText, "Latest successful baseline restore");
+
+    const refreshOne = delayNextHistoryList();
+    await window.webContents.executeJavaScript(
+      "document.querySelector('#interfaceLanguage').dispatchEvent(new Event('change', { bubbles: true }))"
+    );
+    await refreshOne.started;
+    const refreshTwo = delayNextHistoryList();
+    await window.webContents.executeJavaScript(
+      "document.querySelector('#interfaceLanguage').dispatchEvent(new Event('change', { bubbles: true }))"
+    );
+    await refreshTwo.started;
+    queueHistoryUpdateResult({ ok: false, reason: "save_failed", message: unsafeDiagnostic });
+    await editSelectedHistory(window, "刷新等待期间失败并保留的草稿");
+    await waitForState(
+      window,
+      (state) => state.resultText === "刷新等待期间失败并保留的草稿" && state.editorSaveState === "error",
+      5000
+    );
+    refreshTwo.release();
+    refreshOne.release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const refreshRaceState = await readRendererState(window);
+    assert.equal(refreshRaceState.resultText, "刷新等待期间失败并保留的草稿");
+    assert.equal(refreshRaceState.editorSaveState, "error");
+    assertNoUnsafeDiagnostic(refreshRaceState.visibleMainText, "Refresh race");
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    const failedDraftAfterSelection = await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === "刷新等待期间失败并保留的草稿" &&
+        state.editorSaveState === "error"
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedDraftAfterSelection.visibleMainText, "Failed draft after selection");
+
+    await window.webContents.executeJavaScript("document.querySelector('#navHome').click()");
+    await waitForState(window, (state) => state.homeCurrent, 5000);
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#navHistory').click();
+        document.querySelector('[data-history-id="history-yesterday"]').click();
+      })()
+    `);
+    const failedDraftAfterHome = await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === "刷新等待期间失败并保留的草稿" &&
+        state.editorSaveState === "error"
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedDraftAfterHome.visibleMainText, "Failed draft after Home");
+
+    const multilineText = "  alpha\nβ😀\ngamma\ndelta  ";
+    await editSelectedHistoryWithBlocks(window);
+    await waitForState(
+      window,
+      () => historyUpdateCalls.at(-1)?.text === multilineText,
+      5000
+    );
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#copyResult').click();
+        document.querySelector('#insertResult').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.copyAttemptTexts.at(-1) === multilineText &&
+        insertTextCalls.at(-1) === multilineText
+      ),
+      5000
+    );
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-english\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-english", 5000);
+    await editSelectedHistory(window, "\u00a0\u3000\n\t");
+    const blankSaveState = await waitForState(
+      window,
+      (state) => (
+        state.englishHistoryDisabled &&
+        !state.englishHistorySelected &&
+        state.englishHistoryTabIndex === -1 &&
+        state.selectedHistoryCount <= 1 &&
+        state.selectedHistoryId !== "history-english"
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(blankSaveState.visibleMainText, "Unicode blank save");
 
     await window.webContents.executeJavaScript(
       "document.querySelector('[data-history-id=\"history-failed-recoverable\"]').click()"
@@ -910,6 +1203,12 @@ function readRendererState(window) {
           document.querySelector('[data-history-id="history-today-whitespace"]')?.tabIndex ?? -1,
         olderHistoryDisabled:
           document.querySelector('[data-history-id="history-today-older"]')?.disabled ?? false,
+        englishHistoryDisabled:
+          document.querySelector('[data-history-id="history-english"]')?.disabled ?? false,
+        englishHistorySelected:
+          document.querySelector('[data-history-id="history-english"]')?.getAttribute('aria-selected') === 'true',
+        englishHistoryTabIndex:
+          document.querySelector('[data-history-id="history-english"]')?.tabIndex ?? -1,
         activeHistoryId: document.activeElement?.dataset?.historyId || '',
         resultText: document.querySelector('#resultText')?.textContent || '',
         editorSaveState: document.querySelector('#editorSaveState')?.dataset?.state || '',
@@ -948,6 +1247,28 @@ function editSelectedHistory(window, text) {
       editor.dispatchEvent(new InputEvent('input', {
         bubbles: true,
         inputType: 'insertText'
+      }));
+    })()
+  `);
+}
+
+function editSelectedHistoryWithBlocks(window) {
+  return window.webContents.executeJavaScript(`
+    (() => {
+      const editor = document.querySelector('#resultText');
+      const first = document.createTextNode('  alpha');
+      const second = document.createElement('div');
+      second.append(document.createTextNode('β😀'));
+      const third = document.createElement('div');
+      third.append(
+        document.createTextNode('gamma'),
+        document.createElement('br'),
+        document.createTextNode('delta  ')
+      );
+      editor.replaceChildren(first, second, third);
+      editor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertFromPaste'
       }));
     })()
   `);

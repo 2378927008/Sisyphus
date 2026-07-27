@@ -18,8 +18,10 @@ import { createVersionedAutosave } from "./versioned-autosave.js";
 import {
   createEditorState,
   normalizeViewPhase,
+  readContentEditableText,
   replaceEditorText,
-  restoreEditorText
+  restoreEditorText,
+  updateEditorBaseline
 } from "./main-view-state.js";
 import {
   filterHistory,
@@ -108,6 +110,13 @@ let selectedHistoryId = "";
 let editorSavePhase = "saved";
 let editorReprocessPhase = "idle";
 let activePrimaryView = "home";
+let editorRevision = 0;
+let historyRefreshVersion = 0;
+let historyInteractionVersion = 0;
+let historySelectionVersion = 0;
+let historyCommitVersion = 0;
+const historyEditorSessions = new Map();
+const historyReprocessVersions = new Map();
 let settingsSaveQueue = Promise.resolve();
 let processingLanguageErrorOwner = null;
 const processingLanguageRequestVersions = {
@@ -135,7 +144,8 @@ const settingsFocusTrap = createFocusTrap({
 });
 const historyAutosave = createVersionedAutosave({
   save: ({ id, text }) => window.localFlow.updateHistory(id, text),
-  onState: handleHistoryAutosaveState
+  onState: handleHistoryAutosaveState,
+  onCommit: handleHistoryAutosaveCommit
 });
 
 prepareWindowsUiV4Markup();
@@ -924,20 +934,102 @@ async function insertText(text) {
   }
 }
 
-function restoreLatestResult() {
+function createHistoryEditorSession(entry) {
+  const text = entry?.status === "failed"
+    ? (typeof entry.text === "string" && entry.text !== "" ? entry.text : entry.transcript || "")
+    : entry?.text || "";
+  return {
+    editorState: createEditorState(text),
+    savePhase: "saved",
+    reprocessPhase: "idle",
+    emptyMessageKey: entry?.status === "failed" ? "result.outputFailed" : "empty.result",
+    commitVersion: 0
+  };
+}
+
+function getHistoryEditorSession(id) {
+  if (!id) return null;
+  let session = historyEditorSessions.get(id);
+  if (!session) {
+    session = createHistoryEditorSession(allHistory.find((entry) => entry.id === id));
+    historyEditorSessions.set(id, session);
+  }
+  return session;
+}
+
+function storeCurrentEditorSession() {
+  if (!selectedHistoryId) return;
+  const existingSession = historyEditorSessions.get(selectedHistoryId);
+  historyEditorSessions.set(selectedHistoryId, {
+    editorState,
+    savePhase: editorSavePhase,
+    reprocessPhase: editorReprocessPhase,
+    emptyMessageKey: emptyEditorMessageKey,
+    commitVersion: existingSession?.commitVersion || 0
+  });
+}
+
+function loadHistoryEditorSession(entry) {
+  const session = getHistoryEditorSession(entry?.id);
+  if (!session) {
+    editorState = createEditorState();
+    editorSavePhase = "saved";
+    editorReprocessPhase = "idle";
+    emptyEditorMessageKey = "empty.result";
+    return;
+  }
+  editorState = session.editorState;
+  editorSavePhase = session.savePhase;
+  editorReprocessPhase = session.reprocessPhase;
+  emptyEditorMessageKey = session.emptyMessageKey;
+}
+
+function invalidateReprocessForHistory(id) {
+  if (!id) return;
+  historyReprocessVersions.set(id, (historyReprocessVersions.get(id) || 0) + 1);
+}
+
+async function restoreLatestResult() {
   if (!editorState.dirty) return;
-  historyAutosave.cancel();
+  const operationId = selectedHistoryId;
+  const baselineText = editorState.baselineText;
+  historyInteractionVersion += 1;
+  const interactionVersion = historyInteractionVersion;
+  invalidateReprocessForHistory(operationId);
+  if (editorReprocessPhase !== "idle") {
+    setEditorReprocessPhase("idle");
+  }
   editorState = restoreEditorText(editorState);
-  setEditorSavePhase("saved");
+  editorRevision += 1;
+  storeCurrentEditorSession();
   renderEditorState();
+  if (!operationId) {
+    setEditorSavePhase("saved");
+    return;
+  }
+
+  const outcome = await historyAutosave.replace({ id: operationId, text: baselineText });
+  if (
+    selectedHistoryId !== operationId ||
+    historyInteractionVersion !== interactionVersion
+  ) {
+    return;
+  }
+  setEditorSavePhase(outcome?.ok ? "saved" : "error");
+  storeCurrentEditorSession();
+  renderEditorState({ syncText: false });
 }
 
 function updateEditorFromInput() {
   emptyEditorMessageKey = "empty.result";
-  editorState = replaceEditorText(editorState, resultText.textContent || "");
-  if (editorReprocessPhase === "error") {
+  editorState = replaceEditorText(editorState, readContentEditableText(resultText));
+  editorRevision += 1;
+  historyInteractionVersion += 1;
+  invalidateReprocessForHistory(selectedHistoryId);
+  if (editorReprocessPhase !== "idle") {
     setEditorReprocessPhase("idle");
   }
+  storeCurrentEditorSession();
   if (selectedHistoryId) {
     historyAutosave.schedule({
       id: selectedHistoryId,
@@ -950,8 +1042,10 @@ function updateEditorFromInput() {
 function replaceEditorBaseline(text, emptyMessageKey = "empty.result") {
   emptyEditorMessageKey = emptyMessageKey;
   editorState = replaceEditorText(editorState, text, { asBaseline: true });
+  editorRevision += 1;
   setEditorSavePhase("saved");
   setEditorReprocessPhase("idle");
+  storeCurrentEditorSession();
   renderEditorState();
 }
 
@@ -975,18 +1069,55 @@ function renderEditorState({ syncText = true } = {}) {
 }
 
 function handleHistoryAutosaveState(state) {
-  if (!state || state.id !== selectedHistoryId) return;
+  if (!state?.id) return;
+  const session = getHistoryEditorSession(state.id);
+  session.savePhase = state.phase === "error"
+    ? "error"
+    : state.phase === "saved"
+      ? "saved"
+      : "saving";
 
-  if (state.phase === "saved") {
-    editorState = replaceEditorText(editorState, state.text, { asBaseline: true });
-    updateCachedHistoryText(state.id, state.text);
-    setEditorSavePhase("saved");
-    renderEditorState({ syncText: false });
+  if (state.id !== selectedHistoryId) return;
+  editorState = session.editorState;
+  setEditorSavePhase(session.savePhase);
+  editorRevision += 1;
+  storeCurrentEditorSession();
+
+  if (state.phase === "saved" && !isSelectableHistoryEntry(getSelectedHistoryEntry())) {
+    const previousId = selectedHistoryId;
+    selectedHistoryId = resolveHistorySelection(allHistory, previousId);
+    historyInteractionVersion += 1;
+    loadHistoryEditorSession(getSelectedHistoryEntry());
     renderHistoryProjection();
+    renderSelectedHistory({ syncEditor: false });
+    renderEditorState();
     return;
   }
 
-  setEditorSavePhase(state.phase === "error" ? "error" : "saving");
+  renderEditorState({ syncText: false });
+  if (state.phase === "saved") renderHistoryProjection();
+}
+
+function handleHistoryAutosaveCommit(commit) {
+  if (!commit?.id) return;
+  const resultEntry = commit.result?.entry;
+  allHistory = normalizeHistoryEntries(allHistory.map((entry) => (
+    entry.id === commit.id
+      ? {
+          ...entry,
+          ...(resultEntry && typeof resultEntry === "object" ? resultEntry : {}),
+          id: commit.id,
+          text: commit.text
+        }
+      : entry
+  )));
+  const session = getHistoryEditorSession(commit.id);
+  session.editorState = updateEditorBaseline(session.editorState, commit.text);
+  historyCommitVersion += 1;
+  session.commitVersion = historyCommitVersion;
+  if (commit.id === selectedHistoryId) {
+    editorState = session.editorState;
+  }
 }
 
 function setEditorSavePhase(phase) {
@@ -1000,42 +1131,78 @@ function setEditorSavePhase(phase) {
   editorSaveState.textContent = t(key);
 }
 
-function updateCachedHistoryText(id, text) {
-  allHistory = normalizeHistoryEntries(allHistory.map((entry) => (
-    entry.id === id ? { ...entry, text } : entry
-  )));
-}
-
 async function reprocessSelectedHistory() {
-  const entry = getSelectedHistoryEntry();
-  if (!entry || !hasHistoryTranscript(entry) || editorReprocessPhase === "running") return;
-
+  const selectionVersion = historySelectionVersion;
+  const interactionBeforeFlush = historyInteractionVersion;
   await historyAutosave.flush();
+  if (
+    selectionVersion !== historySelectionVersion ||
+    interactionBeforeFlush !== historyInteractionVersion
+  ) {
+    return;
+  }
+  const operationId = selectedHistoryId;
+  const entry = allHistory.find((item) => item.id === operationId);
+  if (!entry || !hasHistoryTranscript(entry) || editorReprocessPhase === "running") return;
+  const operationVersion = (historyReprocessVersions.get(operationId) || 0) + 1;
+  historyReprocessVersions.set(operationId, operationVersion);
+  historyInteractionVersion += 1;
+  const uiInteractionVersion = historyInteractionVersion;
   setEditorReprocessPhase("running");
+  storeCurrentEditorSession();
   try {
-    const result = await window.localFlow.reprocessHistory(selectedHistoryId);
+    const result = await window.localFlow.reprocessHistory(operationId);
     if (result?.ok !== true || !result.entry || typeof result.entry !== "object") {
-      setEditorReprocessPhase("error");
+      const operationSession = getHistoryEditorSession(operationId);
+      operationSession.reprocessPhase = "idle";
+      if (
+        selectedHistoryId === operationId &&
+        historyReprocessVersions.get(operationId) === operationVersion &&
+        historyInteractionVersion === uiInteractionVersion
+      ) {
+        setEditorReprocessPhase("error");
+        storeCurrentEditorSession();
+      }
       return;
     }
+    if (historyReprocessVersions.get(operationId) !== operationVersion) return;
 
     const updatedEntry = normalizeHistoryEntries([{
       ...entry,
       ...result.entry,
-      id: selectedHistoryId
+      id: operationId
     }])[0];
     allHistory = allHistory.map((item) => (
-      item.id === selectedHistoryId ? updatedEntry : item
+      item.id === operationId ? updatedEntry : item
     ));
-    editorState = createEditorState(updatedEntry.text || updatedEntry.transcript || "");
-    emptyEditorMessageKey = updatedEntry.status === "failed" ? "result.outputFailed" : "empty.result";
+    const updatedSession = createHistoryEditorSession(updatedEntry);
+    historyCommitVersion += 1;
+    updatedSession.commitVersion = historyCommitVersion;
+    historyEditorSessions.set(operationId, updatedSession);
+    renderHistoryProjection();
+    if (
+      selectedHistoryId !== operationId ||
+      historyInteractionVersion !== uiInteractionVersion
+    ) {
+      return;
+    }
+
+    loadHistoryEditorSession(updatedEntry);
     setEditorSavePhase("saved");
     setEditorReprocessPhase("idle");
-    renderHistoryProjection();
     renderSelectedHistory({ syncEditor: false });
     renderEditorState();
   } catch {
-    setEditorReprocessPhase("error");
+    const operationSession = getHistoryEditorSession(operationId);
+    operationSession.reprocessPhase = "idle";
+    if (
+      selectedHistoryId === operationId &&
+      historyReprocessVersions.get(operationId) === operationVersion &&
+      historyInteractionVersion === uiInteractionVersion
+    ) {
+      setEditorReprocessPhase("error");
+      storeCurrentEditorSession();
+    }
   }
 }
 
@@ -1380,11 +1547,20 @@ function fillSettings(settings, { fieldValuesAtSave } = {}) {
 }
 
 async function renderHistory() {
+  const requestVersion = historyRefreshVersion + 1;
+  historyRefreshVersion = requestVersion;
   await historyAutosave.flush();
+  if (requestVersion !== historyRefreshVersion) return;
   const selectionBeforeRefresh = selectedHistoryId;
-  const preserveFailedEditor = editorSavePhase === "error";
+  const selectionVersionBeforeRefresh = historySelectionVersion;
+  const editorRevisionBeforeRefresh = editorRevision;
+  const commitVersionBeforeRefresh = historyCommitVersion;
   const history = await window.localFlow.listHistory();
-  allHistory = normalizeHistoryEntries(Array.isArray(history) ? history : []);
+  if (requestVersion !== historyRefreshVersion) return;
+  allHistory = mergeHistorySnapshotWithSessions(
+    normalizeHistoryEntries(Array.isArray(history) ? history : []),
+    commitVersionBeforeRefresh
+  );
   const selectedEntry = allHistory.find((entry) => entry.id === selectedHistoryId);
   selectedHistoryId = activePrimaryView === "home"
     ? resolveHistorySelection(allHistory, "")
@@ -1393,8 +1569,33 @@ async function renderHistory() {
       : resolveHistorySelection(allHistory, selectedHistoryId);
   renderHistoryProjection();
   renderSelectedHistory({
-    syncEditor: !(preserveFailedEditor && selectedHistoryId === selectionBeforeRefresh)
+    syncEditor: (
+      selectedHistoryId !== selectionBeforeRefresh ||
+      (
+        historySelectionVersion === selectionVersionBeforeRefresh &&
+        editorRevision === editorRevisionBeforeRefresh
+      )
+    )
   });
+}
+
+function mergeHistorySnapshotWithSessions(entries, commitVersionBeforeRefresh) {
+  return normalizeHistoryEntries(entries.map((entry) => {
+    const session = historyEditorSessions.get(entry.id);
+    if (!session) return entry;
+    if (
+      session.savePhase === "saved" &&
+      !session.editorState.dirty &&
+      session.commitVersion <= commitVersionBeforeRefresh
+    ) {
+      historyEditorSessions.set(entry.id, createHistoryEditorSession(entry));
+      return entry;
+    }
+    const text = session.savePhase === "saved"
+      ? session.editorState.currentText
+      : session.editorState.baselineText;
+    return { ...entry, text };
+  }));
 }
 
 function renderHistoryProjection() {
@@ -1419,7 +1620,7 @@ function renderHistoryItem(item) {
   const preview = displayable
     ? singleLineText(text)
     : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");
-  const selected = item.id === selectedHistoryId;
+  const selected = selectable && item.id === selectedHistoryId;
 
   return `
     <article class="history-item" data-history-item data-history-status="${escapeHtml(item?.status || "empty")}">
@@ -1491,9 +1692,14 @@ async function handleHistoryAction(event) {
 
 async function selectHistoryEntry(entry, { focusRow = false } = {}) {
   if (!isSelectableHistoryEntry(entry)) return;
+  const requestVersion = historySelectionVersion + 1;
+  historySelectionVersion = requestVersion;
+  storeCurrentEditorSession();
   if (entry.id !== selectedHistoryId) {
     await historyAutosave.flush();
   }
+  if (requestVersion !== historySelectionVersion) return;
+  historyInteractionVersion += 1;
   selectedHistoryId = entry.id;
   renderSelectedHistory();
   renderHistoryProjection();
@@ -1508,10 +1714,9 @@ async function selectHistoryEntry(entry, { focusRow = false } = {}) {
 function renderSelectedHistory({ syncEditor = true } = {}) {
   const entry = getSelectedHistoryEntry();
   if (syncEditor) {
-    emptyEditorMessageKey = entry?.status === "failed" ? "result.outputFailed" : "empty.result";
-    editorState = createEditorState(entry?.text || entry?.transcript || "");
-    setEditorSavePhase("saved");
-    setEditorReprocessPhase("idle");
+    loadHistoryEditorSession(entry);
+    setEditorSavePhase(editorSavePhase);
+    setEditorReprocessPhase(editorReprocessPhase);
     renderEditorState();
   } else {
     renderEditorContext();
@@ -1593,15 +1798,23 @@ async function activatePrimaryView(view, { focus = false } = {}) {
     openSettingsDrawer();
     return;
   }
-  activePrimaryView = view === "history" ? "history" : "home";
-  document.body.dataset.primaryView = activePrimaryView;
-  syncPrimaryNavigation({ focus });
-  if (activePrimaryView === "home") {
+  const nextView = view === "history" ? "history" : "home";
+  if (nextView === "home") {
+    const requestVersion = historySelectionVersion + 1;
+    historySelectionVersion = requestVersion;
+    storeCurrentEditorSession();
     const nextSelection = resolveHistorySelection(allHistory, "");
     if (nextSelection !== selectedHistoryId) {
       await historyAutosave.flush();
     }
+    if (requestVersion !== historySelectionVersion) return;
+    historyInteractionVersion += 1;
     selectedHistoryId = nextSelection;
+  }
+  activePrimaryView = nextView;
+  document.body.dataset.primaryView = activePrimaryView;
+  syncPrimaryNavigation({ focus });
+  if (activePrimaryView === "home") {
     renderSelectedHistory();
     renderHistoryProjection();
     document.body.dataset.workspacePane = "editor";
