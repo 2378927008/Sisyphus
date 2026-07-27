@@ -1,5 +1,14 @@
 function noop() {}
 
+function saveFailure(result) {
+  const candidateReason = typeof result?.reason === "string" ? result.reason.trim() : "";
+  const error = new Error("history_save_failed");
+  error.name = "HistorySaveError";
+  error.code = "history_save_failed";
+  error.reason = /^[a-z][a-z0-9_]{0,63}$/.test(candidateReason) ? candidateReason : "save_failed";
+  return error;
+}
+
 export function createVersionedAutosave({
   delayMs = 450,
   save,
@@ -28,7 +37,10 @@ export function createVersionedAutosave({
     if (!current(request)) return;
     emit("saving", request);
     try {
-      await save({ id: request.id, text: request.text, version: request.version });
+      const result = await save({ id: request.id, text: request.text, version: request.version });
+      if (result && typeof result === "object" && result.ok === false) {
+        throw saveFailure(result);
+      }
       emit("saved", request);
     } catch (error) {
       emit("error", request, error);

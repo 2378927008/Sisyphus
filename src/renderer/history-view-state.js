@@ -6,9 +6,27 @@ function comparisonText(value) {
   return asText(value).normalize("NFKC").toLowerCase();
 }
 
-function validId(entry, index) {
+function stableLegacySource(entry) {
+  return JSON.stringify([
+    asText(entry?.createdAt),
+    asText(entry?.transcript),
+    asText(entry?.text),
+    asText(entry?.status)
+  ]);
+}
+
+function shortStableHash(value) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export function resolveHistoryEntryId(entry) {
   const id = asText(entry?.id).trim();
-  return id || `${asText(entry?.createdAt)}:${index}`;
+  return id || `legacy-${shortStableHash(stableLegacySource(entry))}`;
 }
 
 function localDateKey(value) {
@@ -26,18 +44,41 @@ function timestamp(entry) {
   return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
 }
 
+function compareStableText(left, right) {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareHistoryEntries(left, right) {
+  const leftTime = timestamp(left);
+  const rightTime = timestamp(right);
+  if (leftTime !== rightTime) return leftTime > rightTime ? -1 : 1;
+
+  const idOrder = compareStableText(left.id, right.id);
+  if (idOrder !== 0) return idOrder;
+  return compareStableText(stableLegacySource(left), stableLegacySource(right));
+}
+
+function compareHistoryGroups(left, right) {
+  const ranks = { today: 0, yesterday: 1, unknown: 3 };
+  const leftRank = ranks[left.key] ?? 2;
+  const rightRank = ranks[right.key] ?? 2;
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  if (leftRank === 2) return compareStableText(right.key, left.key);
+  return 0;
+}
+
 export function normalizeHistoryEntries(entries) {
   if (!Array.isArray(entries)) return [];
 
   return entries
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => entry && typeof entry === "object")
-    .map(({ entry, index }) => {
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => {
       const text = asText(entry.text);
       const transcript = asText(entry.transcript);
       return {
         ...entry,
-        id: validId(entry, index),
+        id: resolveHistoryEntryId(entry),
         text,
         transcript,
         createdAt: asText(entry.createdAt),
@@ -76,7 +117,9 @@ export function groupHistoryByDate(entries, { now = new Date() } = {}) {
     groups.get(key).entries.push(entry);
   }
 
-  return [...groups.values()];
+  return [...groups.values()]
+    .map((group) => ({ ...group, entries: [...group.entries].sort(compareHistoryEntries) }))
+    .sort(compareHistoryGroups);
 }
 
 export function resolveHistorySelection(entries, selectedId) {
@@ -86,6 +129,6 @@ export function resolveHistorySelection(entries, selectedId) {
 
   const usable = normalizedEntries
     .filter((entry) => entry.status === "complete" || entry.status === "partial")
-    .sort((left, right) => timestamp(right) - timestamp(left));
+    .sort(compareHistoryEntries);
   return usable[0]?.id || normalizedEntries[0]?.id || "";
 }

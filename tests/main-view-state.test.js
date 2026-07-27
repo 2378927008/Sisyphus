@@ -69,10 +69,10 @@ test("projects the two most recent usable history entries in input order", () =>
 
   assert.deepEqual(projected.map((entry) => entry.text), ["三", "一"]);
   assert.deepEqual(projected.map((entry) => entry.characterCount), [1, 1]);
-  assert.deepEqual(projected.map((entry) => entry.id), [
-    "2026-07-11T03:00:00.000Z:0",
-    "2026-07-11T01:00:00.000Z:2"
-  ]);
+  for (const id of projected.map((entry) => entry.id)) {
+    assert.match(id, /^legacy-[a-f0-9]{8}$/);
+  }
+  assert.notEqual(projected[0].id, projected[1].id);
 });
 
 test("projects exactly the first three usable history entries without mutating input", () => {
@@ -142,4 +142,15 @@ test("keeps full history normalization in the browser-safe history view module",
 
   assert.equal(entry.id, "partial");
   assert.equal(entry.characterCount, 5);
+});
+
+test("projects the same legacy history id after input reordering", () => {
+  const legacy = { createdAt: "2026-07-27T09:00:00Z", status: "complete", text: "legacy" };
+  const other = { createdAt: "2026-07-26T09:00:00Z", status: "complete", text: "other" };
+
+  const firstId = projectHistory([legacy, other], 2).find((entry) => entry.text === "legacy").id;
+  const reorderedId = projectHistory([other, legacy], 2).find((entry) => entry.text === "legacy").id;
+
+  assert.equal(reorderedId, firstId);
+  assert.match(firstId, /^legacy-[a-f0-9]{8}$/);
 });

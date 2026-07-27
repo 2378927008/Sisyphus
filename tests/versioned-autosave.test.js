@@ -120,3 +120,75 @@ test("continues saving after a rejected save", async () => {
   assert.deepEqual(harness.saved.map((entry) => entry.text), ["second"]);
   assert.equal(harness.states.at(-1).phase, "saved");
 });
+
+test("treats a resolved business failure as an error and recovers", async () => {
+  const calls = [];
+  const responses = [
+    { ok: false, reason: "history_changed" },
+    { ok: true }
+  ];
+  const harness = createAutosaveHarness({
+    save: async (payload) => {
+      calls.push(payload);
+      return responses.shift();
+    }
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "first" });
+  harness.flushTimer();
+  await harness.autosave.flush();
+
+  const firstState = harness.states.at(-1);
+  assert.equal(firstState.phase, "error");
+  assert.equal(firstState.version, 1);
+  assert.equal(firstState.error.code, "history_save_failed");
+  assert.equal(firstState.error.reason, "history_changed");
+  assert.equal(harness.states.some((state) => state.phase === "saved" && state.version === 1), false);
+
+  harness.autosave.schedule({ id: "h1", text: "second" });
+  harness.flushTimer();
+  await harness.autosave.flush();
+
+  assert.deepEqual(calls.map((call) => call.text), ["first", "second"]);
+  assert.equal(harness.states.at(-1).phase, "saved");
+  assert.equal(harness.states.at(-1).version, 2);
+});
+
+test("does not let an older resolved business failure replace the latest pending state", async () => {
+  let resolveFirst;
+  const harness = createAutosaveHarness({
+    save: ({ version }) => version === 1
+      ? new Promise((resolve) => { resolveFirst = resolve; })
+      : Promise.resolve({ ok: true })
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "first" });
+  harness.flushTimer();
+  await Promise.resolve();
+  harness.autosave.schedule({ id: "h1", text: "second" });
+  resolveFirst({ ok: false, reason: "history_changed" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.states.at(-1).phase, "pending");
+  assert.equal(harness.states.at(-1).version, 2);
+  assert.equal(harness.states.some((state) => state.phase === "error" && state.version === 1), false);
+
+  await harness.autosave.flush();
+  assert.equal(harness.states.at(-1).phase, "saved");
+  assert.equal(harness.states.at(-1).version, 2);
+});
+
+test("replaces diagnostic business reasons with a safe fallback", async () => {
+  const harness = createAutosaveHarness({
+    save: async () => ({ ok: false, reason: "C:\\private\\history.json failed" })
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "draft" });
+  harness.flushTimer();
+  await harness.autosave.flush();
+
+  assert.equal(harness.states.at(-1).phase, "error");
+  assert.equal(harness.states.at(-1).error.code, "history_save_failed");
+  assert.equal(harness.states.at(-1).error.reason, "save_failed");
+  assert.doesNotMatch(harness.states.at(-1).error.message, /private|history\.json/i);
+});

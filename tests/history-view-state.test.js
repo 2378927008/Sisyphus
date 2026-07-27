@@ -72,3 +72,67 @@ test("keeps a valid selection and otherwise chooses the newest usable result", (
   assert.equal(resolveHistorySelection([{ id: "failed", status: "failed" }], "missing"), "failed");
   assert.equal(resolveHistorySelection([], "missing"), "");
 });
+
+test("sorts unordered groups and entries deterministically without mutating input", () => {
+  const unordered = [
+    { id: "unknown", text: "unknown", transcript: "", createdAt: "not-a-date", status: "failed" },
+    { id: "older", text: "older", transcript: "", createdAt: "2026-07-20T12:00:00+08:00", status: "complete" },
+    { id: "today-z", text: "early", transcript: "", createdAt: "2026-07-27T08:00:00+08:00", status: "complete" },
+    { id: "yesterday", text: "yesterday", transcript: "", createdAt: "2026-07-26T12:00:00+08:00", status: "partial" },
+    { id: "today-b", text: "tie b", transcript: "", createdAt: "2026-07-27T10:00:00+08:00", status: "complete" },
+    { id: "newer-old", text: "newer old", transcript: "", createdAt: "2026-07-24T12:00:00+08:00", status: "complete" },
+    { id: "today-a", text: "tie a", transcript: "", createdAt: "2026-07-27T10:00:00+08:00", status: "complete" }
+  ];
+  const snapshot = structuredClone(unordered);
+
+  const groups = groupHistoryByDate(unordered, {
+    now: new Date("2026-07-27T12:00:00+08:00")
+  });
+
+  assert.deepEqual(groups.map((group) => group.key), [
+    "today",
+    "yesterday",
+    "2026-07-24",
+    "2026-07-20",
+    "unknown"
+  ]);
+  assert.deepEqual(groups[0].entries.map((entry) => entry.id), ["today-a", "today-b", "today-z"]);
+  assert.deepEqual(unordered, snapshot);
+});
+
+test("uses caller-local midnight boundaries", () => {
+  const now = new Date(2026, 6, 27, 0, 5, 0);
+  const localToday = new Date(2026, 6, 27, 0, 1, 0).toISOString();
+  const localYesterday = new Date(2026, 6, 26, 23, 59, 0).toISOString();
+
+  const groups = groupHistoryByDate([
+    { id: "before", createdAt: localYesterday, status: "complete", text: "before" },
+    { id: "after", createdAt: localToday, status: "complete", text: "after" }
+  ], { now });
+
+  assert.deepEqual(groups.map((group) => group.key), ["today", "yesterday"]);
+  assert.deepEqual(groups.map((group) => group.entries[0].id), ["after", "before"]);
+});
+
+test("keeps deterministic legacy ids when records are reordered", () => {
+  const legacy = {
+    createdAt: "2026-07-27T09:00:00+08:00",
+    transcript: "original speech",
+    text: "edited output",
+    status: "partial"
+  };
+  const other = {
+    createdAt: "2026-07-26T09:00:00+08:00",
+    transcript: "another speech",
+    text: "another output",
+    status: "complete"
+  };
+
+  const firstId = normalizeHistoryEntries([legacy, other]).find((entry) => entry.text === "edited output").id;
+  const reorderedId = normalizeHistoryEntries([other, legacy]).find((entry) => entry.text === "edited output").id;
+  const duplicateIds = normalizeHistoryEntries([legacy, structuredClone(legacy)]).map((entry) => entry.id);
+
+  assert.match(firstId, /^legacy-[a-f0-9]{8}$/);
+  assert.equal(reorderedId, firstId);
+  assert.deepEqual(duplicateIds, [firstId, firstId]);
+});
