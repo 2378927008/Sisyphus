@@ -5,7 +5,7 @@ import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-st
 import { createSettingsEffectsTransaction } from "./settings-effects-transaction.js";
 import { DictationService } from "./dictation-service.js";
 import { createHistoryActions } from "./history-actions.js";
-import { isAuthorizedWindowSender } from "./ipc-authorization.js";
+import { wireHistoryIpc } from "./history-ipc.js";
 import { applyElectronRuntimeSwitches } from "./electron-runtime.js";
 import { validateWhisperSetup } from "./whisper-diagnostics.js";
 import { detectWhisperAssets } from "./whisper-assets.js";
@@ -378,17 +378,10 @@ function wireIpc() {
     return saveSettingsWithSystemEffects(settings);
   });
   ipcMain.handle("history:list", () => settingsStore.getHistory());
-  ipcMain.handle("history:update", async (event, payload = {}) => {
-    if (!isAuthorizedWindowSender(event, mainWindow)) {
-      return { ok: false, reason: "unauthorized" };
-    }
-    return historyActions.updateText(payload.id, payload.text);
-  });
-  ipcMain.handle("history:reprocess", async (event, id) => {
-    if (!isAuthorizedWindowSender(event, mainWindow)) {
-      return { ok: false, reason: "unauthorized" };
-    }
-    return historyActions.reprocess(id);
+  wireHistoryIpc({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    historyActions
   });
   ipcMain.handle("diagnostics:whisper", async () => {
     const settings = await settingsStore.getSettings();
