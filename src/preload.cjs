@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld("localFlow", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   listHistory: () => ipcRenderer.invoke("history:list"),
+  updateHistory: (id, text) => ipcRenderer.invoke("history:update", { id, text }),
+  reprocessHistory: (id) => ipcRenderer.invoke("history:reprocess", id),
   checkWhisper: () => ipcRenderer.invoke("diagnostics:whisper"),
   checkTextProvider: () => ipcRenderer.invoke("diagnostics:text"),
   getProviderStatus: () => ipcRenderer.invoke("providers:status"),

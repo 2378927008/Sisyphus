@@ -189,7 +189,7 @@ test("raw setup output belongs only to the advanced settings section", async () 
   assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
 });
 
-test("advanced setup controls stay isolated and history remains read-only across renderer IPC sources", async () => {
+test("advanced setup controls stay isolated and history mutations remain narrowly scoped", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
@@ -214,13 +214,17 @@ test("advanced setup controls stay isolated and history remains read-only across
     ["main", mainSource],
     ["smoke", smokeSource]
   ]) {
-    for (const channel of ["history:delete", "history:write", "history:update", "history:clear"]) {
+    for (const channel of ["history:delete", "history:write", "history:clear"]) {
       assert.equal(source.includes(channel), false, `${name} must not use ${channel}`);
     }
   }
 
   assert.match(preloadSource, /history:list/);
+  assert.match(preloadSource, /history:update/);
+  assert.match(preloadSource, /history:reprocess/);
   assert.match(smokeSource, /history:list/);
+  assert.match(smokeSource, /history:update/);
+  assert.match(smokeSource, /history:reprocess/);
 });
 
 test("main window fallback uses the short safe local setup status", async () => {

@@ -107,13 +107,17 @@ async function getActualPreloadInvokeChannels(preloadSource) {
     "processWav",
     "refreshModelSetupStatus",
     "reportRecordingStatus",
+    "reprocessHistory",
     "saveSettings",
-    "startModelSetup"
+    "startModelSetup",
+    "updateHistory"
   ]);
 
   await exposedApi.getSettings();
   await exposedApi.saveSettings({ hotkey: "CommandOrControl+Alt+Space" });
   await exposedApi.listHistory();
+  await exposedApi.updateHistory("history-smoke", "edited smoke text");
+  await exposedApi.reprocessHistory("history-smoke");
   await exposedApi.checkWhisper();
   await exposedApi.checkTextProvider();
   await exposedApi.getProviderStatus();

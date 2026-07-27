@@ -25,6 +25,8 @@ const smokeIpcChannelRegistry = [
   "settings:get",
   "settings:save",
   "history:list",
+  "history:update",
+  "history:reprocess",
   "dictation:insert-text",
   "diagnostics:whisper",
   "diagnostics:text",
@@ -189,6 +191,22 @@ function wireIpc() {
     historyListCalls += 1;
     return historyFixtures;
   });
+  registerSmokeIpcHandler("history:update", (_event, payload = {}) => ({
+    ok: true,
+    entry: {
+      id: payload.id,
+      text: payload.text,
+      status: "complete"
+    }
+  }));
+  registerSmokeIpcHandler("history:reprocess", (_event, id) => ({
+    ok: true,
+    entry: {
+      id,
+      text: "reprocessed smoke transcript",
+      status: "complete"
+    }
+  }));
   registerSmokeIpcHandler("dictation:insert-text", (_event, text) => {
     insertTextCalls.push(text);
     return insertTextResult;
