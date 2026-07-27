@@ -10,10 +10,10 @@
     <title>Local Flow 本地语音输入</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <main class="app-shell">
-      <header id="appHeader" class="app-header">
-        <div class="app-brand">
+  <body data-primary-view="home" data-workspace-pane="editor">
+    <main class="app-layout">
+      <aside id="appSidebar" class="app-sidebar">
+        <div class="sidebar-brand">
           <img
             class="app-brand-icon"
             src="../../assets/local-flow-icon.svg"
@@ -21,154 +21,167 @@
             aria-hidden="true"
           />
           <h1>Local Flow</h1>
-          <p>
-            <span aria-hidden="true">○</span>
+        </div>
+
+        <nav id="primaryNavigation" class="primary-navigation" aria-label="主要导航">
+          <button id="navHome" class="nav-item" type="button" data-primary-view="home" aria-current="page">
+            <span data-lucide="House"></span>
+            <span class="button-label" data-i18n="nav.home">首页</span>
+          </button>
+          <button id="navHistory" class="nav-item" type="button" data-primary-view="history">
+            <span data-lucide="History"></span>
+            <span class="button-label" data-i18n="nav.history">历史记录</span>
+          </button>
+          <button class="nav-item" type="button" disabled>
+            <span data-lucide="BookOpen"></span>
+            <span class="button-label" data-i18n="nav.dictionary">个人词典</span>
+          </button>
+          <button class="nav-item" type="button" disabled>
+            <span data-lucide="MessageSquareText"></span>
+            <span class="button-label" data-i18n="nav.snippets">快捷短语</span>
+          </button>
+        </nav>
+
+        <button id="navSettings" class="nav-item nav-settings" type="button" data-primary-view="settings">
+          <span data-lucide="Settings"></span>
+          <span class="button-label" data-i18n="nav.settings">设置</span>
+        </button>
+      </aside>
+
+      <section class="app-main">
+        <header id="appTopbar" class="app-topbar">
+          <p class="local-health">
+            <span class="health-dot" aria-hidden="true"></span>
             <span id="headerHealthText">本地 Whisper 待配置</span>
           </p>
-        </div>
-
-        <div id="mainTabs" class="main-tabs" role="tablist" aria-label="主视图">
-          <button
-            id="dictationTab"
-            role="tab"
-            aria-selected="true"
-            aria-controls="dictationPanel"
-            type="button"
-          >
-            <span data-lucide="Mic"></span>
-            语音输入
-          </button>
-          <button
-            id="historyTab"
-            role="tab"
-            aria-selected="false"
-            aria-controls="historyPanel"
-            tabindex="-1"
-            type="button"
-          >
-            <span data-lucide="History"></span>
-            历史
-          </button>
-        </div>
-
-        <button
-          id="openSettings"
-          class="ghost"
-          type="button"
-          title="设置"
-          aria-label="设置"
-          data-i18n-title="action.settings"
-          data-i18n-aria-label="action.settings"
-        >
-          <span data-lucide="Settings"></span>
-        </button>
-      </header>
-
-      <section
-        id="dictationPanel"
-        class="dictation-stage"
-        role="tabpanel"
-        aria-labelledby="dictationTab"
-      >
-        <div id="languageControls" class="language-strip">
-          <label>
-            <span data-i18n="label.recognitionLanguage">语音识别语言</span>
-            <select id="whisperLanguage" name="whisperLanguage" form="settingsForm"></select>
+          <label class="global-search">
+            <span class="visually-hidden" data-i18n="history.search">搜索历史记录</span>
+            <span data-lucide="Search"></span>
+            <input
+              id="globalSearch"
+              type="search"
+              autocomplete="off"
+              placeholder="搜索历史记录"
+              data-i18n-placeholder="history.search"
+            />
           </label>
-          <span aria-hidden="true">→</span>
-          <label>
-            <span data-i18n="label.outputLanguage">输出语言</span>
-            <select id="outputLanguage" name="outputLanguage" form="settingsForm"></select>
-          </label>
+        </header>
+
+        <section id="commandStrip" class="command-strip" aria-label="录音控制">
           <div class="shortcut-hint">
             <span data-lucide="Keyboard"></span>
-            <span>快捷键</span>
+            <span>快捷键：Ctrl + Alt + Space</span>
           </div>
-        </div>
 
-        <section id="voiceCommandBar" class="status-line" aria-label="录音控制">
-          <button id="recordButton" class="primary" type="button" aria-live="polite">
+          <label class="command-select">
+            <span data-lucide="WandSparkles"></span>
+            <span class="visually-hidden" data-i18n="label.polishMode">处理模式</span>
+            <select
+              id="commandPolishMode"
+              aria-label="处理模式"
+              data-i18n-aria-label="label.polishMode"
+            >
+              <option value="polish" data-i18n="mode.polish">整理口述文本</option>
+              <option value="raw" data-i18n="mode.raw">原始转写</option>
+              <option value="command" data-i18n="mode.command">语音编辑指令</option>
+            </select>
+          </label>
+
+          <div id="languageControls" class="language-controls">
+            <span data-lucide="Globe2"></span>
+            <label>
+              <span class="visually-hidden" data-i18n="label.recognitionLanguage">语音识别语言</span>
+              <select id="whisperLanguage" name="whisperLanguage" form="settingsForm"></select>
+            </label>
+            <span class="language-separator" aria-hidden="true">/</span>
+            <label>
+              <span class="visually-hidden" data-i18n="label.outputLanguage">输出语言</span>
+              <select id="outputLanguage" name="outputLanguage" form="settingsForm"></select>
+            </label>
+          </div>
+
+          <button id="recordButton" class="primary" type="button">
             <span data-lucide="Mic"></span>
             <span id="recordLabel" data-i18n="record.start">开始录音</span>
+            <span data-lucide="ChevronDown"></span>
           </button>
-          <p id="statusText">就绪。快捷键：Ctrl + Alt + Space</p>
-          <span class="provider-status">空闲中</span>
+
+          <p id="statusText" class="command-status">就绪。快捷键：Ctrl + Alt + Space</p>
+          <span class="provider-status" role="status" aria-live="polite" aria-atomic="true">空闲中</span>
+
+          <div id="recordRecovery" class="record-recovery" role="status" hidden>
+            <span data-lucide="AlertTriangle"></span>
+            <p id="recordRecoveryText">录音暂不可用，请检查设置。</p>
+            <button id="recordRecoveryAction" class="secondary" type="button">打开设置</button>
+          </div>
         </section>
 
-        <div id="recordRecovery" class="record-recovery" role="status" hidden>
-          <span data-lucide="AlertTriangle"></span>
-          <p id="recordRecoveryText">录音暂不可用，请检查设置。</p>
-          <button id="recordRecoveryAction" class="secondary" type="button">打开设置</button>
-        </div>
+        <section id="workspacePage" class="workspace-page">
+          <section id="historyPane" class="history-pane" aria-labelledby="historyHeading">
+            <header class="history-pane-header">
+              <h2 id="historyHeading" class="visually-hidden" data-i18n="nav.history">历史记录</h2>
+              <label class="history-search">
+                <span data-lucide="Search"></span>
+                <span class="visually-hidden" data-i18n="history.search">搜索历史记录</span>
+                <input
+                  id="historySearch"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="搜索历史记录"
+                  data-i18n-placeholder="history.search"
+                />
+              </label>
+            </header>
+            <div id="historyList" class="history-list" role="listbox" aria-label="历史记录"></div>
+          </section>
 
-        <section id="resultWorkspace" class="result-surface" aria-labelledby="resultHeading">
-          <div class="section-title">
-            <h2 id="resultHeading" data-i18n="label.latestResult">最新结果</h2>
-            <div class="button-row" aria-label="结果操作">
-              <span id="resultCharacterCount" class="result-character-count">0 个字符</span>
-              <button id="restoreResult" type="button" class="ghost">
-                <span data-lucide="Undo2"></span>
-                撤销
+          <section id="editorPane" class="editor-pane" aria-labelledby="resultHeading">
+            <header class="editor-toolbar">
+              <button id="editorBack" class="ghost editor-back" type="button">
+                <span data-lucide="ArrowLeft"></span>
+                <span class="button-label" data-i18n="history.back">返回历史</span>
               </button>
-              <button id="copyResult" type="button" class="ghost">
-                <span data-lucide="Copy"></span>
-                <span class="button-label" data-i18n="action.copy">复制</span>
-              </button>
-              <button id="insertResult" type="button" class="ghost">
-                <span data-lucide="CornerDownLeft"></span>
-                插入到光标
-              </button>
+              <div class="editor-meta">
+                <h2 id="resultHeading" class="visually-hidden" data-i18n="label.latestResult">最新结果</h2>
+                <time id="editorCreatedAt"></time>
+                <span id="editorSaveState" class="editor-status" data-i18n="editor.saved">已保存</span>
+              </div>
+              <div class="button-row" aria-label="结果操作">
+                <span id="resultCharacterCount" class="result-character-count">0 个字符</span>
+                <button id="restoreResult" type="button" class="ghost">
+                  <span data-lucide="Undo2"></span>
+                  <span class="button-label">撤销</span>
+                </button>
+                <button id="copyResult" type="button" class="ghost">
+                  <span data-lucide="Copy"></span>
+                  <span class="button-label" data-i18n="action.copy">复制</span>
+                </button>
+                <button id="insertResult" type="button" class="ghost">
+                  <span data-lucide="CornerDownLeft"></span>
+                  <span class="button-label">插入到光标</span>
+                </button>
+              </div>
+            </header>
+            <div id="resultEditor" class="result-editor">
+              <p
+                id="resultText"
+                class="result-text"
+                contenteditable="true"
+                role="textbox"
+                aria-multiline="true"
+                data-empty-result="true"
+                data-i18n="empty.result"
+              >还没有转写结果。</p>
             </div>
-          </div>
-          <div id="resultEditor" class="result-editor">
-            <p
-              id="resultText"
-              class="result-text"
-              contenteditable="true"
-              role="textbox"
-              aria-multiline="true"
-              data-empty-result="true"
-              data-i18n="empty.result"
-            >还没有转写结果。</p>
-          </div>
+            <footer class="editor-footer">
+              <span data-lucide="CheckCircle2"></span>
+              <span data-i18n="hint.autoKeepsLanguage">自动输出保持原语言</span>
+            </footer>
+          </section>
         </section>
-
-        <section id="recentHistorySection" class="history-surface" aria-labelledby="recentHistoryHeading">
-          <div class="section-title">
-            <h2 id="recentHistoryHeading" data-i18n="section.recent">最近输入</h2>
-            <button id="viewAllHistory" type="button" class="ghost">
-              <span class="button-label">查看全部</span>
-              <span data-lucide="ChevronRight"></span>
-            </button>
-          </div>
-          <div id="recentHistoryList" class="history-list">
-            <p class="empty">暂无最近记录。</p>
-          </div>
-        </section>
-
-        <footer id="footerHealth" class="status-line" aria-label="本地服务状态">
-          <span data-lucide="CheckCircle2"></span>
-          <span id="footerHealthText">本地 Whisper 待配置</span>
-          <span>自动输出保持原语言</span>
-        </footer>
-      </section>
-
-      <section
-        id="historyPanel"
-        class="history-surface"
-        role="tabpanel"
-        aria-labelledby="historyTab"
-        hidden
-      >
-        <div class="section-title">
-          <h2 data-i18n="section.history">历史记录</h2>
-          <button id="refreshHistory" type="button" class="ghost" data-i18n="action.refresh">刷新</button>
-        </div>
-        <div id="fullHistoryList">
-          <div id="historyList" class="history-list"></div>
-        </div>
       </section>
     </main>
+
 
     <aside
       id="settingsDrawer"

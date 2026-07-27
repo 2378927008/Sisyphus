@@ -17,11 +17,15 @@ import { renderIcons } from "./icons.js";
 import {
   createEditorState,
   normalizeViewPhase,
-  projectHistory,
   replaceEditorText,
-  resolveHistoryEntryIds,
   restoreEditorText
 } from "./main-view-state.js";
+import {
+  filterHistory,
+  groupHistoryByDate,
+  normalizeHistoryEntries,
+  resolveHistorySelection
+} from "./history-view-state.js";
 
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
@@ -33,31 +37,29 @@ const statusText = document.querySelector("#statusText");
 const providerStatusText = document.querySelector("#providerStatusText");
 const resultText = document.querySelector("#resultText");
 const resultCharacterCount = document.querySelector("#resultCharacterCount");
+const editorCreatedAt = document.querySelector("#editorCreatedAt");
+const editorSaveState = document.querySelector("#editorSaveState");
+const editorBack = document.querySelector("#editorBack");
 const historyList = document.querySelector("#historyList");
-const recentHistoryList = document.querySelector("#recentHistoryList");
-const refreshHistory = document.querySelector("#refreshHistory");
-const mainTabsRegion = document.querySelector("#mainTabs");
-const dictationTab = document.querySelector("#dictationTab");
-const historyTab = document.querySelector("#historyTab");
-const dictationPanel = document.querySelector("#dictationPanel");
-const historyPanel = document.querySelector("#historyPanel");
-const openHistory = document.querySelector("#openHistory");
-const viewAllHistory = document.querySelector("#viewAllHistory");
-viewAllHistory.querySelector(".button-label").dataset.i18n = "action.viewAll";
-const voiceCommandBar = document.querySelector("#voiceCommandBar");
-const phaseStatus = voiceCommandBar.querySelector(".provider-status");
+const historySearch = document.querySelector("#historySearch");
+const globalSearch = document.querySelector("#globalSearch");
+const commandPolishMode = document.querySelector("#commandPolishMode");
+const primaryNavigation = document.querySelector("#primaryNavigation");
+const navHome = document.querySelector("#navHome");
+const navHistory = document.querySelector("#navHistory");
+const navSettings = document.querySelector("#navSettings");
+const primaryNavigationButtons = [navHome, navHistory, navSettings];
+const commandStrip = document.querySelector("#commandStrip");
+const phaseStatus = commandStrip.querySelector(".provider-status");
 const shortcutHintText = document.querySelector(".shortcut-hint span:last-child");
-const resultActions = document.querySelector("#resultWorkspace .button-row");
+const resultActions = document.querySelector("#editorPane .button-row");
 const headerHealthText = document.querySelector("#headerHealthText");
-const footerHealth = document.querySelector("#footerHealth");
-const footerCopyNodes = [...footerHealth.querySelectorAll("span:not([data-lucide])")];
 const checkWhisper = document.querySelector("#checkWhisper");
 const checkMicrophone = document.querySelector("#checkMicrophone");
 const checkTextProvider = document.querySelector("#checkTextProvider");
 const diagnosticsList = document.querySelector("#diagnosticsList");
 const microphoneDiagnosticsList = document.querySelector("#microphoneDiagnosticsList");
 const textDiagnosticsList = document.querySelector("#textDiagnosticsList");
-const openSettings = document.querySelector("#openSettings");
 const closeSettings = document.querySelector("#closeSettings");
 const settingsDrawer = document.querySelector("#settingsDrawer");
 const drawerPanel = settingsDrawer.querySelector(".drawer-panel");
@@ -94,17 +96,17 @@ let isSetupBusy = false;
 let activeSetupType = "";
 let currentLanguage = defaultInterfaceLanguage;
 let editorState = createEditorState();
-let allHistoryIds = [];
 let emptyEditorMessageKey = "empty.result";
 let allHistory = [];
-let recentHistoryCompact = window.innerHeight < 650;
+let historyQuery = "";
+let selectedHistoryId = "";
+let activePrimaryView = "home";
 let settingsSaveQueue = Promise.resolve();
 let processingLanguageErrorOwner = null;
 const processingLanguageRequestVersions = {
   whisperLanguage: 0,
   outputLanguage: 0
 };
-const mainTabs = [dictationTab, historyTab];
 const SETTINGS_SAVE_FAILED_KEY = "status.settingsSaveFailed";
 const ACTIVE_LANGUAGE_STATUS_PHASES = new Set([
   "starting",
@@ -125,16 +127,17 @@ const settingsFocusTrap = createFocusTrap({
   onEscape: closeSettingsDrawer
 });
 
-prepareWindowsUiV3Markup();
+prepareWindowsUiV4Markup();
 init();
 
-function prepareWindowsUiV3Markup() {
-  attachTranslationToIconLabel(dictationTab, "tab.dictation");
-  attachTranslationToIconLabel(historyTab, "tab.history");
+function prepareWindowsUiV4Markup() {
+  attachTranslationToIconLabel(navHome, "nav.home");
+  attachTranslationToIconLabel(navHistory, "nav.history");
+  attachTranslationToIconLabel(navSettings, "nav.settings");
+  attachTranslationToIconLabel(editorBack, "history.back");
   attachTranslationToIconLabel(restoreResult, "action.restore");
   attachTranslationToIconLabel(copyResult, "action.copy");
   attachTranslationToIconLabel(insertResult, "action.insert");
-  attachTranslationToIconLabel(viewAllHistory, "action.viewAll");
 
   recordButton.removeAttribute("aria-live");
   phaseStatus.setAttribute("role", "status");
@@ -145,11 +148,9 @@ function prepareWindowsUiV3Markup() {
   document.querySelector("#settingsSectionShortcuts").dataset.i18n = "settings.shortcuts";
   document.querySelector("#settingsSectionModels").dataset.i18n = "settings.modelsPrivacy";
   document.querySelector("#settingsSectionAdvanced").dataset.i18n = "settings.advanced";
-  footerCopyNodes[1].dataset.i18n = "hint.autoKeepsLanguage";
-  mainTabsRegion.dataset.i18nAriaLabel = "aria.mainTabs";
-  voiceCommandBar.dataset.i18nAriaLabel = "aria.voiceCommandBar";
+  primaryNavigation.dataset.i18nAriaLabel = "aria.mainTabs";
+  commandStrip.dataset.i18nAriaLabel = "aria.voiceCommandBar";
   resultActions.dataset.i18nAriaLabel = "aria.resultActions";
-  footerHealth.dataset.i18nAriaLabel = "aria.localServices";
   settingsSectionNav.dataset.i18nAriaLabel = "aria.settingsSections";
 
   const waveform = document.createElement("div");
@@ -160,7 +161,7 @@ function prepareWindowsUiV3Markup() {
     bar.style.setProperty("--bar-index", String(index));
     return bar;
   }));
-  voiceCommandBar.insertBefore(waveform, phaseStatus);
+  commandStrip.insertBefore(waveform, phaseStatus);
 }
 
 function attachTranslationToIconLabel(button, key) {
@@ -192,27 +193,29 @@ async function init() {
   fillSettings(currentSettings);
   setViewPhase("idle");
   renderEditorState();
-  activateTab(dictationTab);
+  activatePrimaryView("home");
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
   recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
-  openSettings.addEventListener("click", () => openSettingsDrawer());
+  navSettings.addEventListener("click", () => activatePrimaryView("settings"));
   closeSettings.addEventListener("click", closeSettingsDrawer);
   settingsDrawer.addEventListener("click", closeSettingsFromBackdrop);
   for (const button of settingsSectionButtons) {
     button.addEventListener("click", () => activateSettingsSection(button.dataset.settingsSection));
     button.addEventListener("keydown", handleSettingsSectionKeydown);
   }
-  refreshHistory.addEventListener("click", renderHistory);
-  viewAllHistory.addEventListener("click", () => activateTab(historyTab));
-  openHistory?.addEventListener("click", () => activateTab(historyTab));
-  for (const tab of mainTabs) {
-    tab.addEventListener("click", () => activateTab(tab));
-    tab.addEventListener("keydown", handleTabKeydown);
+  for (const button of [navHome, navHistory]) {
+    button.addEventListener("click", () => activatePrimaryView(button.dataset.primaryView));
   }
-  recentHistoryList.addEventListener("click", handleHistoryAction);
+  for (const button of primaryNavigationButtons) {
+    button.addEventListener("keydown", handlePrimaryNavigationKeydown);
+  }
   historyList.addEventListener("click", handleHistoryAction);
-  window.addEventListener("resize", handleRecentHistoryResize);
+  historyList.addEventListener("keydown", handleHistoryKeydown);
+  historySearch.addEventListener("input", handleHistorySearchInput);
+  globalSearch.addEventListener("input", handleHistorySearchInput);
+  editorBack.addEventListener("click", showHistoryListPane);
+  window.addEventListener("resize", syncResponsiveWorkspace);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
@@ -230,6 +233,7 @@ async function init() {
   form.whisperLanguage.addEventListener("change", changeProcessingLanguage);
   form.outputLanguage.addEventListener("change", changeProcessingLanguage);
   form.llmProvider.addEventListener("change", refreshProcessingProviderPreview);
+  commandPolishMode.addEventListener("change", changeCommandPolishMode);
   form.addEventListener("submit", saveSettings);
   for (const button of shortcutCaptureButtons) {
     button.addEventListener("click", () => shortcutRecorder.start(button));
@@ -252,6 +256,7 @@ async function init() {
   }
 
   await renderHistory();
+  syncResponsiveWorkspace();
   await renderLocalModelStatus();
   await refreshProviderStatus();
   await refreshSetupStatusView({ updateStatus: false });
@@ -290,7 +295,7 @@ async function saveProcessingLanguage(field, settingName, requestedValue, reques
     });
     await refreshProviderStatus();
     await refreshSetupStatusView({ updateStatus: false });
-    renderFooterHealth();
+    renderHeaderHealth();
     clearOwnedLanguageSaveFailure(settingName, requestVersion);
   } catch {
     if (!isLatestProcessingLanguageRequest(settingName, requestVersion)) return;
@@ -305,7 +310,7 @@ async function saveProcessingLanguage(field, settingName, requestedValue, reques
     setStatus(t(SETTINGS_SAVE_FAILED_KEY));
     renderProviderStatus();
     renderSetupChecklist();
-    renderFooterHealth();
+    renderHeaderHealth();
   }
 }
 
@@ -473,18 +478,12 @@ async function refreshProviderStatus() {
   applyRecordReadiness();
 }
 
-function renderFooterHealth(readiness = getCurrentRecordReadiness()) {
-  if (!footerHealth) return;
-
+function renderHeaderHealth(readiness = getCurrentRecordReadiness()) {
   const healthMessage = readiness.ready
     ? t("status.localReady")
     : t("status.localNeedsSetup");
-  const statusNode = footerCopyNodes[0];
-  footerHealth.dataset.ready = String(readiness.ready);
   headerHealthText.textContent = healthMessage;
-  if (statusNode) {
-    statusNode.textContent = healthMessage;
-  }
+  headerHealthText.dataset.ready = String(readiness.ready);
 }
 
 function renderProviderStatus() {
@@ -507,7 +506,7 @@ function getCurrentRecordReadiness() {
 function applyRecordReadiness() {
   const readiness = getCurrentRecordReadiness();
   renderRecordReadiness(readiness);
-  renderFooterHealth(readiness);
+  renderHeaderHealth(readiness);
 
   if (!readiness.ready && !isRecording) {
     showRecordReadinessReason(readiness);
@@ -1014,7 +1013,7 @@ function closeSettingsDrawer() {
 }
 
 function focusSettingsReturnTarget(preferredTarget) {
-  for (const target of new Set([preferredTarget, openSettings])) {
+  for (const target of new Set([preferredTarget, navSettings])) {
     if (!isSafeSettingsReturnTarget(target)) continue;
     try {
       target.focus({ preventScroll: true });
@@ -1276,126 +1275,212 @@ function fillSettings(settings, { fieldValuesAtSave } = {}) {
       field.value = value ?? "";
     }
   }
+  commandPolishMode.value = form.polishMode.value;
 }
 
 async function renderHistory() {
   const history = await window.localFlow.listHistory();
-  allHistory = Array.isArray(history) ? history : [];
-  allHistoryIds = resolveHistoryEntryIds(allHistory);
-
-  if (!allHistory.length) {
-    historyList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
-    recentHistoryList.innerHTML = `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
-    return;
-  }
-
-  renderRecentHistory();
-  renderFullHistory();
+  allHistory = normalizeHistoryEntries(Array.isArray(history) ? history : []);
+  selectedHistoryId = activePrimaryView === "home"
+    ? resolveHistorySelection(allHistory, "")
+    : resolveHistorySelection(allHistory, selectedHistoryId);
+  renderHistoryProjection();
+  renderSelectedHistory();
 }
 
-function renderRecentHistory() {
-  const limit = recentHistoryCompact ? 2 : 3;
-  const recent = projectHistory(allHistory, limit);
+function renderHistoryProjection() {
+  const filteredHistory = filterHistory(allHistory, historyQuery);
+  const groups = groupHistoryByDate(filteredHistory);
 
-  recentHistoryList.innerHTML = recent.length
-    ? recent.map((item) => renderHistoryItem(item, { recent: true })).join("")
+  historyList.innerHTML = groups.length
+    ? groups.map((group) => `
+      <section class="history-group" data-history-group="${escapeHtml(group.key)}">
+        <h3 class="history-group-heading">${escapeHtml(formatHistoryGroupLabel(group))}</h3>
+        ${group.entries.map((entry) => renderHistoryItem(entry)).join("")}
+      </section>
+    `).join("")
     : `<p class="empty">${escapeHtml(t("empty.history"))}</p>`;
-  renderIcons(recentHistoryList);
-}
-
-function handleRecentHistoryResize() {
-  const nextCompact = window.innerHeight < 650;
-  if (nextCompact === recentHistoryCompact) return;
-
-  recentHistoryCompact = nextCompact;
-  renderRecentHistory();
-}
-
-function renderFullHistory() {
-  historyList.innerHTML = allHistory
-    .map((item, index) => renderHistoryItem(item, { index }))
-    .join("");
   renderIcons(historyList);
 }
 
-function renderHistoryItem(item, { index = -1, recent = false } = {}) {
+function renderHistoryItem(item) {
   const text = typeof item?.text === "string" ? item.text : "";
-  const usable = item?.status === "complete" && text !== "";
-  const id = recent ? item.id : historyEntryId(item, index);
-  const resolvedIndex = recent ? findHistoryEntryIndex(id) : index;
+  const usable = (item?.status === "complete" || item?.status === "partial") && text !== "";
   const preview = usable
     ? singleLineText(text)
     : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");
-  const count = usable ? Array.from(text).length : 0;
-  const disabled = usable ? "" : " disabled";
-  const actionLabel = recent ? preview : formatHistoryTime(item?.createdAt);
+  const selected = item.id === selectedHistoryId;
 
   return `
     <article class="history-item" data-history-item data-history-status="${escapeHtml(item?.status || "empty")}">
       <button
         type="button"
+        role="option"
         class="history-select"
         data-history-action="select"
-        data-history-id="${escapeHtml(id)}"
-        data-history-index="${resolvedIndex}"
-        aria-label="${escapeHtml(actionLabel || preview)}"
-        ${disabled}
+        data-history-id="${escapeHtml(item.id)}"
+        aria-label="${escapeHtml(preview)}"
+        aria-selected="${selected}"
+        tabindex="${selected ? "0" : "-1"}"
+        ${usable ? "" : "disabled"}
       >
-        <time>${escapeHtml(formatHistoryTime(item?.createdAt))}</time>
-        <p>${escapeHtml(preview)}</p>
-        <span data-history-character-count>${escapeHtml(t("label.characterCount", { count }))}</span>
+        <time>${escapeHtml(formatHistoryTimeOnly(item.createdAt))}</time>
+        <span class="history-copy">
+          <p>${escapeHtml(preview)}</p>
+          <span data-history-character-count>${escapeHtml(t("label.characterCount", {
+            count: usable ? item.characterCount : 0
+          }))}</span>
+        </span>
         <span data-lucide="ChevronRight" aria-hidden="true"></span>
       </button>
-      ${recent ? "" : `
-        <div class="button-row">
-          <button
-            type="button"
-            class="ghost"
-            data-history-action="copy"
-            data-history-id="${escapeHtml(id)}"
-            data-history-index="${resolvedIndex}"
-            ${disabled}
-          >${escapeHtml(t("action.copy"))}</button>
-          <button
-            type="button"
-            class="ghost"
-            data-history-action="insert"
-            data-history-id="${escapeHtml(id)}"
-            data-history-index="${resolvedIndex}"
-            ${disabled}
-          >${escapeHtml(insertResult.textContent.trim() || "Insert")}</button>
-        </div>
-      `}
     </article>
   `;
+}
+
+function handleHistorySearchInput(event) {
+  historyQuery = event.currentTarget.value;
+  historySearch.value = historyQuery;
+  globalSearch.value = historyQuery;
+  renderHistoryProjection();
+}
+
+function handleHistoryKeydown(event) {
+  const current = event.target.closest?.('[data-history-action="select"]');
+  if (!current) return;
+
+  const rows = [...historyList.querySelectorAll('[data-history-action="select"]:not(:disabled)')];
+  const currentIndex = rows.indexOf(current);
+  if (currentIndex < 0) return;
+
+  let nextIndex = null;
+  if (event.key === "ArrowDown") nextIndex = Math.min(rows.length - 1, currentIndex + 1);
+  else if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = rows.length - 1;
+
+  if (nextIndex === null) return;
+  event.preventDefault();
+  rows[nextIndex]?.focus();
 }
 
 async function handleHistoryAction(event) {
   const actionButton = event.target.closest?.("[data-history-action]");
   if (!actionButton || actionButton.disabled) return;
 
-  const entry = allHistory[Number(actionButton.dataset.historyIndex)];
-  const text = typeof entry?.text === "string" ? entry.text : "";
-  if (entry?.status !== "complete" || text === "") return;
+  const entry = allHistory.find((item) => item.id === actionButton.dataset.historyId);
+  if (!entry) return;
 
   if (actionButton.dataset.historyAction === "select") {
-    replaceEditorBaseline(text);
-    activateTab(dictationTab);
+    selectedHistoryId = entry.id;
+    renderSelectedHistory();
+    renderHistoryProjection();
+    document.body.dataset.workspacePane = "editor";
+  }
+}
+
+function renderSelectedHistory() {
+  const entry = allHistory.find((item) => item.id === selectedHistoryId);
+  const text = typeof entry?.text === "string" ? entry.text : "";
+  replaceEditorBaseline(text);
+  editorCreatedAt.textContent = entry ? formatHistoryTime(entry.createdAt) : "";
+  editorCreatedAt.dateTime = entry?.createdAt || "";
+  editorSaveState.textContent = t("editor.saved");
+}
+
+function formatHistoryGroupLabel(group) {
+  if (group.labelKey) return t(group.labelKey);
+  if (group.key === "unknown") return t("nav.history");
+
+  const date = new Date(`${group.key}T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? group.label || group.key
+    : date.toLocaleDateString(currentLanguage, {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+}
+
+function singleLineText(text) {
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+function formatHistoryTime(createdAt) {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(currentLanguage);
+}
+
+function formatHistoryTimeOnly(createdAt) {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString(currentLanguage, { hour: "2-digit", minute: "2-digit" });
+}
+
+function activatePrimaryView(view, { focus = false } = {}) {
+  if (view === "settings") {
+    openSettingsDrawer();
     return;
   }
+  activePrimaryView = view === "history" ? "history" : "home";
+  document.body.dataset.primaryView = activePrimaryView;
+  syncPrimaryNavigation({ focus });
+  if (activePrimaryView === "home") {
+    selectedHistoryId = resolveHistorySelection(allHistory, "");
+    renderSelectedHistory();
+    renderHistoryProjection();
+    document.body.dataset.workspacePane = "editor";
+  }
+  if (activePrimaryView === "history") {
+    document.body.dataset.workspacePane = "list";
+    historySearch.focus();
+  }
+}
 
-  if (actionButton.dataset.historyAction === "copy") {
-    try {
-      await writeClipboardText(text);
-      setStatus(t("status.copied"));
-    } catch {
-      setStatus(t("status.copyFailed"));
-    }
-    return;
+function syncPrimaryNavigation({ focus = false } = {}) {
+  for (const button of [navHome, navHistory]) {
+    const selected = button.dataset.primaryView === activePrimaryView;
+    if (selected) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+    button.tabIndex = selected ? 0 : -1;
+  }
+  navSettings.removeAttribute("aria-current");
+  navSettings.tabIndex = 0;
+  if (focus) {
+    (activePrimaryView === "history" ? navHistory : navHome).focus();
+  }
+}
+
+function handlePrimaryNavigationKeydown(event) {
+  const currentIndex = primaryNavigationButtons.indexOf(event.currentTarget);
+  if (currentIndex < 0) return;
+
+  let nextIndex = null;
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    nextIndex = (currentIndex + 1) % primaryNavigationButtons.length;
+  } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    nextIndex = (currentIndex - 1 + primaryNavigationButtons.length) % primaryNavigationButtons.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = primaryNavigationButtons.length - 1;
   }
 
-  if (actionButton.dataset.historyAction === "insert") {
-    await insertText(text);
+  if (nextIndex === null) return;
+  event.preventDefault();
+  const nextButton = primaryNavigationButtons[nextIndex];
+  activatePrimaryView(nextButton.dataset.primaryView, { focus: true });
+}
+
+function showHistoryListPane() {
+  document.body.dataset.workspacePane = "list";
+  historySearch.focus();
+}
+
+function syncResponsiveWorkspace() {
+  if (window.innerWidth >= 900) return;
+  if (activePrimaryView === "history" && !selectedHistoryId) {
+    document.body.dataset.workspacePane = "list";
   }
 }
 
@@ -1410,49 +1495,6 @@ function captureFormFieldValues(keys = Array.from(form.elements, (field) => fiel
 
 function readFormFieldValue(field) {
   return field.type === "checkbox" ? Boolean(field.checked) : field.value;
-}
-
-function historyEntryId(entry, index) {
-  return allHistoryIds[index] || resolveHistoryEntryIds([entry])[0] || "";
-}
-
-function findHistoryEntryIndex(id) {
-  return allHistoryIds.indexOf(id);
-}
-
-function singleLineText(text) {
-  return String(text).replace(/\s+/g, " ").trim();
-}
-
-function formatHistoryTime(createdAt) {
-  const date = new Date(createdAt);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(currentLanguage);
-}
-
-function activateTab(activeTab, { focus = false } = {}) {
-  for (const tab of mainTabs) {
-    const selected = tab === activeTab;
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-  }
-
-  dictationPanel.hidden = activeTab !== dictationTab;
-  historyPanel.hidden = activeTab !== historyTab;
-  if (focus) activeTab.focus();
-}
-
-function handleTabKeydown(event) {
-  const currentIndex = mainTabs.indexOf(event.currentTarget);
-  let nextIndex = currentIndex;
-
-  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % mainTabs.length;
-  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + mainTabs.length) % mainTabs.length;
-  else if (event.key === "Home") nextIndex = 0;
-  else if (event.key === "End") nextIndex = mainTabs.length - 1;
-  else return;
-
-  event.preventDefault();
-  activateTab(mainTabs[nextIndex], { focus: true });
 }
 
 function applyInterfaceLanguage(language) {
@@ -1473,6 +1515,13 @@ function applyInterfaceLanguage(language) {
   shortcutRecorder.refreshLabels();
 
   renderEditorState();
+  renderHistoryProjection();
+  renderSelectedHistory();
+}
+
+async function changeCommandPolishMode() {
+  form.polishMode.value = commandPolishMode.value;
+  await saveSettingsFromCurrentForm({ updateStatus: false });
 }
 
 function applyTranslations(root = document) {
@@ -1616,7 +1665,7 @@ function setRecordingLifecyclePhase(phase) {
 function setViewPhase(phase) {
   const normalizedPhase = normalizeViewPhase(phase);
   document.body.dataset.phase = normalizedPhase;
-  voiceCommandBar.dataset.phase = normalizedPhase;
+  commandStrip.dataset.phase = normalizedPhase;
   phaseStatus.textContent = t(`phase.${normalizedPhase}`);
 }
 

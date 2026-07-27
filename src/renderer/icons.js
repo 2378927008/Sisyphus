@@ -1,29 +1,45 @@
 import {
   AlertTriangle,
+  ArrowLeft,
+  BookOpen,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Copy,
   CornerDownLeft,
   createIcons,
+  Globe2,
   History,
+  House,
   Keyboard,
+  MessageSquareText,
   Mic,
+  Search,
   Settings,
   Undo2,
+  WandSparkles,
   X
 } from "../../node_modules/lucide/dist/esm/lucide.mjs";
 
 const icons = {
   AlertTriangle,
+  ArrowLeft,
+  BookOpen,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Copy,
   CornerDownLeft,
+  Globe2,
   History,
+  House,
   Keyboard,
+  MessageSquareText,
   Mic,
+  Search,
   Settings,
   Undo2,
+  WandSparkles,
   X
 };
 

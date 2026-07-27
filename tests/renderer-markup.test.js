@@ -36,48 +36,37 @@ test("renderer uses the exact local Lucide runtime dependency", async () => {
   assert.equal(packageJson.build.npmRebuild, false);
 });
 
-test("main window exposes the semantic Windows UI v3 hierarchy", async () => {
+test("main window exposes the semantic Windows UI v4 product shell", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
   for (const id of [
-    "appHeader",
-    "mainTabs",
-    "dictationPanel",
-    "languageControls",
-    "voiceCommandBar",
-    "recordRecovery",
-    "resultWorkspace",
-    "resultCharacterCount",
-    "recentHistorySection",
-    "historyPanel",
-    "headerHealthText",
-    "footerHealth",
-    "footerHealthText",
+    "appSidebar",
+    "navHome",
+    "navHistory",
+    "navSettings",
+    "appTopbar",
+    "globalSearch",
+    "commandStrip",
+    "recordButton",
+    "historyPane",
+    "historySearch",
+    "historyList",
+    "editorPane",
+    "editorBack",
+    "resultText",
     "settingsDrawer"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
 
-  assert.match(html, /id="mainTabs"[^>]*role="tablist"/);
-  assert.match(
-    html,
-    /<button[^>]*id="dictationTab"[^>]*role="tab"[^>]*aria-selected="true"[^>]*aria-controls="dictationPanel"/
-  );
-  assert.match(
-    html,
-    /<button[^>]*id="historyTab"[^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-controls="historyPanel"/
-  );
-  assert.match(
-    html,
-    /id="dictationPanel"[^>]*role="tabpanel"[^>]*aria-labelledby="dictationTab"/
-  );
-  assert.match(
-    html,
-    /id="historyPanel"[^>]*role="tabpanel"[^>]*aria-labelledby="historyTab"[^>]*hidden/
-  );
+  assert.match(html, /<main class="app-layout">[\s\S]*id="appSidebar"[\s\S]*id="appTopbar"[\s\S]*id="commandStrip"[\s\S]*id="workspacePage"/);
+  assert.match(html, /<nav[^>]*aria-label="主要导航"/);
+  assert.match(html, /id="workspacePage"[\s\S]*id="historyPane"[\s\S]*id="editorPane"/);
+  assert.doesNotMatch(html, /id="mainTabs"|id="dictationTab"|id="historyTab"|id="recentHistorySection"|id="footerHealth"/);
+  assert.doesNotMatch(html, /id="(?:windowMinimize|windowMaximize|windowClose)"/);
 });
 
-test("header renders the existing Local Flow icon as decorative brand artwork", async () => {
+test("sidebar renders the existing Local Flow icon as decorative brand artwork", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
   assert.match(
@@ -113,7 +102,6 @@ test("latest result exposes a visible localized character count", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
-  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 
   assert.match(html, /id="resultCharacterCount"[^>]*class="result-character-count"[^>]*>0 个字符<\/span>/);
   assert.match(appSource, /const resultCharacterCount = document\.querySelector\("#resultCharacterCount"\)/);
@@ -123,38 +111,23 @@ test("latest result exposes a visible localized character count", async () => {
   );
   assert.match(
     styles,
-    /\.result-character-count\s*\{[^}]*flex:\s*0 0 auto[^}]*color:\s*var\(--muted\)[^}]*font-size:\s*12px[^}]*white-space:\s*nowrap/s
+    /\.editor-status,\s*\.result-character-count\s*\{[^}]*color:\s*var\(--muted\)[^}]*font-size:\s*12px[^}]*white-space:\s*nowrap/s
   );
-  assert.match(smokeSource, /visibleCharacterCount:\s*document\.querySelector\('#resultCharacterCount'\)/);
-  assert.match(smokeSource, /state\.visibleCharacterCount === "0 个字符"/);
-  assert.match(smokeSource, /state\.visibleCharacterCount === "8 characters"/);
 });
 
-test("main window separates recent history from the full history list", async () => {
-  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
-
-  assert.match(html, /id="recentHistorySection"[\s\S]*id="recentHistoryList"/);
-  assert.match(html, /id="historyPanel"[\s\S]*id="fullHistoryList"[\s\S]*id="historyList"/);
-  assert.match(html, /id="footerHealth"/);
-});
-
-test("history refresh and view-all commands keep separate semantics", async () => {
+test("history workspace uses one searchable cached list beside the selected editor", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
-  const recentHistory = getElementMarkup(html, "section", "recentHistorySection");
-  const fullHistory = getElementMarkup(html, "section", "historyPanel");
-  const viewAllButton = getElementMarkup(recentHistory, "button", "viewAllHistory");
-  const refreshButton = getElementMarkup(fullHistory, "button", "refreshHistory");
 
-  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
-  assert.match(
-    appSource,
-    /viewAllHistory\.querySelector\("\.button-label"\)\.dataset\.i18n\s*=\s*"action\.viewAll"/
-  );
-  assert.match(refreshButton, /data-i18n="action\.refresh"/);
-  assert.match(refreshButton, />[\s\S]*刷新[\s\S]*<\/button>/);
-  assert.doesNotMatch(recentHistory, /id="refreshHistory"/);
-  assert.doesNotMatch(fullHistory, /id="viewAllHistory"/);
+  assert.match(html, /id="historyPane"[\s\S]*id="historySearch"[\s\S]*id="historyList"/);
+  assert.match(html, /id="editorPane"[\s\S]*id="editorBack"[\s\S]*id="resultText"/);
+  assert.match(appSource, /normalizeHistoryEntries/);
+  assert.match(appSource, /filterHistory/);
+  assert.match(appSource, /groupHistoryByDate/);
+  assert.match(appSource, /resolveHistorySelection/);
+  assert.match(appSource, /historySearch\.addEventListener\("input"/);
+  assert.match(appSource, /globalSearch\.addEventListener\("input"/);
+  assert.doesNotMatch(appSource, /(?:historySearch|globalSearch)\.addEventListener\("input",[\s\S]{0,240}listHistory\(/);
 });
 
 test("settings drawer groups existing controls into four stable sections", async () => {
@@ -167,12 +140,11 @@ test("settings drawer groups existing controls into four stable sections", async
     "settingsAdvanced"
   ]) {
     assert.match(html, new RegExp(`<section[^>]*id="${section}"`), section);
-    assert.match(html, new RegExp(`id="${section}"[\\s\\S]*?<button[^>]*type="button"`), `${section} button`);
   }
 
-  const dictationPanel = html.match(/id="dictationPanel"[\s\S]*?<\/section>/)?.[0] ?? "";
+  const mainMarkup = getElementMarkup(html, "section", "workspacePage");
   const settingsDrawer = html.slice(html.indexOf('id="settingsDrawer"'));
-  assert.doesNotMatch(dictationPanel, /id="setupChecklist"/);
+  assert.doesNotMatch(mainMarkup, /id="setupChecklist"/);
   assert.match(settingsDrawer, /id="setupChecklist"/);
   assert.match(settingsDrawer, /id="providerStatusText"/);
   assert.match(settingsDrawer, /id="installWhisper"/);
@@ -196,7 +168,7 @@ test("advanced setup controls stay isolated and history mutations remain narrowl
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
   const advanced = getElementMarkup(html, "section", "settingsAdvanced");
-  const dictation = getElementMarkup(html, "section", "dictationPanel");
+  const mainMarkup = html.slice(html.indexOf("<main"), html.indexOf("</main>") + 7);
 
   for (const field of [
     "whisperCliPath",
@@ -205,7 +177,7 @@ test("advanced setup controls stay isolated and history mutations remain narrowl
     "embeddedLlmModelPath"
   ]) {
     assert.match(advanced, new RegExp(`name="${field}"`), `${field} should remain in Advanced`);
-    assert.doesNotMatch(dictation, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
+    assert.doesNotMatch(mainMarkup, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
   }
 
   for (const [name, source] of [
@@ -227,16 +199,15 @@ test("advanced setup controls stay isolated and history mutations remain narrowl
   assert.match(smokeSource, /history:reprocess/);
 });
 
-test("main window fallback uses the short safe local setup status", async () => {
+test("main window fallback uses one short safe local setup status", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const mainEnd = html.indexOf("</main>");
   const mainMarkup = html.slice(html.indexOf("<main"), mainEnd + "</main>".length);
-  const header = getElementMarkup(html, "header", "appHeader");
-  const footer = getElementMarkup(html, "footer", "footerHealth");
+  const header = getElementMarkup(html, "header", "appTopbar");
 
   assert.match(header, /本地 Whisper 待配置/);
-  assert.match(footer, /本地 Whisper 待配置/);
   assert.doesNotMatch(mainMarkup, /已就绪/);
+  assert.doesNotMatch(mainMarkup, /C:\\|https?:\/\/|\bspawn\b|ENOENT|stderr/i);
 });
 
 test("renderer loads only local Lucide placeholders and no hand-drawn icons", async () => {
@@ -250,10 +221,16 @@ test("renderer loads only local Lucide placeholders and no hand-drawn icons", as
     "Mic",
     "Settings",
     "History",
+    "House",
+    "Search",
+    "BookOpen",
+    "MessageSquareText",
+    "ArrowLeft",
+    "Globe2",
     "Copy",
     "Undo2",
     "CornerDownLeft",
-    "ChevronRight",
+    "ChevronDown",
     "Keyboard",
     "CheckCircle2",
     "AlertTriangle",
@@ -280,7 +257,7 @@ test("renderer loads only local Lucide placeholders and no hand-drawn icons", as
 test("pure icon buttons have static and translatable accessible Chinese names", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
-  for (const id of ["openSettings", "closeSettings"]) {
+  for (const id of ["closeSettings"]) {
     const button = html.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`))?.[0] ?? "";
     assert.match(button, /title="[\u4e00-\u9fff]+"/, `${id} title`);
     assert.match(button, /aria-label="[\u4e00-\u9fff]+"/, `${id} aria-label`);
@@ -309,10 +286,10 @@ test("localized icon controls preserve icons by translating only child labels", 
     /<span class="button-label" data-i18n="action\.copy">复制<\/span>/
   );
 
-  const viewAllButton = getElementMarkup(html, "button", "viewAllHistory");
-  assert.match(viewAllButton, /data-lucide="ChevronRight"/);
-  assert.match(viewAllButton, /<span class="button-label">查看全部<\/span>/);
-  assert.doesNotMatch(viewAllButton.match(/^<button\b[^>]*>/)?.[0] ?? "", /\sdata-i18n=/);
+  const recordButton = getElementMarkup(html, "button", "recordButton");
+  assert.match(recordButton, /data-lucide="Mic"/);
+  assert.match(recordButton, /<span[^>]*id="recordLabel"[^>]*data-i18n="record\.start"/);
+  assert.doesNotMatch(recordButton.match(/^<button\b[^>]*>/)?.[0] ?? "", /\sdata-i18n=/);
 });
 
 test("interface translation updates text and accessible attributes before refreshing icons", async () => {
@@ -334,10 +311,9 @@ test("localization targets cover container names and the dynamic shortcut hint",
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
 
   for (const [target, key] of [
-    ["mainTabsRegion", "aria.mainTabs"],
-    ["voiceCommandBar", "aria.voiceCommandBar"],
+    ["primaryNavigation", "aria.mainTabs"],
+    ["commandStrip", "aria.voiceCommandBar"],
     ["resultActions", "aria.resultActions"],
-    ["footerHealth", "aria.localServices"],
     ["settingsSectionNav", "aria.settingsSections"]
   ]) {
     assert.match(
@@ -353,12 +329,14 @@ test("localization targets cover container names and the dynamic shortcut hint",
   assert.match(appSource, /applyTranslations\(\);[\s\S]*?renderShortcutHint\(\);[\s\S]*?renderIcons\(\);/);
 });
 
-test("localized Windows UI v3 structure preserves icon controls and dynamic content", async () => {
+test("localized Windows UI v4 structure preserves icon controls and dynamic content", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
 
   for (const [control, key] of [
-    ["dictationTab", "tab.dictation"],
-    ["historyTab", "tab.history"],
+    ["navHome", "nav.home"],
+    ["navHistory", "nav.history"],
+    ["navSettings", "nav.settings"],
+    ["editorBack", "history.back"],
     ["restoreResult", "action.restore"],
     ["copyResult", "action.copy"],
     ["insertResult", "action.insert"]
@@ -374,14 +352,12 @@ test("localized Windows UI v3 structure preserves icon controls and dynamic cont
     "settings.general",
     "settings.shortcuts",
     "settings.modelsPrivacy",
-    "settings.advanced",
-    "hint.autoKeepsLanguage"
+    "settings.advanced"
   ]) {
     assert.match(appSource, new RegExp(`dataset\\.i18n = \\"${key.replace(".", "\\.")}\\"`), key);
   }
 
   assert.match(appSource, /const WAVEFORM_BAR_COUNT = 24/);
-  assert.match(appSource, /attachTranslationToIconLabel\(viewAllHistory, "action\.viewAll"\)/);
   assert.match(appSource, /button\.dataset\.i18nTitle = key/);
   assert.match(appSource, /button\.dataset\.i18nAriaLabel = key/);
   assert.match(appSource, /recordButton\.removeAttribute\("aria-live"\)/);
@@ -389,7 +365,6 @@ test("localized Windows UI v3 structure preserves icon controls and dynamic cont
   assert.match(appSource, /phaseStatus\.setAttribute\("aria-live", "polite"\)/);
   assert.match(appSource, /className = "waveform"/);
   assert.match(appSource, /Array\.from\(\{ length: WAVEFORM_BAR_COUNT \}/);
-  assert.match(appSource, /t\("label\.characterCount", \{ count \}\)/);
   assert.match(appSource, /phaseStatus\.textContent = t\(`phase\.\$\{normalizedPhase\}`\)/);
   assert.match(appSource, /const headerHealthText = document\.querySelector\("#headerHealthText"\)/);
   assert.match(
@@ -397,99 +372,61 @@ test("localized Windows UI v3 structure preserves icon controls and dynamic cont
     /const healthMessage = readiness\.ready\s*\? t\("status\.localReady"\)\s*:\s*t\("status\.localNeedsSetup"\)/s
   );
   assert.match(appSource, /headerHealthText\.textContent = healthMessage/);
-  assert.match(appSource, /statusNode\.textContent = healthMessage/);
+  assert.doesNotMatch(appSource, /footerHealth/);
 });
 
-test("Windows UI v3 styles enforce the approved visual and responsive system", async () => {
+test("Windows UI v4 styles enforce the approved visual and responsive system", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
 
   for (const token of [
-    ["--background", "#F6F8F7"],
-    ["--surface", "#FFFFFF"],
-    ["--text", "#17211E"],
-    ["--muted", "#66716D"],
-    ["--line", "#DCE3E0"],
-    ["--accent", "#078A68"],
-    ["--recording", "#D64B3C"],
-    ["--warning", "#A96F16"],
-    ["--error", "#B83A3A"]
+    ["--page", "#f5f7f6"],
+    ["--surface", "#ffffff"],
+    ["--sidebar", "#f0f3f2"],
+    ["--text", "#17211e"],
+    ["--muted", "#66716d"],
+    ["--line", "#dce3e0"],
+    ["--accent", "#078a68"],
+    ["--recording", "#e2554f"],
+    ["--warning", "#a96f16"],
+    ["--error", "#b83a3a"],
+    ["--focus", "#1769e0"]
   ]) {
     assert.match(styles, new RegExp(`${token[0]}:\\s*${token[1]}`, "i"), token[0]);
   }
 
   assert.match(styles, /font-family:\s*"Segoe UI",\s*"Microsoft YaHei",\s*system-ui/);
   assert.match(styles, /letter-spacing:\s*0/);
-  assert.match(styles, /body\s*\{[^}]*overflow-x:\s*hidden/s);
-  assert.match(styles, /\.app-shell\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /body\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.app-layout\s*\{[^}]*overflow:\s*hidden/s);
   assert.match(styles, /#recordButton\s*\{[^}]*border-radius:\s*6px/s);
-  assert.match(styles, /\.status-line\s*\{[^}]*min-height:\s*\d+px/s);
   assert.match(styles, /\.drawer-panel\s*\{[^}]*width:\s*min\(560px,\s*100vw\)/s);
-  assert.match(styles, /@media\s*\(max-width:\s*919px\)/);
-  assert.match(styles, /@media\s*\(max-height:\s*649px\)/);
+  assert.match(styles, /@media\s*\(min-width:\s*1000px\)[\s\S]*grid-template-columns:\s*44% 56%/);
+  assert.match(styles, /@media\s*\(min-width:\s*900px\)\s*and\s*\(max-width:\s*999px\)[\s\S]*64px/);
+  assert.match(styles, /@media\s*\(max-width:\s*899px\)[\s\S]*body\[data-workspace-pane="list"\][\s\S]*body\[data-workspace-pane="editor"\]/);
   assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(styles, /:focus-visible\s*\{[^}]*outline:\s*2px/s);
-  assert.match(styles, /@media\s*\(max-width:\s*919px\)[\s\S]*?\.button-label\s*\{[^}]*display:\s*none/s);
-  assert.match(styles, /@media\s*\(max-height:\s*649px\)[\s\S]*?#recentHistoryList \.history-item:nth-child\(3\)\s*\{[^}]*display:\s*none/s);
-  assert.doesNotMatch(styles, /^\s*\.history-item:nth-child\(3\)\s*\{/m);
   assert.doesNotMatch(styles, /(?:linear|radial)-gradient/i);
+  assert.doesNotMatch(styles, /border-radius:\s*(?:9|[1-9]\d+)px/);
   assert.doesNotMatch(styles, /record-orb/);
-  assert.doesNotMatch(styles, /border-radius:\s*(?:50%|999\w*)[^;]*;[^}]*#recordButton/s);
 });
 
-test("minimum window keeps a compact waveform and two recent history rows", async () => {
+test("minimum window switches between list and editor without hiding the back action", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
-  const narrowStart = styles.indexOf("@media (max-width: 760px)");
-  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
+  const narrowStart = styles.indexOf("@media (max-width: 899px)");
   const reducedMotionStart = styles.indexOf("@media (prefers-reduced-motion: reduce)");
-  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
-  const lowHeightStyles = styles.slice(lowHeightStart, reducedMotionStart);
+  const narrowStyles = styles.slice(narrowStart, reducedMotionStart);
 
-  assert.ok(narrowStart >= 0 && lowHeightStart > narrowStart);
-  assert.match(
-    narrowStyles,
-    /#voiceCommandBar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) minmax\(72px,\s*96px\) auto/s
-  );
-  assert.match(
-    narrowStyles,
-    /\.waveform\s*\{[^}]*min-width:\s*72px[^}]*max-width:\s*96px/s
-  );
-  assert.doesNotMatch(narrowStyles, /\.waveform\s*\{[^}]*display:\s*none/s);
-  assert.match(
-    lowHeightStyles,
-    /#recentHistorySection\s*\{[^}]*max-height:\s*148px[^}]*overflow-y:\s*auto[^}]*padding:\s*6px 10px/s
-  );
-  assert.match(
-    lowHeightStyles,
-    /#recentHistorySection \.section-title\s*\{[^}]*margin-bottom:\s*2px/s
-  );
-  assert.match(
-    lowHeightStyles,
-    /#viewAllHistory\s*\{[^}]*min-height:\s*28px[^}]*padding:\s*3px 6px/s
-  );
-  assert.match(
-    lowHeightStyles,
-    /#recentHistoryList \.history-select\s*\{[^}]*padding:\s*4px 6px/s
-  );
+  assert.ok(narrowStart >= 0 && reducedMotionStart > narrowStart);
+  assert.match(narrowStyles, /body\[data-workspace-pane="list"\] #editorPane\s*\{[^}]*display:\s*none/s);
+  assert.match(narrowStyles, /body\[data-workspace-pane="editor"\] #historyPane\s*\{[^}]*display:\s*none/s);
+  assert.match(narrowStyles, /#editorBack\s*\{[^}]*display:\s*inline-flex/s);
 });
 
-test("full history aligns selection and actions on one desktop row", async () => {
+test("history rows expose deterministic selected and keyboard-focus states", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
-  const narrowStart = styles.indexOf("@media (max-width: 760px)");
-  const lowHeightStart = styles.indexOf("@media (max-height: 649px)");
-  const narrowStyles = styles.slice(narrowStart, lowHeightStart);
 
-  assert.match(
-    styles,
-    /#historyList \.history-item\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto[^}]*align-items:\s*center/s
-  );
-  assert.match(
-    styles,
-    /#historyList \.history-item > \.button-row\s*\{[^}]*flex-wrap:\s*nowrap[^}]*padding:\s*0 10px 0 0/s
-  );
-  assert.match(
-    narrowStyles,
-    /#historyList \.history-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s
-  );
+  assert.match(styles, /\.history-select\[aria-selected="true"\]\s*\{/);
+  assert.match(styles, /\.history-select:hover:not\(:disabled\),\s*\.history-select:focus-visible\s*\{/);
 });
 
 test("explanatory copy stays at body size while only metadata and raw output are smaller", async () => {
@@ -506,7 +443,7 @@ test("explanatory copy stays at body size while only metadata and raw output are
   for (const block of smallTextBlocks) {
     assert.match(
       block[1],
-      /history-select time|data-history-character-count|result-character-count|setup-output|install-command|hud-timer/,
+      /history-select time|history-group-heading|data-history-character-count|result-character-count|editor-status|setup-output|install-command|hud-timer/,
       `small text is limited to metadata or raw output: ${block[1].trim()}`
     );
   }

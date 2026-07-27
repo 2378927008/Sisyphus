@@ -4,7 +4,19 @@ import { getUiText, uiTranslations } from "../src/renderer/i18n.js";
 
 const mojibakePattern = /寮€|璇|鐨|妯|鎸|鍚|杈|闊|绠€|Fran莽ais|D茅|Arr锚|袧邪|褋|携蟹|贸|谩|Espa帽ol|銉|鞚|氇|瑾|閷|鞁/;
 
-const windowsUiV3Keys = [
+const windowsUiV4Keys = [
+  "nav.home",
+  "nav.history",
+  "nav.dictionary",
+  "nav.snippets",
+  "nav.settings",
+  "history.search",
+  "history.group.today",
+  "history.group.yesterday",
+  "history.back",
+  "editor.saved",
+  "editor.saving",
+  "editor.saveFailed",
   "tab.dictation",
   "tab.history",
   "aria.mainTabs",
@@ -50,7 +62,7 @@ const safeStatusKeys = [
   "setup.cancelFailed"
 ];
 
-test("Windows UI v3 keys are explicit in every supported dictionary", () => {
+test("Windows UI v4 keys are explicit in every supported dictionary", () => {
   assert.deepEqual(Object.keys(uiTranslations), [
     "en",
     "zh-Hans",
@@ -63,7 +75,7 @@ test("Windows UI v3 keys are explicit in every supported dictionary", () => {
   ]);
 
   for (const [language, dictionary] of Object.entries(uiTranslations)) {
-    for (const key of windowsUiV3Keys) {
+    for (const key of windowsUiV4Keys) {
       assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
       assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
     }
@@ -85,8 +97,20 @@ test("safe failure statuses are explicit in every language and ignore diagnostic
   }
 });
 
-test("Windows UI v3 uses the approved Simplified Chinese core copy", () => {
+test("Windows UI v4 uses the approved Simplified Chinese shell copy", () => {
   const expected = {
+    "nav.home": "首页",
+    "nav.history": "历史记录",
+    "nav.dictionary": "个人词典",
+    "nav.snippets": "快捷短语",
+    "nav.settings": "设置",
+    "history.search": "搜索历史记录",
+    "history.group.today": "今天",
+    "history.group.yesterday": "昨天",
+    "history.back": "返回历史",
+    "editor.saved": "已保存",
+    "editor.saving": "正在保存",
+    "editor.saveFailed": "保存失败",
     "tab.dictation": "语音输入",
     "tab.history": "历史",
     "aria.mainTabs": "主视图",
