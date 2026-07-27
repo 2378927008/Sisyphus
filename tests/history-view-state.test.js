@@ -69,7 +69,7 @@ test("keeps a valid selection and otherwise chooses the newest usable result", (
 
   assert.equal(resolveHistorySelection(selectionEntries, "old"), "old");
   assert.equal(resolveHistorySelection(selectionEntries, "missing"), "new");
-  assert.equal(resolveHistorySelection([{ id: "failed", status: "failed" }], "missing"), "failed");
+  assert.equal(resolveHistorySelection([{ id: "failed", status: "failed" }], "missing"), "");
   assert.equal(resolveHistorySelection([], "missing"), "");
 });
 
@@ -113,6 +113,49 @@ test("skips a newer partial entry without displayable text", () => {
   ];
 
   assert.equal(resolveHistorySelection(selectionEntries, "missing"), "partial-visible");
+});
+
+test("does not retain a selected entry whose display text becomes blank", () => {
+  const selectionEntries = [
+    {
+      id: "selected-now-blank",
+      text: " \n\t ",
+      transcript: "The transcript remains searchable but is not display output.",
+      createdAt: "2026-07-27T10:00:00+08:00",
+      status: "complete"
+    },
+    {
+      id: "next-visible",
+      text: "Next visible output",
+      transcript: "Next visible output",
+      createdAt: "2026-07-27T09:00:00+08:00",
+      status: "partial"
+    }
+  ];
+
+  assert.equal(resolveHistorySelection(selectionEntries, "selected-now-blank"), "next-visible");
+});
+
+test("does not select whitespace-only complete or partial entries", () => {
+  const selectionEntries = [
+    {
+      id: "complete-whitespace",
+      text: "   ",
+      transcript: "Complete transcript must not become display output.",
+      createdAt: "2026-07-27T10:00:00+08:00",
+      status: "complete"
+    },
+    {
+      id: "partial-whitespace",
+      text: "\n\t",
+      transcript: "Partial transcript must not become display output.",
+      createdAt: "2026-07-27T09:00:00+08:00",
+      status: "partial"
+    }
+  ];
+
+  assert.equal(resolveHistorySelection(selectionEntries, "missing"), "");
+  assert.equal(resolveHistorySelection(selectionEntries, "partial-whitespace"), "");
 });
 
 test("sorts unordered groups and entries deterministically without mutating input", () => {

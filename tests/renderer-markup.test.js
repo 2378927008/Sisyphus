@@ -118,6 +118,10 @@ test("latest result exposes a visible localized character count", async () => {
 test("history workspace uses one searchable cached list beside the selected editor", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const historySource = await readFile(
+    new URL("../src/renderer/history-view-state.js", import.meta.url),
+    "utf8"
+  );
 
   assert.match(html, /id="historyPane"[\s\S]*id="historySearch"[\s\S]*id="historyList"/);
   assert.match(html, /id="editorPane"[\s\S]*id="editorBack"[\s\S]*id="resultText"/);
@@ -125,6 +129,8 @@ test("history workspace uses one searchable cached list beside the selected edit
   assert.match(appSource, /filterHistory/);
   assert.match(appSource, /groupHistoryByDate/);
   assert.match(appSource, /resolveHistorySelection/);
+  assert.match(historySource, /export function hasDisplayableHistoryText\(/);
+  assert.match(appSource, /hasDisplayableHistoryText\(item\)/);
   assert.match(appSource, /historySearch\.addEventListener\("input"/);
   assert.match(appSource, /globalSearch\.addEventListener\("input"/);
   assert.doesNotMatch(appSource, /(?:historySearch|globalSearch)\.addEventListener\("input",[\s\S]{0,240}listHistory\(/);

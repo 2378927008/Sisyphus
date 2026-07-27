@@ -2,6 +2,13 @@ function asText(value) {
   return typeof value === "string" ? value : "";
 }
 
+export function hasDisplayableHistoryText(entry) {
+  return (
+    (entry?.status === "complete" || entry?.status === "partial") &&
+    asText(entry?.text).trim() !== ""
+  );
+}
+
 function comparisonText(value) {
   return asText(value).normalize("NFKC").toLowerCase();
 }
@@ -144,13 +151,15 @@ export function groupHistoryByDate(entries, { now = new Date() } = {}) {
 export function resolveHistorySelection(entries, selectedId) {
   const normalizedEntries = normalizeHistoryEntries(entries);
   const selected = asText(selectedId);
-  if (selected && normalizedEntries.some((entry) => entry.id === selected)) return selected;
+  if (
+    selected &&
+    normalizedEntries.some((entry) => entry.id === selected && hasDisplayableHistoryText(entry))
+  ) {
+    return selected;
+  }
 
   const usable = normalizedEntries
-    .filter((entry) => (
-      (entry.status === "complete" || entry.status === "partial") &&
-      entry.text.trim() !== ""
-    ))
+    .filter(hasDisplayableHistoryText)
     .sort(compareHistoryEntries);
-  return usable[0]?.id || normalizedEntries[0]?.id || "";
+  return usable[0]?.id || "";
 }

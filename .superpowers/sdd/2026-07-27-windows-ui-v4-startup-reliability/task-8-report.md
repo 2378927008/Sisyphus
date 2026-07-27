@@ -103,6 +103,46 @@ Tests were changed before implementation.
 - `git diff --check`
   - Result: passed.
 
+## Fix Round 2
+
+### Changed Files
+
+- `src/renderer/history-view-state.js`
+- `src/renderer/app.js`
+- `tests/history-view-state.test.js`
+- `tests/renderer-markup.test.js`
+- `scripts/electron-v4-shell-smoke.mjs`
+- `.superpowers/sdd/2026-07-27-windows-ui-v4-startup-reliability/task-8-report.md`
+
+### Finding Closed
+
+- Added one shared `hasDisplayableHistoryText` predicate for complete/partial status plus non-empty trimmed `text`.
+- `resolveHistorySelection` now applies the predicate both when retaining `selectedId` and when choosing a fallback. Failed and whitespace-only records cannot become selected, and `transcript` remains searchable metadata rather than display output.
+- History row enabled/disabled state uses the same predicate. Disabled whitespace-only rows cannot be clicked and are excluded from arrow-key navigation.
+- The V4 shell smoke changes a selected fixture to whitespace-only text, refreshes through the real interface-language change path, and verifies selection and editor content fall back to the next usable result.
+
+### RED Evidence
+
+- `node --test tests/history-view-state.test.js tests/renderer-markup.test.js`
+  - Result before implementation: 41 tests, 37 passed, 4 failed.
+  - Failures covered failed-only fallback, retained selection becoming blank, complete/partial whitespace-only selection, and the missing shared renderer predicate.
+- V4 shell smoke before implementation
+  - Result: failed because the whitespace-only partial row remained enabled.
+
+### GREEN Evidence
+
+- `node --test tests/history-view-state.test.js tests/renderer-markup.test.js`
+  - Result: 41 passed, 0 failed.
+- `node --test tests/renderer-markup.test.js tests/i18n.test.js tests/history-view-state.test.js tests/electron-runtime.test.js tests/focus-trap.test.js`
+  - Result: 125 passed, 0 failed.
+- `npm.cmd test`
+  - Result: 528 tests, 525 passed, 0 failed, 3 skipped.
+- `npm.cmd run check:app`
+  - Result: retained regression smoke `"ok": true`; V4 shell smoke `"ok": true`.
+  - V4 interactions covered whitespace-only disabled state, blocked click, arrow-key skip, selected-row refresh fallback, narrow-screen navigation, and focus restoration.
+- `git diff --check`
+  - Result: passed.
+
 ## Concerns
 
 No functional blocker remains. The successful Electron smoke run emitted host-profile `OS_crypt` decryption and disk/GPU cache access warnings, but these did not enter the product UI and did not affect the smoke result. Visual fidelity was reviewed against the approved reference and enforced by focused structure/style assertions; no separate screenshot artifact was added because it is outside Task 8 scope.

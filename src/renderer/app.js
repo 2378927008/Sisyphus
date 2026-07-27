@@ -23,6 +23,7 @@ import {
 import {
   filterHistory,
   groupHistoryByDate,
+  hasDisplayableHistoryText,
   normalizeHistoryEntries,
   resolveHistorySelection
 } from "./history-view-state.js";
@@ -1309,7 +1310,7 @@ function renderHistoryProjection() {
 
 function renderHistoryItem(item) {
   const text = typeof item?.text === "string" ? item.text : "";
-  const usable = (item?.status === "complete" || item?.status === "partial") && text !== "";
+  const usable = hasDisplayableHistoryText(item);
   const preview = usable
     ? singleLineText(text)
     : t(item?.status === "failed" ? "result.outputFailed" : "empty.result");

@@ -70,6 +70,13 @@ const historyFixtures = [
     text: "关于 Q3 版本迭代计划的会议纪要整理如下，包含目标、范围、资源与时间安排。"
   },
   {
+    id: "history-today-whitespace",
+    createdAt: localFixtureDate(0, 12),
+    transcript: "Transcript-only content must not be displayed or selected.",
+    status: "partial",
+    text: " \n\t "
+  },
+  {
     id: "history-today-older",
     createdAt: localFixtureDate(0, 10),
     transcript: "Design sync",
@@ -261,7 +268,11 @@ app.whenReady().then(async () => {
         state.historyGroupCount === 3 &&
         state.historyRowCount === historyFixtures.length &&
         state.selectedHistoryId === "history-today-newest" &&
+        state.whitespaceHistoryDisabled &&
+        !state.whitespaceHistorySelected &&
+        state.whitespaceHistoryTabIndex === -1 &&
         state.resultText.includes("Q3 版本迭代计划") &&
+        !state.visibleMainText.includes("Transcript-only content") &&
         state.settingsDrawerInert
       ),
       7000
@@ -358,6 +369,18 @@ app.whenReady().then(async () => {
       throw new Error("History search requested history instead of reusing the cached projection.");
     }
 
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-today-whitespace\"]').click()"
+    );
+    const whitespaceClickState = await readRendererState(window);
+    if (
+      whitespaceClickState.selectedHistoryId !== "history-today-newest" ||
+      whitespaceClickState.selectedHistoryCount !== 1 ||
+      !whitespaceClickState.resultText.includes("Q3 版本迭代计划")
+    ) {
+      throw new Error("A whitespace-only history row remained clickable.");
+    }
+
     await window.webContents.executeJavaScript(`
       (() => {
         const rows = [...document.querySelectorAll('#historyList [data-history-action="select"]')];
@@ -377,6 +400,43 @@ app.whenReady().then(async () => {
         state.selectedHistoryCount === 1 &&
         state.selectedHistoryTabIndex === 0 &&
         state.resultText.includes("与设计团队同步登录流程")
+      ),
+      5000
+    );
+
+    const selectedFixture = historyFixtures.find((entry) => entry.id === "history-today-older");
+    const selectedFixtureText = selectedFixture.text;
+    selectedFixture.text = " \n\t ";
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const language = document.querySelector('#interfaceLanguage');
+        language.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-today-newest" &&
+        state.selectedHistoryCount === 1 &&
+        state.olderHistoryDisabled &&
+        state.resultText.includes("Q3 版本迭代计划") &&
+        !state.resultText.includes("Design sync")
+      ),
+      5000
+    );
+
+    selectedFixture.text = selectedFixtureText;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const language = document.querySelector('#interfaceLanguage');
+        language.dispatchEvent(new Event('change', { bubbles: true }));
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-today-newest" &&
+        !state.olderHistoryDisabled
       ),
       5000
     );
@@ -617,6 +677,14 @@ function readRendererState(window) {
         selectedHistoryCount: document.querySelectorAll('#historyList [aria-selected="true"]').length,
         selectedHistoryId: document.querySelector('#historyList [aria-selected="true"]')?.dataset.historyId || '',
         selectedHistoryTabIndex: document.querySelector('#historyList [aria-selected="true"]')?.tabIndex ?? -1,
+        whitespaceHistoryDisabled:
+          document.querySelector('[data-history-id="history-today-whitespace"]')?.disabled ?? false,
+        whitespaceHistorySelected:
+          document.querySelector('[data-history-id="history-today-whitespace"]')?.getAttribute('aria-selected') === 'true',
+        whitespaceHistoryTabIndex:
+          document.querySelector('[data-history-id="history-today-whitespace"]')?.tabIndex ?? -1,
+        olderHistoryDisabled:
+          document.querySelector('[data-history-id="history-today-older"]')?.disabled ?? false,
         activeHistoryId: document.activeElement?.dataset?.historyId || '',
         resultText: document.querySelector('#resultText')?.textContent || '',
         workspacePane: document.body.dataset.workspacePane || '',
