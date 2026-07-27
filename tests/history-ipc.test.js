@@ -70,6 +70,50 @@ test("history update rejects non-plain payloads without calling history actions"
   assert.deepEqual(calls.update, []);
 });
 
+test("history update rejects missing or invalid fields without calling history actions", async (t) => {
+  const inheritedTextPayload = new Proxy(
+    Object.assign(
+      Object.create({ text: "inherited text" }),
+      { id: "history-1" }
+    ),
+    {
+      getPrototypeOf: () => Object.prototype
+    }
+  );
+  const cases = [
+    ["missing text", { id: "history-1" }],
+    ["missing id", { text: "edited text" }],
+    ["blank id", { id: "   ", text: "edited text" }],
+    ["non-string id", { id: 42, text: "edited text" }],
+    ["non-string text", { id: "history-1", text: 42 }],
+    ["inherited text", inheritedTextPayload]
+  ];
+
+  for (const [name, payload] of cases) {
+    await t.test(name, async () => {
+      const { calls, handlers, authorizedEvent } = createHarness();
+
+      assert.deepEqual(
+        await handlers.get("history:update")(authorizedEvent, payload),
+        { ok: false, reason: "invalid_request" }
+      );
+      assert.deepEqual(calls.update, []);
+    });
+  }
+});
+
+test("history update passes an explicit empty text value to the action", async () => {
+  const { calls, handlers, authorizedEvent } = createHarness();
+
+  const result = await handlers.get("history:update")(
+    authorizedEvent,
+    { id: "history-1", text: "" }
+  );
+
+  assert.deepEqual(result, { ok: false, reason: "history_changed" });
+  assert.deepEqual(calls.update, [{ id: "history-1", text: "" }]);
+});
+
 test("history reprocess rejects invalid ids without calling history actions", async () => {
   const { calls, handlers, authorizedEvent } = createHarness();
   const invalidIds = [undefined, null, "", "   ", 42, [], {}, Symbol("history")];

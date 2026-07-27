@@ -12,7 +12,7 @@ export function wireHistoryIpc({
     if (!isAuthorizedWindowSender(event, getMainWindow())) {
       return unauthorizedResult;
     }
-    if (!isPlainObject(payload)) {
+    if (!isValidHistoryUpdatePayload(payload)) {
       return invalidRequestResult;
     }
     return historyActions.updateText(payload.id, payload.text);
@@ -39,4 +39,15 @@ function isPlainObject(value) {
   } catch {
     return false;
   }
+}
+
+function isValidHistoryUpdatePayload(payload) {
+  return Boolean(
+    isPlainObject(payload) &&
+    Object.hasOwn(payload, "id") &&
+    typeof payload.id === "string" &&
+    payload.id.trim() &&
+    Object.hasOwn(payload, "text") &&
+    typeof payload.text === "string"
+  );
 }
