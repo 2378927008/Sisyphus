@@ -147,7 +147,10 @@ export function resolveHistorySelection(entries, selectedId) {
   if (selected && normalizedEntries.some((entry) => entry.id === selected)) return selected;
 
   const usable = normalizedEntries
-    .filter((entry) => entry.status === "complete" || entry.status === "partial")
+    .filter((entry) => (
+      (entry.status === "complete" || entry.status === "partial") &&
+      entry.text.trim() !== ""
+    ))
     .sort(compareHistoryEntries);
   return usable[0]?.id || normalizedEntries[0]?.id || "";
 }

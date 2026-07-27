@@ -174,12 +174,12 @@ test("package exposes microphone smoke test script", async () => {
   );
 });
 
-test("package exposes full app smoke test script", async () => {
+test("package runs regression and V4 shell app smoke scripts", async () => {
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
   assert.equal(
     pkg.scripts["check:app"],
-    "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-app-smoke.mjs"
+    "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-app-smoke.mjs && electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-v4-shell-smoke.mjs"
   );
 });
 

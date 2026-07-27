@@ -1173,10 +1173,14 @@ async function stopRecording() {
     const entry = await window.localFlow.processWav(wav);
     if (!isCurrentRecordingOperation(operationToken)) return;
 
-    renderDictationResult(entry);
+    activePrimaryView = "home";
+    document.body.dataset.primaryView = activePrimaryView;
+    syncPrimaryNavigation();
     await renderHistory();
     if (!isCurrentRecordingOperation(operationToken)) return;
 
+    renderDictationResult(entry);
+    document.body.dataset.workspacePane = "editor";
     setRecordingLifecyclePhase("idle");
     setViewPhase(entry?.status === "failed" ? "warning" : "done");
   } catch {
@@ -1360,7 +1364,11 @@ function handleHistoryKeydown(event) {
 
   if (nextIndex === null) return;
   event.preventDefault();
-  rows[nextIndex]?.focus();
+  const nextId = rows[nextIndex]?.dataset.historyId;
+  const nextEntry = allHistory.find((item) => item.id === nextId);
+  if (!nextEntry) return;
+
+  selectHistoryEntry(nextEntry, { focusRow: true });
 }
 
 async function handleHistoryAction(event) {
@@ -1371,11 +1379,20 @@ async function handleHistoryAction(event) {
   if (!entry) return;
 
   if (actionButton.dataset.historyAction === "select") {
-    selectedHistoryId = entry.id;
-    renderSelectedHistory();
-    renderHistoryProjection();
-    document.body.dataset.workspacePane = "editor";
+    selectHistoryEntry(entry);
   }
+}
+
+function selectHistoryEntry(entry, { focusRow = false } = {}) {
+  selectedHistoryId = entry.id;
+  renderSelectedHistory();
+  renderHistoryProjection();
+  if (focusRow) {
+    [...historyList.querySelectorAll('[data-history-action="select"]')]
+      .find((row) => row.dataset.historyId === selectedHistoryId)
+      ?.focus();
+  }
+  document.body.dataset.workspacePane = "editor";
 }
 
 function renderSelectedHistory() {

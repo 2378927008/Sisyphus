@@ -73,6 +73,48 @@ test("keeps a valid selection and otherwise chooses the newest usable result", (
   assert.equal(resolveHistorySelection([], "missing"), "");
 });
 
+test("skips a newer complete entry without displayable text", () => {
+  const selectionEntries = [
+    {
+      id: "complete-empty",
+      text: "",
+      transcript: "A transcript is retained for reprocessing but is not displayed as output.",
+      createdAt: "2026-07-27T10:00:00+08:00",
+      status: "complete"
+    },
+    {
+      id: "complete-visible",
+      text: "Visible output",
+      transcript: "Visible output",
+      createdAt: "2026-07-27T09:00:00+08:00",
+      status: "complete"
+    }
+  ];
+
+  assert.equal(resolveHistorySelection(selectionEntries, "missing"), "complete-visible");
+});
+
+test("skips a newer partial entry without displayable text", () => {
+  const selectionEntries = [
+    {
+      id: "partial-empty",
+      text: "   ",
+      transcript: "The raw transcript is not the selected editor output.",
+      createdAt: "2026-07-27T10:00:00+08:00",
+      status: "partial"
+    },
+    {
+      id: "partial-visible",
+      text: "Partial visible output",
+      transcript: "Partial visible output",
+      createdAt: "2026-07-27T09:00:00+08:00",
+      status: "partial"
+    }
+  ];
+
+  assert.equal(resolveHistorySelection(selectionEntries, "missing"), "partial-visible");
+});
+
 test("sorts unordered groups and entries deterministically without mutating input", () => {
   const unordered = [
     { id: "unknown", text: "unknown", transcript: "", createdAt: "not-a-date", status: "failed" },

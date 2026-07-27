@@ -46,7 +46,7 @@ Tests were changed before implementation.
 - `npm.cmd run check:app`
   - Result: passed with `"ok": true`, three cached history groups, one history-list IPC call, narrow editor pane, stable selection, and restored settings focus.
 - `npm.cmd test`
-  - Result: 524 tests, 521 passed, 0 failed, 3 skipped.
+  - Result: 526 tests, 523 passed, 0 failed, 3 skipped.
 - `git diff --check`
   - Result: passed.
 
@@ -54,8 +54,54 @@ Tests were changed before implementation.
 
 - DOM/accessibility: semantic landmarks, unique IDs, localized accessible names, selected-row state, `aria-current`, keyboard row navigation, reachable narrow-screen back action, drawer focus containment, and focus restoration are covered by structure, focus-trap, and Electron smoke tests.
 - Responsive: 1180x800 desktop and 780x600 narrow master-detail behavior are exercised by Electron smoke; CSS assertions cover the 1000px and 900px breakpoints.
-- Localization: all 12 required V4 keys are non-empty in `zh-Hans`, `zh-Hant`, `en`, `es`, `ja`, `ko`, `de`, and `fr`.
+- Localization: all 12 required V4 keys are non-empty in `en`, `zh-Hans`, `ja`, `ko`, `zh-Hant`, `fr`, `ru`, and `es`.
 - Privacy/safety: visible main-window smoke assertions reject unsafe diagnostics; advanced setup output remains inside Settings.
+
+## Fix Round 1
+
+### Changed Files
+
+- `package.json`
+- `scripts/electron-app-smoke.mjs`
+- `scripts/electron-v4-shell-smoke.mjs`
+- `src/renderer/app.js`
+- `src/renderer/history-view-state.js`
+- `tests/electron-runtime.test.js`
+- `tests/history-view-state.test.js`
+- `.superpowers/sdd/2026-07-27-windows-ui-v4-startup-reliability/task-8-report.md`
+
+### Findings Closed
+
+- Restored the `63dc964` Electron regression smoke and kept the V4 shell smoke as a separate process. `npm.cmd run check:app` runs both in sequence.
+- The regression smoke again exercises recording start/stop, successful and failed processing, settings failure and save serialization, Whisper/Qwen setup success/failure/refresh/cancel, optional Qwen with Auto same-language readiness, copy/insert/restore, failed history actions, HUD startup, and safe error messages. IPC calls and completion outcomes are asserted rather than merely registered.
+- History selection now skips complete or partial entries without non-whitespace display text, even when a transcript exists for reprocessing.
+- Arrow navigation now updates the selected ID, `aria-selected`, roving tabindex, editor content, focus, and narrow-screen pane through the same selection path as pointer activation.
+- A completed dictation returns to Home and keeps the current success or failure result visible after the history cache refresh.
+- Corrected the language list from `de` to `ru`.
+
+### RED Evidence
+
+- `node --test tests/history-view-state.test.js`
+  - Result before implementation: 7 passed, 2 failed.
+  - The complete-empty and partial-empty records incorrectly won selection.
+- `npm.cmd run check:app`
+  - Result before keyboard implementation: failed because ArrowDown moved focus while selection, tabindex, and editor content remained on the previous row.
+  - Result after restoring the regression smoke: failed on V3-only selectors until the retained scenarios were adapted to the V4 DOM.
+- Regression smoke completion-matrix assertion
+  - Result before adding interactions: failed with `Qwen setup success was not exercised.`
+
+### GREEN Evidence
+
+- `node --test tests/renderer-markup.test.js tests/i18n.test.js tests/history-view-state.test.js`
+  - Result: 54 passed, 0 failed.
+- `node --test tests/electron-runtime.test.js tests/focus-trap.test.js`
+  - Result: 69 passed, 0 failed.
+- `npm.cmd test`
+  - Result: 526 tests, 523 passed, 0 failed, 3 skipped.
+- `npm.cmd run check:app`
+  - Result: regression smoke `"ok": true`; V4 shell smoke `"ok": true`.
+- `git diff --check`
+  - Result: passed.
 
 ## Concerns
 
