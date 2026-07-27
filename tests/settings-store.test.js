@@ -704,6 +704,28 @@ test("history updates persist processing metadata without changing the transcrip
   }
 });
 
+test("history conditional updates reject stale text and timestamp versions", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-history-cas-"));
+
+  try {
+    const store = createSettingsStore(userDataPath);
+    await store.addHistory({ id: "h1", transcript: "original", text: "initial", status: "complete" });
+    await store.updateHistory("h1", { text: "user edit" });
+
+    const result = await store.updateHistory(
+      "h1",
+      { text: "stale background result" },
+      { expectedText: "initial", expectedUpdatedAt: undefined }
+    );
+    const persisted = await store.getHistoryEntry("h1");
+
+    assert.deepEqual(result, { ok: false, reason: "history_changed" });
+    assert.equal(persisted.text, "user edit");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("history replacement writes clean up temporary files when rename fails", async () => {
   const writes = [];
   const removed = [];

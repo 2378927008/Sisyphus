@@ -37,7 +37,11 @@ export class DictationService {
 
     this.notifyStatus({ phase: "transcribing", message: "Transcribing speech..." });
     const transcript = await this.transcribe(wavBuffer, settings);
-    const processing = await this.processTranscript(transcript, { settings, providers });
+    const processing = await this.processTranscript(transcript, {
+      settings,
+      providers,
+      onPolishing: () => this.notifyStatus({ phase: "polishing", message: "Cleaning up dictation..." })
+    });
 
     const entry = {
       id: crypto.randomUUID(),
@@ -80,7 +84,7 @@ export class DictationService {
     return entry;
   }
 
-  async processTranscript(transcript, { settings, providers } = {}) {
+  async processTranscript(transcript, { settings, providers, onPolishing } = {}) {
     const effectiveSettings = settings || await this.settingsStore.getSettings({ includeSecrets: true });
     const effectiveProviders = providers || this.providerStatus(effectiveSettings);
     const snippet = expandExactSnippet(transcript, effectiveSettings.snippets);
@@ -103,6 +107,7 @@ export class DictationService {
     let status = "complete";
     let processingError = "";
 
+    onPolishing?.();
     try {
       if (isTargetOutputLanguage(effectiveSettings.outputLanguage)) {
         assertTextProviderCanProcess(effectiveProviders);

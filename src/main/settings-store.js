@@ -182,12 +182,15 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
         return next;
       });
     },
-    updateHistory(id, patch) {
+    updateHistory(id, patch, conditions = {}) {
       return enqueueHistoryOperation(async () => {
         const history = await loadHistory(historyPath, io);
         const index = history.findIndex((entry) => entry?.id === id);
         if (index < 0) {
           return null;
+        }
+        if (!matchesHistoryConditions(history[index], conditions)) {
+          return { ok: false, reason: "history_changed" };
         }
         const updated = { ...history[index], ...normalizeHistoryPatch(patch), updatedAt: new Date().toISOString() };
         const next = [...history];
@@ -375,6 +378,17 @@ function normalizeHistoryPatch(patch) {
     }
   }
   return next;
+}
+
+function matchesHistoryConditions(entry, conditions) {
+  const expected = conditions && typeof conditions === "object" ? conditions : {};
+  if (Object.hasOwn(expected, "expectedUpdatedAt") && entry.updatedAt !== expected.expectedUpdatedAt) {
+    return false;
+  }
+  if (Object.hasOwn(expected, "expectedText") && entry.text !== expected.expectedText) {
+    return false;
+  }
+  return true;
 }
 
 async function writeJson(filePath, value, io) {

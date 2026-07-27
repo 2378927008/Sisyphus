@@ -25,12 +25,21 @@ export function createHistoryActions({ settingsStore, dictationService }) {
       }
 
       const processed = await dictationService.processTranscript(entry.transcript);
+      if (processed?.status !== "complete") {
+        return { ok: false, reason: "processing_failed" };
+      }
       const patch = Object.fromEntries(
         PROCESSING_FIELDS
           .filter((field) => Object.hasOwn(processed, field))
           .map((field) => [field, processed[field]])
       );
-      const updated = await settingsStore.updateHistory(id, patch);
+      const updated = await settingsStore.updateHistory(id, patch, {
+        expectedUpdatedAt: entry.updatedAt,
+        expectedText: entry.text
+      });
+      if (updated?.ok === false && updated.reason === "history_changed") {
+        return updated;
+      }
       if (!updated) {
         throw new Error("history_entry_not_found");
       }

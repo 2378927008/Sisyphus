@@ -49,6 +49,7 @@ test("processTranscript only expands complete normalized snippet matches", async
 
 test("processWav transcribes once and writes one snippet history entry", async () => {
   const history = [];
+  const events = [];
   let transcribeCalls = 0;
   let pasteCalls = 0;
   const service = new DictationService({
@@ -67,7 +68,7 @@ test("processWav transcribes once and writes one snippet history entry", async (
     paste: async () => {
       pasteCalls += 1;
     },
-    notifyStatus: () => {}
+    notifyStatus: (event) => events.push(event)
   });
 
   const entry = await service.processWav(Buffer.from("wav"));
@@ -79,6 +80,7 @@ test("processWav transcribes once and writes one snippet history entry", async (
   assert.equal(entry.source, "snippet");
   assert.equal(entry.snippetId, "s1");
   assert.equal(pasteCalls, 1);
+  assert.deepEqual(events.map((event) => event.phase), ["transcribing", "pasting", "done"]);
 });
 
 test("processWav saves polished result and pastes when enabled", async () => {
@@ -102,6 +104,22 @@ test("processWav saves polished result and pastes when enabled", async () => {
   assert.equal(entry.detectedLanguage, "en");
   assert.equal(history[0], entry);
   assert.equal(history.at(-1).pasted, "hello world");
+});
+
+test("processWav reports polishing between transcription and completion", async () => {
+  const history = [];
+  const events = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history),
+    clipboard: {},
+    transcribe: async () => "um hello world",
+    polish: async () => "hello world",
+    notifyStatus: (event) => events.push(event)
+  });
+
+  await service.processWav(Buffer.from("wav"));
+
+  assert.deepEqual(events.map((event) => event.phase), ["transcribing", "polishing", "done"]);
 });
 
 test("processWav saves complete text and warns when paste fails", async () => {
