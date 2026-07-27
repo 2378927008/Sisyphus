@@ -23,7 +23,8 @@ function buildReleaseRequirements(pkg) {
     "assets/local-flow-icon.ico",
     `${outputDir}/${installerName}`,
     `${outputDir}/win-unpacked/${productName}.exe`,
-    `${outputDir}/win-unpacked/resources/app/assets/local-flow-icon.ico`
+    `${outputDir}/win-unpacked/resources/app/assets/local-flow-icon.ico`,
+    `${outputDir}/win-unpacked/resources/vendor/llm/bin/llama-cli.exe`
   ];
 }
 

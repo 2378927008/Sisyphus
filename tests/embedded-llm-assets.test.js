@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   detectEmbeddedLlmAssets,
   embeddedLlmRecommendation,
   buildEmbeddedLlmInstallCommand,
-  selectLlamaReleaseAsset
+  selectLlamaReleaseAsset,
+  validateEmbeddedLlmRuntime
 } from "../src/main/embedded-llm-assets.js";
 
 test("embeddedLlmRecommendation describes the bundled default model", () => {
@@ -13,6 +15,8 @@ test("embeddedLlmRecommendation describes the bundled default model", () => {
   assert.equal(embeddedLlmRecommendation.modelFile, "Qwen3-4B-Q4_K_M.gguf");
   assert.equal(embeddedLlmRecommendation.license, "Apache-2.0");
   assert.match(embeddedLlmRecommendation.modelUrl, /Qwen3-4B-Q4_K_M\.gguf/);
+  assert.equal(embeddedLlmRecommendation.runtimeVersion, "b9049");
+  assert.match(embeddedLlmRecommendation.runtimeCliSha256, /^[a-f0-9]{64}$/);
 });
 
 test("detectEmbeddedLlmAssets reports missing runtime and model", async () => {
@@ -86,4 +90,45 @@ test("selectLlamaReleaseAsset skips cudart packages and prefers Windows AVX2 run
   ]);
 
   assert.equal(asset.name, "llama-b1234-bin-win-avx2-x64.zip");
+});
+
+test("validateEmbeddedLlmRuntime uses a bounded version probe and drains both streams", async () => {
+  let spawnedArgs;
+  let child;
+  const resultPromise = validateEmbeddedLlmRuntime("C:/runtime/llama-cli.exe", {
+    expectedSha256: "",
+    spawn: (_file, args) => {
+      spawnedArgs = args;
+      child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      queueMicrotask(() => {
+        child.stdout.emit("data", Buffer.alloc(128 * 1024, "x"));
+        child.stderr.emit("data", Buffer.from("version: test"));
+        child.emit("close", 0);
+      });
+      return child;
+    }
+  });
+
+  assert.deepEqual(spawnedArgs, ["--version"]);
+  assert.equal(child.stdout.listenerCount("data"), 1);
+  assert.deepEqual(await resultPromise, { ready: true, error: "" });
+});
+
+test("validateEmbeddedLlmRuntime rejects an unexpected binary before spawning it", async () => {
+  let spawnCalls = 0;
+  const result = await validateEmbeddedLlmRuntime("C:/runtime/llama-cli.exe", {
+    expectedSha256: "a".repeat(64),
+    readFile: async () => Buffer.from("unexpected runtime"),
+    spawn: () => {
+      spawnCalls += 1;
+      throw new Error("must not spawn an unverified runtime");
+    }
+  });
+
+  assert.equal(result.ready, false);
+  assert.match(result.error, /does not match the bundled version/i);
+  assert.equal(spawnCalls, 0);
 });

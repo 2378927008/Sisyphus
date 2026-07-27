@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   buildSetupDownloadEnv,
   createModelSetupService,
   getModelSetupScript,
-  killSetupProcessTree
+  killSetupProcessTree,
+  resolveSetupTimeoutMs
 } from "../src/main/model-setup.js";
 
 test("getModelSetupScript returns only known local setup scripts", () => {
@@ -178,8 +181,15 @@ test("setup scripts accept a NodeExe parameter for packaged builds", () => {
     assert.match(script, /\[string\]\$NodeExe = "node"/);
     assert.doesNotMatch(script, /&\s+node\b/);
     assert.doesNotMatch(script, /\|\s+node\b/);
-    assert.match(script, /&\s+\$NodeExe\b/);
+    assert.match(script, /Invoke-NodeProcess/);
+    assert.doesNotMatch(script, /&\s+\$NodeExe\b/);
   }
+});
+
+test("model setup timeouts allow large local Qwen downloads without weakening Whisper bounds", () => {
+  assert.equal(resolveSetupTimeoutMs("whisper"), 2 * 60 * 60 * 1000);
+  assert.equal(resolveSetupTimeoutMs("llm"), 12 * 60 * 60 * 1000);
+  assert.equal(resolveSetupTimeoutMs("llm", 25), 25);
 });
 
 test("setup scripts emit structured failure markers", () => {
@@ -198,10 +208,13 @@ test("setup scripts emit structured failure markers", () => {
   assert.match(whisperScript, /-FailureCode "whisper_model_download"/);
 
   for (const reason of [
-    "llm_release_metadata",
-    "llm_release_asset_missing",
+    "llm_runtime_manifest",
+    "llm_model_manifest",
     "llm_extract_failed",
     "llm_runtime_missing",
+    "llm_runtime_invalid",
+    "llm_runtime_locked",
+    "llm_model_locked",
   ]) {
     assert.match(llmScript, new RegExp(`Fail-Setup -Code "${reason}"`));
   }
@@ -220,8 +233,136 @@ test("setup-llm supports deployment supplied fallback download URLs", () => {
   assert.match(llmScript, /LOCAL_FLOW_LLAMA_RUNTIME_MIRROR_URLS/);
   assert.match(llmScript, /LOCAL_FLOW_QWEN_MODEL_URL/);
   assert.match(llmScript, /LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS/);
-  assert.match(llmScript, /\$asset\.browser_download_url/);
-  assert.match(llmScript, /\$modelMirrorUrl/);
+  assert.match(llmScript, /\$manifestRuntimeUrls/);
+  assert.match(llmScript, /\$manifestModelUrls/);
+});
+
+test("setup-llm uses a pinned verified runtime without GitHub release metadata", () => {
+  const llmScript = readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8");
+  const manifestPath = path.join(process.cwd(), "scripts", "llama-runtime-manifest.json");
+
+  assert.equal(existsSync(manifestPath), true);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+  assert.match(manifest.version, /^b\d+$/);
+  assert.equal(manifest.fileName, `llama-${manifest.version}-bin-win-cpu-x64.zip`);
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  assert.match(manifest.cliSha256, /^[a-f0-9]{64}$/);
+  assert.ok(manifest.urls.some((url) => url.startsWith(
+    `https://github.com/ggml-org/llama.cpp/releases/download/${manifest.version}/`
+  )));
+  assert.match(llmScript, /\[switch\]\$RuntimeOnly/);
+  assert.match(llmScript, /llama-runtime-manifest\.json/);
+  assert.match(llmScript, /check-llama-runtime\.mjs/);
+  assert.match(llmScript, /Get-FileHash/);
+  assert.match(llmScript, /Remove-Item -LiteralPath \$binDir -Recurse/);
+  assert.doesNotMatch(llmScript, /api\.github\.com\/repos\/ggml-org\/llama\.cpp\/releases\/latest/);
+});
+
+test("setup-llm pins and verifies the official Qwen model with the reachable mirror first", () => {
+  const llmScript = readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8");
+  const manifest = JSON.parse(readFileSync(
+    path.join(process.cwd(), "scripts", "qwen-model-manifest.json"),
+    "utf8"
+  ));
+
+  assert.equal(manifest.modelId, "Qwen/Qwen3-4B-GGUF");
+  assert.match(manifest.revision, /^[a-f0-9]{40}$/);
+  assert.equal(manifest.fileName, "Qwen3-4B-Q4_K_M.gguf");
+  assert.equal(manifest.size, 2_497_280_256);
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  assert.match(manifest.urls[0], /^https:\/\/hf-mirror\.com\//);
+  assert.match(manifest.urls[1], /^https:\/\/huggingface\.co\//);
+  assert.ok(manifest.urls.every((url) => url.includes(manifest.revision)));
+  assert.match(llmScript, /qwen-model-manifest\.json/);
+  assert.match(llmScript, /\$manifestModelUrls/);
+  assert.match(llmScript, /-ExpectedSha256 \$modelSha256/);
+});
+
+test("setup-llm runtime-only mode skips all network work when runtime is bundled", {
+  skip: process.platform !== "win32" || !existsSync(path.join(
+    process.cwd(), "vendor", "llm", "bin", "llama-cli.exe"
+  ))
+}, () => {
+  const installDir = mkdtempSync(path.join(tmpdir(), "local-flow-llama-runtime-"));
+  const binDir = path.join(installDir, "bin");
+  cpSync(path.join(process.cwd(), "vendor", "llm", "bin"), binDir, { recursive: true });
+
+  try {
+    const result = spawnSync("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy", "Bypass",
+      "-File", path.join(process.cwd(), "scripts", "setup-llm.ps1"),
+      "-InstallDir", installDir,
+      "-NodeExe", process.execPath,
+      "-RuntimeOnly"
+    ], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 30_000
+    });
+    const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Using bundled llama\.cpp runtime/);
+    assert.match(output, /runtime setup complete/);
+    assert.doesNotMatch(output, /Fetching|Downloading/);
+  } finally {
+    rmSync(installDir, { recursive: true, force: true });
+  }
+});
+
+test("check-llama-runtime accepts a relative bundled runtime path", {
+  skip: process.platform !== "win32" || !existsSync(path.join(
+    process.cwd(), "vendor", "llm", "bin", "llama-cli.exe"
+  ))
+}, () => {
+  const cliPath = path.join("vendor", "llm", "bin", "llama-cli.exe");
+  const result = spawnSync(process.execPath, [
+    path.join(process.cwd(), "scripts", "check-llama-runtime.mjs"),
+    cliPath
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30_000
+  });
+
+  assert.equal(result.status, 0, `${result.stdout || ""}\n${result.stderr || ""}`);
+});
+
+test("packaged setup waits for Electron-as-Node and keeps the bundled runtime", {
+  skip: process.platform !== "win32" || !existsSync(path.join(
+    process.cwd(), "dist", "win-unpacked", "Local Flow.exe"
+  ))
+}, () => {
+  const packagedRoot = path.join(process.cwd(), "dist", "win-unpacked");
+  const scriptPath = path.join(packagedRoot, "resources", "app", "scripts", "setup-llm.ps1");
+  const installDir = path.join(packagedRoot, "resources", "vendor", "llm");
+  const nodeExecutable = path.join(packagedRoot, "Local Flow.exe");
+  const result = spawnSync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", scriptPath,
+    "-InstallDir", installDir,
+    "-NodeExe", nodeExecutable,
+    "-RuntimeOnly"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      LOCAL_FLOW_LLAMA_RUNTIME_URL: "http://127.0.0.1:1/should-not-download.zip",
+      LOCAL_FLOW_DOWNLOAD_MAX_ATTEMPTS: "1",
+      LOCAL_FLOW_DOWNLOAD_TIMEOUT_MS: "1000"
+    }
+  });
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+
+  assert.equal(result.status, 0, output);
+  assert.match(output, /Using bundled llama\.cpp runtime/);
+  assert.doesNotMatch(output, /Downloading pinned llama\.cpp runtime/);
 });
 
 test("setup-whisper supports deployment supplied fallback download URLs", () => {

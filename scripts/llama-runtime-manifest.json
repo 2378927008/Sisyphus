@@ -1,0 +1,11 @@
+{
+  "version": "b9049",
+  "fileName": "llama-b9049-bin-win-cpu-x64.zip",
+  "sha256": "cc2bc606e90e516c1feb6c58affb477049440f1d76332acde5297073446a6bff",
+  "cliSha256": "52b59647c0cbb06d33edfc21d4b269881f8e703e452236058c010630785f4ae9",
+  "urls": [
+    "https://github.com/ggml-org/llama.cpp/releases/download/b9049/llama-b9049-bin-win-cpu-x64.zip"
+  ],
+  "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b9049",
+  "license": "MIT"
+}

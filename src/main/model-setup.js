@@ -3,7 +3,23 @@ import path from "node:path";
 import { detectEmbeddedLlmAssets } from "./embedded-llm-assets.js";
 import { detectWhisperAssets } from "./whisper-assets.js";
 
-const defaultSetupTimeoutMs = 60 * 60 * 1000;
+const defaultSetupTimeoutMs = Object.freeze({
+  whisper: 2 * 60 * 60 * 1000,
+  llm: 12 * 60 * 60 * 1000
+});
+
+export function resolveSetupTimeoutMs(type, configuredTimeout = defaultSetupTimeoutMs) {
+  if (Number.isFinite(configuredTimeout) && configuredTimeout > 0) {
+    return configuredTimeout;
+  }
+
+  const configuredForType = Number(configuredTimeout?.[type]);
+  if (Number.isFinite(configuredForType) && configuredForType > 0) {
+    return configuredForType;
+  }
+
+  return defaultSetupTimeoutMs[type] || defaultSetupTimeoutMs.whisper;
+}
 
 const setupScripts = {
   whisper: {
@@ -115,7 +131,7 @@ export function createModelSetupService({
     let result;
     try {
       const resolvedSetupEnv = await resolveSetupEnv(setupEnv, type);
-      result = await runSetup(script, spawnProcess, setupTimeoutMs, killProcessTree, (output) => {
+      result = await runSetup(script, spawnProcess, resolveSetupTimeoutMs(type, setupTimeoutMs), killProcessTree, (output) => {
         const current = state.get(type);
         if (current?.status === "running") {
           setState(type, {
@@ -468,9 +484,14 @@ function getSetupFailureMessage(type, reason, { code, error, fallbackError } = {
     whisper_assets_missing: "Whisper setup finished but required assets were not found.",
     llm_release_metadata: "Could not fetch llama.cpp release metadata. Check your network or proxy, then retry.",
     llm_release_asset_missing: "The current llama.cpp release did not include a compatible Windows runtime. Update Local Flow or retry later.",
+    llm_runtime_manifest: "The bundled llama.cpp runtime manifest is missing or invalid. Reinstall or update Local Flow, then retry.",
     llm_runtime_download: "llama.cpp runtime download failed. Check your network or proxy, then retry.",
     llm_extract_failed: "llama.cpp runtime archive could not be extracted. Delete the cached zip and retry.",
     llm_runtime_missing: "llama.cpp runtime was extracted, but llama-cli.exe or llama-server.exe was not found.",
+    llm_runtime_invalid: "llama.cpp was installed, but it could not start on this computer. Reinstall or update Local Flow, then retry.",
+    llm_runtime_locked: "The existing llama.cpp runtime is in use. Close Local Flow completely, then retry.",
+    llm_model_manifest: "The bundled Qwen model manifest is missing or invalid. Reinstall or update Local Flow, then retry.",
+    llm_model_locked: "The existing Qwen model is in use. Close Local Flow completely, then retry.",
     llm_model_download: "Qwen model download failed. This file is large; check network stability, disk space, and proxy settings, then retry.",
     llm_assets_missing: "Qwen setup finished but required assets were not found.",
     setup_timeout: "Model setup timed out. Check network stability and retry.",

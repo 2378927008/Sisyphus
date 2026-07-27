@@ -86,7 +86,7 @@ Local Flow 是语音输入软件，不是默认翻译软件。输出语言为 `�
 
 录音前必须配置 Whisper 语音模型。如果首页的 `开始录音` 按钮不可用，先点击 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。Qwen3 是可选的本地文本模型，不是录音必需项；默认试用可以先不安装 Qwen。
 
-如果 `安装 Whisper` 或 `安装 Qwen` 因 GitHub / Hugging Face 网络问题失败，打开 `设置` > `模型下载源`，填入可直连的主下载地址或备用镜像地址后重试。留空会继续使用默认官方源；多个备用地址可用分号或换行分隔。
+Windows 安装包已内置经过校验的 llama.cpp 运行时，因此安装 Qwen 时通常只需下载约 2.5 GB 的模型文件，不再查询 GitHub 发布信息。若 Whisper 或 Qwen 模型下载失败，打开 `设置` > `模型下载源`，填入可直连的主下载地址或备用镜像地址后重试；多个备用地址可用分号或换行分隔。
 
 ## Startup And Tray Behavior
 
@@ -191,6 +191,8 @@ The default path does not require Qwen. The app still includes an optional local
 - License: Apache 2.0.
 - Approximate model size: 2.5 GB.
 - Model file: `Qwen3-4B-Q4_K_M.gguf`.
+- Pinned model revision: `bc640142c66e1fdd12af0bd68f40445458f3869b`.
+- Verified model SHA-256: `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`.
 - Install location: `vendor/llm`.
 
 Run the setup script when you are ready to download the runtime and model:
@@ -199,7 +201,7 @@ Run the setup script when you are ready to download the runtime and model:
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-llm.ps1
 ```
 
-The script downloads llama.cpp Windows binaries from the latest GitHub release and the Qwen3 GGUF model from Hugging Face. The app detects the installed files on next start or after `刷新安装状态`.
+The Windows installer bundles the verified llama.cpp `b9049` CPU runtime. Source checkouts download that pinned runtime only when it is missing. The setup script downloads the Qwen model from a pinned Hugging Face revision, tries the reachable mirror before the main site, and verifies both archives with SHA-256. The app detects installed files on next start or after `刷新安装状态`.
 
 If GitHub or Hugging Face is too slow in your network, configure `设置` > `模型下载源` before clicking `安装 Qwen`, or point the installer at your own direct-download mirrors before running the script. These URLs should serve the same llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
 

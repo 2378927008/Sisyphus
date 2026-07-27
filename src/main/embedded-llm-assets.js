@@ -1,17 +1,22 @@
 import { spawn } from "node:child_process";
-import { stat as fsStat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
 
 export const embeddedLlmRecommendation = {
   provider: "llama.cpp",
   modelId: "Qwen/Qwen3-4B-GGUF",
+  modelRevision: "bc640142c66e1fdd12af0bd68f40445458f3869b",
   quantization: "Q4_K_M",
   modelFile: "Qwen3-4B-Q4_K_M.gguf",
-  modelUrl: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
-  modelMirrorUrl: "https://hf-mirror.com/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
+  modelSha256: "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+  modelUrl: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+  modelMirrorUrl: "https://hf-mirror.com/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
   license: "Apache-2.0",
   approximateSize: "2.5 GB",
-  runtimeReleaseApi: "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+  runtimeVersion: "b9049",
+  runtimeCliSha256: "52b59647c0cbb06d33edfc21d4b269881f8e703e452236058c010630785f4ae9",
+  runtimeSource: "https://github.com/ggml-org/llama.cpp/releases/tag/b9049",
   setupCommand: buildEmbeddedLlmInstallCommand()
 };
 
@@ -49,16 +54,37 @@ export async function detectEmbeddedLlmAssets(rootPath, deps = {}) {
   };
 }
 
-export function validateEmbeddedLlmRuntime(cliPath, deps = {}) {
+export async function validateEmbeddedLlmRuntime(cliPath, deps = {}) {
   const spawnImpl = deps.spawn || spawn;
+  const readFile = deps.readFile || fsReadFile;
+  const expectedSha256 = deps.expectedSha256 ?? embeddedLlmRecommendation.runtimeCliSha256;
   const timeoutMs = deps.runtimeValidationTimeoutMs || 5000;
+
+  if (expectedSha256) {
+    try {
+      const binary = await readFile(cliPath);
+      const actualSha256 = createHash("sha256").update(binary).digest("hex");
+      if (actualSha256 !== expectedSha256.toLowerCase()) {
+        return {
+          ready: false,
+          error: "llama-cli does not match the bundled version. Reinstall the local language runtime."
+        };
+      }
+    } catch (error) {
+      return {
+        ready: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
 
   return new Promise((resolve) => {
     let settled = false;
-    const child = spawnImpl(cliPath, ["-h"], {
+    const child = spawnImpl(cliPath, ["--version"], {
       windowsHide: true,
       cwd: path.dirname(cliPath)
     });
+    let stdout = "";
     let stderr = "";
 
     const timer = setTimeout(() => {
@@ -69,8 +95,11 @@ export function validateEmbeddedLlmRuntime(cliPath, deps = {}) {
     }, timeoutMs);
     timer.unref?.();
 
+    child.stdout?.on?.("data", (chunk) => {
+      stdout = appendOutputTail(stdout, chunk);
+    });
     child.stderr?.on?.("data", (chunk) => {
-      stderr += chunk.toString();
+      stderr = appendOutputTail(stderr, chunk);
     });
     child.on?.("error", (error) => {
       if (settled) return;
@@ -84,9 +113,17 @@ export function validateEmbeddedLlmRuntime(cliPath, deps = {}) {
       clearTimeout(timer);
       resolve(code === 0
         ? { ready: true, error: "" }
-        : { ready: false, error: stderr.trim() || `llama-cli exited with code ${code}.` });
+        : {
+          ready: false,
+          error: [stderr.trim(), stdout.trim()].filter(Boolean).join("\n") || `llama-cli exited with code ${code}.`
+        });
     });
   });
+}
+
+function appendOutputTail(current, chunk, maxLength = 8192) {
+  const next = current + chunk.toString();
+  return next.length > maxLength ? next.slice(-maxLength) : next;
 }
 
 export function buildEmbeddedLlmInstallCommand() {

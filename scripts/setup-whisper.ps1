@@ -6,6 +6,7 @@
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "invoke-node-process.ps1")
 
 function Fail-Setup {
   param(
@@ -67,8 +68,8 @@ function Download-WithFallback {
   for ($index = 0; $index -lt $validUrls.Count; $index += 1) {
     $url = $validUrls[$index]
     Write-Host "Downloading from $(Format-DownloadSource -Url $url)..."
-    & $NodeExe $downloadScript $url $DestinationPath
-    if ($LASTEXITCODE -eq 0) {
+    $downloadResult = Invoke-NodeProcess -Executable $NodeExe -Arguments @($downloadScript, $url, $DestinationPath)
+    if ($downloadResult.ExitCode -eq 0) {
       return
     }
 
@@ -99,10 +100,14 @@ $downloadScript = Join-Path $repoRoot "scripts\download-file.mjs"
 New-Item -ItemType Directory -Force -Path $binDir, $modelDir, $downloadDir | Out-Null
 
 Write-Host "Fetching latest whisper.cpp release metadata..."
-$releaseJson = & $NodeExe -e "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());" $releaseApi
-if ($LASTEXITCODE -ne 0) {
+$releaseResult = Invoke-NodeProcess `
+  -Executable $NodeExe `
+  -Arguments @("-e", "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());", $releaseApi) `
+  -HideStdout
+if ($releaseResult.ExitCode -ne 0) {
   Fail-Setup -Code "whisper_release_metadata" -Message "Failed to fetch whisper.cpp release metadata."
 }
+$releaseJson = $releaseResult.Stdout
 try {
   $release = $releaseJson | ConvertFrom-Json
 } catch {
