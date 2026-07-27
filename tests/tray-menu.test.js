@@ -2,15 +2,54 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip } from "../src/main/tray-menu.js";
 
-test("getBackgroundNotice returns a localized one-time background notice", () => {
-  assert.equal(
-    getBackgroundNotice(),
-    "Local Flow is still running in the background. Use the tray icon to reopen it."
-  );
-  assert.equal(
-    getBackgroundNotice("zh-Hans"),
-    "Local Flow \u4ecd\u5728\u540e\u53f0\u8fd0\u884c\uff0c\u53ef\u4ee5\u901a\u8fc7\u6258\u76d8\u56fe\u6807\u91cd\u65b0\u6253\u5f00\u3002"
-  );
+const supportedTrayLanguages = {
+  en: {
+    show: "Show",
+    recording: "Recording",
+    notice: "Local Flow is still running in the background. Use the tray icon to reopen it."
+  },
+  "zh-Hans": {
+    show: "显示主窗口",
+    recording: "正在录音",
+    notice: "Local Flow 仍在后台运行，可以通过托盘图标重新打开。"
+  },
+  ja: {
+    show: "表示",
+    recording: "録音中",
+    notice: "Local Flow はバックグラウンドで実行中です。トレイアイコンから再度開けます。"
+  },
+  ko: {
+    show: "표시",
+    recording: "녹음 중",
+    notice: "Local Flow가 백그라운드에서 실행 중입니다. 트레이 아이콘을 사용해 다시 열 수 있습니다."
+  },
+  "zh-Hant": {
+    show: "顯示主視窗",
+    recording: "正在錄音",
+    notice: "Local Flow 仍在背景執行，可透過系統匣圖示重新開啟。"
+  },
+  fr: {
+    show: "Afficher",
+    recording: "Enregistrement",
+    notice: "Local Flow fonctionne toujours en arrière-plan. Utilisez l'icône de la zone de notification pour le rouvrir."
+  },
+  ru: {
+    show: "Показать",
+    recording: "Запись",
+    notice: "Local Flow продолжает работать в фоновом режиме. Откройте его снова через значок в области уведомлений."
+  },
+  es: {
+    show: "Mostrar",
+    recording: "Grabando",
+    notice: "Local Flow sigue ejecutándose en segundo plano. Usa el icono de la bandeja para volver a abrirlo."
+  }
+};
+
+test("background notice is localized for every supported interface language", () => {
+  for (const [language, expected] of Object.entries(supportedTrayLanguages)) {
+    assert.equal(getBackgroundNotice(language), expected.notice, language);
+  }
+  assert.equal(getBackgroundNotice("unknown"), supportedTrayLanguages.en.notice);
 });
 
 test("buildTrayMenuTemplate returns product tray actions in order", () => {
@@ -93,6 +132,13 @@ test("buildTrayMenuTemplate returns Simplified Chinese labels", () => {
   ]);
 });
 
+test("tray menu selects every exact supported interface language and only unknown codes fall back", () => {
+  for (const [language, expected] of Object.entries(supportedTrayLanguages)) {
+    assert.equal(buildTrayMenuTemplate({ language })[0].label, expected.show, language);
+  }
+  assert.equal(buildTrayMenuTemplate({ language: "unknown" })[0].label, supportedTrayLanguages.en.show);
+});
+
 function getVisibleMenuText(item) {
   return item.type === "separator" ? item.type : item.label;
 }
@@ -124,4 +170,14 @@ test("getTrayTooltip returns localized phase status and fallback", () => {
     language: "unknown",
     state: { phase: "unknown" }
   }), "Local Flow - Idle");
+});
+
+test("tray tooltip selects every exact supported interface language", () => {
+  for (const [language, expected] of Object.entries(supportedTrayLanguages)) {
+    assert.equal(
+      getTrayTooltip({ language, state: { phase: "recording" } }),
+      `Local Flow - ${expected.recording}`,
+      language
+    );
+  }
 });

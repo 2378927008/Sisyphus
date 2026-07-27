@@ -56,6 +56,36 @@ const windowsUiV4Keys = [
   "phase.error"
 ];
 
+const personalizationKeys = [
+  "dictionary.title",
+  "dictionary.search",
+  "dictionary.add",
+  "dictionary.empty",
+  "dictionary.term",
+  "dictionary.edit",
+  "dictionary.delete",
+  "dictionary.save",
+  "dictionary.cancel",
+  "dictionary.duplicate",
+  "snippets.title",
+  "snippets.search",
+  "snippets.add",
+  "snippets.empty",
+  "snippets.trigger",
+  "snippets.expansion",
+  "snippets.edit",
+  "snippets.copy",
+  "snippets.delete",
+  "snippets.save",
+  "snippets.cancel",
+  "snippets.exactMatchHint",
+  "snippets.duplicate",
+  "settings.manageDictionary",
+  "personalization.saved",
+  "personalization.saveFailed",
+  "personalization.invalid"
+];
+
 const safeStatusKeys = [
   "status.settingsSaveFailed",
   "status.outputFailed",
@@ -82,6 +112,15 @@ test("Windows UI v4 keys are explicit in every supported dictionary", () => {
 
   for (const [language, dictionary] of Object.entries(uiTranslations)) {
     for (const key of windowsUiV4Keys) {
+      assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
+      assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
+    }
+  }
+});
+
+test("personalization CRUD and search strings are explicit in every supported dictionary", () => {
+  for (const [language, dictionary] of Object.entries(uiTranslations)) {
+    for (const key of personalizationKeys) {
       assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
       assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
     }

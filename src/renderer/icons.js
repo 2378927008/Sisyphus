@@ -14,8 +14,11 @@ import {
   Keyboard,
   MessageSquareText,
   Mic,
+  Pencil,
+  Plus,
   Search,
   Settings,
+  Trash2,
   Undo2,
   WandSparkles,
   X
@@ -36,8 +39,11 @@ const icons = {
   Keyboard,
   MessageSquareText,
   Mic,
+  Pencil,
+  Plus,
   Search,
   Settings,
+  Trash2,
   Undo2,
   WandSparkles,
   X

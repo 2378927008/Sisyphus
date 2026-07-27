@@ -46,8 +46,16 @@ let settings = mergeSettings({
   hotkey: "CommandOrControl+Alt+Space",
   pasteAfterTranscribe: false,
   whisperCliPath: "C:\\smoke\\whisper-cli.exe",
-  whisperModelPath: "C:\\smoke\\ggml-base.bin"
+  whisperModelPath: "C:\\smoke\\ggml-base.bin",
+  dictionary: ["Qwen", "Local Flow"],
+  snippets: [{
+    id: "snippet-existing",
+    trigger: "meeting notes",
+    text: "Summarize the meeting notes."
+  }]
 });
+const settingsSaveCalls = [];
+let settingsSaveError = "";
 let historyListCalls = 0;
 const historyUpdateCalls = [];
 const historyReprocessCalls = [];
@@ -212,6 +220,10 @@ function assertSmokeIpcCoverage() {
 function wireIpc() {
   registerSmokeIpcHandler("settings:get", () => settings);
   registerSmokeIpcHandler("settings:save", (_event, next) => {
+    settingsSaveCalls.push(structuredClone(next));
+    if (settingsSaveError) {
+      throw new Error(settingsSaveError);
+    }
     settings = mergeSettings(next, settings);
     return settings;
   });
@@ -373,6 +385,10 @@ app.whenReady().then(async () => {
         state.interfaceLanguageOptions.join(",") === expectedInterfaceLanguageCodes.join(",") &&
         state.homeCurrent &&
         !state.historyCurrent &&
+        !state.dictionaryCurrent &&
+        !state.snippetsCurrent &&
+        state.primaryNavigationCount === 5 &&
+        state.enabledPrimaryNavigationCount === 5 &&
         state.commandStripVisible &&
         state.recordButtonVisible &&
         state.hasLanguageControls &&
@@ -462,6 +478,211 @@ app.whenReady().then(async () => {
     if (historyListCalls !== callsBeforeGlobalSearch) {
       throw new Error("Global search requested history instead of filtering the cached projection.");
     }
+
+    const selectionBeforePersonalization = globalSearchState.selectedHistoryId;
+    await window.webContents.executeJavaScript("document.querySelector('#navDictionary').click()");
+    const dictionaryView = await waitForState(
+      window,
+      (state) => (
+        state.dictionaryCurrent &&
+        state.dictionaryPageVisible &&
+        !state.workspacePageVisible &&
+        state.dictionaryRowCount === 2
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(dictionaryView.visibleMainText, "Dictionary page");
+
+    const dictionarySaveStart = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#dictionaryAdd').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = '  Ｑｗｅｎ  ';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    await waitForState(window, (state) => state.dictionaryStatus.length > 0, 5000);
+    assert.equal(settingsSaveCalls.length, dictionarySaveStart);
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = '  Codex   Desktop  ';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => settings.dictionary.includes("Codex Desktop") && state.dictionaryRowCount === 3,
+      5000
+    );
+    assert.deepEqual(settingsSaveCalls.at(-1), {
+      dictionary: ["Qwen", "Local Flow", "Codex Desktop"]
+    });
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-dictionary-row]')]
+          .find((item) => item.textContent.includes('Codex Desktop'));
+        row.querySelector('[data-personalization-action="edit"]').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = 'Codex Windows';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      () => settings.dictionary.includes("Codex Windows") && !settings.dictionary.includes("Codex Desktop"),
+      5000
+    );
+
+    settingsSaveError = unsafeDiagnostic;
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#dictionaryAdd').click();
+        const input = document.querySelector('[data-personalization-form="dictionary"] input');
+        input.value = 'Recoverable local term';
+        input.closest('form').requestSubmit();
+      })()
+    `);
+    const failedDictionarySave = await waitForState(
+      window,
+      (state) => (
+        state.dictionaryStatus.length > 0 &&
+        state.visibleMainText.includes("Recoverable local term")
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(failedDictionarySave.visibleMainText, "Dictionary save failure");
+    settingsSaveError = "";
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-dictionary-row]')]
+          .find((item) => item.textContent.includes('Recoverable local term'));
+        row.querySelector('[data-personalization-action="delete"]').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => !state.visibleMainText.includes("Recoverable local term"),
+      5000
+    );
+
+    await window.webContents.executeJavaScript("document.querySelector('#navSnippets').click()");
+    const snippetsView = await waitForState(
+      window,
+      (state) => (
+        state.snippetsCurrent &&
+        state.snippetsPageVisible &&
+        !state.workspacePageVisible &&
+        state.snippetRowCount === 1
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(snippetsView.visibleMainText, "Quick snippets page");
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#snippetAdd').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'daily brief';
+        form.querySelector('[name="text"]').value = 'Prepare the daily brief.';
+        form.requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => settings.snippets.some((item) => item.trigger === "daily brief") && state.snippetRowCount === 2,
+      5000
+    );
+    const addedSnippet = settings.snippets.find((item) => item.trigger === "daily brief");
+    assert.ok(addedSnippet?.id);
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('daily brief'));
+        row.querySelector('[data-personalization-action="edit"]').click();
+        const form = document.querySelector('[data-personalization-form="snippet"]');
+        form.querySelector('[name="trigger"]').value = 'daily summary';
+        form.querySelector('[name="text"]').value = 'Prepare the daily summary.';
+        form.requestSubmit();
+      })()
+    `);
+    await waitForState(
+      window,
+      () => settings.snippets.some((item) => item.trigger === "daily summary"),
+      5000
+    );
+    assert.equal(
+      settings.snippets.find((item) => item.trigger === "daily summary")?.id,
+      addedSnippet.id
+    );
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        window.__copyAttempts = [];
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText(text) {
+              window.__copyAttempts.push(text);
+              return Promise.resolve();
+            }
+          }
+        });
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('daily summary'));
+        row.querySelector('[data-personalization-action="copy"]').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      (state) => state.copyAttemptTexts.includes("Prepare the daily summary."),
+      5000
+    );
+
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const row = [...document.querySelectorAll('[data-snippet-row]')]
+          .find((item) => item.textContent.includes('daily summary'));
+        row.querySelector('[data-personalization-action="delete"]').click();
+      })()
+    `);
+    await waitForState(
+      window,
+      () => !settings.snippets.some((item) => item.id === addedSnippet.id),
+      5000
+    );
+
+    await window.webContents.executeJavaScript("document.querySelector('#navSettings').click()");
+    await waitForState(window, (state) => state.settingsDrawerOpen, 5000);
+    const fullSaveStart = settingsSaveCalls.length;
+    await window.webContents.executeJavaScript("document.querySelector('#settingsForm').requestSubmit()");
+    await waitForState(window, () => settingsSaveCalls.length > fullSaveStart, 5000);
+    const fullSave = settingsSaveCalls.at(-1);
+    assert.deepEqual(fullSave.dictionary, settings.dictionary);
+    assert.deepEqual(fullSave.snippets, settings.snippets);
+    await window.webContents.executeJavaScript("document.querySelector('#manageDictionary').click()");
+    await waitForState(
+      window,
+      (state) => state.dictionaryCurrent && !state.settingsDrawerOpen,
+      5000
+    );
+
+    await window.webContents.executeJavaScript("document.querySelector('#navHistory').click()");
+    await waitForState(
+      window,
+      (state) => (
+        state.historyCurrent &&
+        state.globalSearchValue === "设计团队" &&
+        state.historySearchValue === "设计团队" &&
+        state.selectedHistoryId === selectionBeforePersonalization
+      ),
+      5000
+    );
 
     await window.webContents.executeJavaScript(`
       (() => {
@@ -1331,6 +1552,10 @@ function readRendererState(window) {
           .map((option) => option.value),
         homeCurrent: document.querySelector('#navHome')?.getAttribute('aria-current') === 'page',
         historyCurrent: document.querySelector('#navHistory')?.getAttribute('aria-current') === 'page',
+        dictionaryCurrent: document.querySelector('#navDictionary')?.getAttribute('aria-current') === 'page',
+        snippetsCurrent: document.querySelector('#navSnippets')?.getAttribute('aria-current') === 'page',
+        primaryNavigationCount: document.querySelectorAll('#appSidebar .nav-item').length,
+        enabledPrimaryNavigationCount: document.querySelectorAll('#appSidebar .nav-item:not(:disabled)').length,
         commandStripVisible: isVisible(document.querySelector('#commandStrip')),
         recordButtonVisible: isVisible(document.querySelector('#recordButton')),
         commandStripRect: rect('#commandStrip'),
@@ -1369,6 +1594,13 @@ function readRendererState(window) {
         editorVisible: isVisible(document.querySelector('#editorPane')),
         editorBackVisible: isVisible(document.querySelector('#editorBack')),
         editorBackTabIndex: document.querySelector('#editorBack')?.tabIndex ?? -1,
+        workspacePageVisible: isVisible(document.querySelector('#workspacePage')),
+        dictionaryPageVisible: isVisible(document.querySelector('#dictionaryPage')),
+        snippetsPageVisible: isVisible(document.querySelector('#snippetsPage')),
+        dictionaryRowCount: document.querySelectorAll('[data-dictionary-row]').length,
+        snippetRowCount: document.querySelectorAll('[data-snippet-row]').length,
+        dictionaryStatus: document.querySelector('#dictionaryStatus')?.textContent?.trim() || '',
+        snippetStatus: document.querySelector('#snippetStatus')?.textContent?.trim() || '',
         settingsDrawerOpen: document.querySelector('#settingsDrawer')?.classList.contains('open') || false,
         settingsDrawerAriaHidden: document.querySelector('#settingsDrawer')?.getAttribute('aria-hidden') === 'true',
         settingsDrawerInert: Boolean(document.querySelector('#settingsDrawer')?.inert),

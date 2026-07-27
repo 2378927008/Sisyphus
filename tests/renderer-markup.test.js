@@ -66,6 +66,27 @@ test("main window exposes the semantic Windows UI v4 product shell", async () =>
   assert.doesNotMatch(html, /id="(?:windowMinimize|windowMaximize|windowClose)"/);
 });
 
+test("sidebar exposes functional dictionary and quick snippet management pages", async () => {
+  const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
+
+  for (const id of [
+    "navDictionary",
+    "navSnippets",
+    "dictionaryPage",
+    "dictionarySearch",
+    "dictionaryList",
+    "dictionaryAdd",
+    "snippetsPage",
+    "snippetSearch",
+    "snippetList",
+    "snippetAdd",
+    "manageDictionary"
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.doesNotMatch(html, /<textarea[^>]*id="dictionary"/);
+});
+
 test("sidebar renders the existing Local Flow icon as decorative brand artwork", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 

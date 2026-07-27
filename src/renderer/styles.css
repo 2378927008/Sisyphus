@@ -438,6 +438,185 @@ body.recording #recordButton {
   background: var(--surface);
 }
 
+.personalization-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.personalization-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.personalization-header h2 {
+  font-size: 20px;
+}
+
+.personalization-search {
+  position: relative;
+  display: flex;
+  width: min(520px, calc(100% - 56px));
+  min-width: 0;
+  align-items: center;
+  margin: 18px 28px;
+}
+
+.personalization-search svg {
+  position: absolute;
+  left: 11px;
+  z-index: 1;
+  color: var(--muted);
+}
+
+.personalization-search input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 8px 12px 8px 38px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.personalization-list {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.personalization-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.personalization-copy {
+  min-width: 0;
+}
+
+.personalization-copy strong,
+.personalization-copy span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personalization-copy span {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.personalization-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.icon-action {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+}
+
+.icon-action:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-soft);
+}
+
+.icon-action.danger-action {
+  color: var(--error);
+}
+
+.personalization-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: end;
+  gap: 10px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-soft);
+}
+
+.snippet-editor-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(240px, 1.3fr);
+  gap: 10px;
+}
+
+.personalization-editor label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.personalization-editor input,
+.personalization-editor textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.personalization-editor textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.personalization-status {
+  min-height: 42px;
+  padding: 11px 28px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.personalization-status[data-state="error"] {
+  color: var(--error);
+}
+
+.personalization-list .empty {
+  border-bottom: 1px solid var(--line);
+}
+
+body[data-primary-view="dictionary"] .app-main,
+body[data-primary-view="snippets"] .app-main {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+body[data-primary-view="dictionary"] #appTopbar,
+body[data-primary-view="dictionary"] #commandStrip,
+body[data-primary-view="snippets"] #appTopbar,
+body[data-primary-view="snippets"] #commandStrip {
+  display: none;
+}
+
 .history-pane,
 .editor-pane {
   min-width: 0;
@@ -781,6 +960,23 @@ body.recording #recordButton {
   .result-character-count {
     display: none;
   }
+
+  .personalization-header,
+  .personalization-row,
+  .personalization-editor {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .personalization-search {
+    width: calc(100% - 36px);
+    margin-right: 18px;
+    margin-left: 18px;
+  }
+
+  .snippet-editor-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 
@@ -887,6 +1083,17 @@ body.recording #recordButton {
 .drawer-section {
   min-width: 0;
   padding-bottom: 12px;
+}
+
+.managed-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.managed-setting .secondary {
+  flex: 0 0 auto;
 }
 
 .drawer-section > label,

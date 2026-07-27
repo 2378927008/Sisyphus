@@ -32,11 +32,11 @@
             <span data-lucide="History"></span>
             <span class="button-label" data-i18n="nav.history">历史记录</span>
           </button>
-          <button class="nav-item" type="button" disabled>
+          <button id="navDictionary" class="nav-item" type="button" data-primary-view="dictionary">
             <span data-lucide="BookOpen"></span>
             <span class="button-label" data-i18n="nav.dictionary">个人词典</span>
           </button>
-          <button class="nav-item" type="button" disabled>
+          <button id="navSnippets" class="nav-item" type="button" data-primary-view="snippets">
             <span data-lucide="MessageSquareText"></span>
             <span class="button-label" data-i18n="nav.snippets">快捷短语</span>
           </button>
@@ -190,6 +190,52 @@
             </footer>
           </section>
         </section>
+
+        <section id="dictionaryPage" class="personalization-page" aria-labelledby="dictionaryHeading" hidden>
+          <header class="personalization-header">
+            <h2 id="dictionaryHeading" data-i18n="dictionary.title">个人词典</h2>
+            <button id="dictionaryAdd" class="primary" type="button">
+              <span data-lucide="Plus"></span>
+              <span class="button-label" data-i18n="dictionary.add">添加词条</span>
+            </button>
+          </header>
+          <label class="personalization-search">
+            <span data-lucide="Search"></span>
+            <span class="visually-hidden" data-i18n="dictionary.search">搜索个人词典</span>
+            <input
+              id="dictionarySearch"
+              type="search"
+              autocomplete="off"
+              placeholder="搜索个人词典"
+              data-i18n-placeholder="dictionary.search"
+            />
+          </label>
+          <div id="dictionaryList" class="personalization-list"></div>
+          <p id="dictionaryStatus" class="personalization-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="snippetsPage" class="personalization-page" aria-labelledby="snippetsHeading" hidden>
+          <header class="personalization-header">
+            <h2 id="snippetsHeading" data-i18n="snippets.title">快捷短语</h2>
+            <button id="snippetAdd" class="primary" type="button">
+              <span data-lucide="Plus"></span>
+              <span class="button-label" data-i18n="snippets.add">添加短语</span>
+            </button>
+          </header>
+          <label class="personalization-search">
+            <span data-lucide="Search"></span>
+            <span class="visually-hidden" data-i18n="snippets.search">搜索快捷短语</span>
+            <input
+              id="snippetSearch"
+              type="search"
+              autocomplete="off"
+              placeholder="搜索快捷短语"
+              data-i18n-placeholder="snippets.search"
+            />
+          </label>
+          <div id="snippetList" class="personalization-list"></div>
+          <p id="snippetStatus" class="personalization-status" role="status" aria-live="polite"></p>
+        </section>
       </section>
     </main>
 
@@ -249,10 +295,13 @@
                 <input id="pasteAfterTranscribe" name="pasteAfterTranscribe" type="checkbox" />
                 <span data-i18n="label.pasteAfterTranscribe">转写后粘贴到当前应用</span>
               </label>
-              <label>
+              <div class="managed-setting">
                 <span data-i18n="label.dictionary">个人词典</span>
-                <textarea id="dictionary" name="dictionary" rows="5" data-i18n-placeholder="placeholder.dictionary" placeholder="每行一个人名、产品名或术语"></textarea>
-              </label>
+                <button id="manageDictionary" class="secondary" type="button">
+                  <span data-lucide="BookOpen"></span>
+                  <span class="button-label" data-i18n="settings.manageDictionary">管理个人词典</span>
+                </button>
+              </div>
               <label class="checkbox-label">
                 <input id="launchAtLogin" name="launchAtLogin" type="checkbox" />
                 <span data-i18n="label.launchAtLogin">开机自动启动 Local Flow</span>

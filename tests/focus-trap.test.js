@@ -348,7 +348,7 @@ test("settings panels own the required existing fields", async () => {
     "interfaceLanguage",
     "polishMode",
     "pasteAfterTranscribe",
-    "dictionary",
+    "manageDictionary",
     "launchAtLogin",
     "startMinimizedToTray"
   ]) assert.match(general, new RegExp(`id="${id}"`), `General: ${id}`);

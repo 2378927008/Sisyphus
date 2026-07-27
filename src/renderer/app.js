@@ -30,6 +30,11 @@ import {
   normalizeHistoryEntries,
   resolveHistorySelection
 } from "./history-view-state.js";
+import {
+  PERSONALIZATION_LIMITS,
+  normalizeDictionary,
+  normalizeSnippets
+} from "../shared/personalization.js";
 
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
@@ -53,9 +58,25 @@ const commandPolishMode = document.querySelector("#commandPolishMode");
 const primaryNavigation = document.querySelector("#primaryNavigation");
 const navHome = document.querySelector("#navHome");
 const navHistory = document.querySelector("#navHistory");
+const navDictionary = document.querySelector("#navDictionary");
+const navSnippets = document.querySelector("#navSnippets");
 const navSettings = document.querySelector("#navSettings");
-const primaryNavigationButtons = [navHome, navHistory, navSettings];
+const primaryNavigationButtons = [navHome, navHistory, navDictionary, navSnippets, navSettings];
+const contentNavigationButtons = [navHome, navHistory, navDictionary, navSnippets];
+const appTopbar = document.querySelector("#appTopbar");
 const commandStrip = document.querySelector("#commandStrip");
+const workspacePage = document.querySelector("#workspacePage");
+const dictionaryPage = document.querySelector("#dictionaryPage");
+const dictionarySearch = document.querySelector("#dictionarySearch");
+const dictionaryList = document.querySelector("#dictionaryList");
+const dictionaryAdd = document.querySelector("#dictionaryAdd");
+const dictionaryStatus = document.querySelector("#dictionaryStatus");
+const snippetsPage = document.querySelector("#snippetsPage");
+const snippetSearch = document.querySelector("#snippetSearch");
+const snippetList = document.querySelector("#snippetList");
+const snippetAdd = document.querySelector("#snippetAdd");
+const snippetStatus = document.querySelector("#snippetStatus");
+const manageDictionary = document.querySelector("#manageDictionary");
 const phaseStatus = commandStrip.querySelector(".provider-status");
 const shortcutHintText = document.querySelector(".shortcut-hint span:last-child");
 const resultActions = document.querySelector("#editorPane .button-row");
@@ -115,9 +136,19 @@ let historyRefreshVersion = 0;
 let historyInteractionVersion = 0;
 let historySelectionVersion = 0;
 let historyCommitVersion = 0;
+let dictionaryQuery = "";
+let snippetQuery = "";
+let dictionaryEditorIndex = null;
+let snippetEditorId = null;
+let dictionaryStatusKey = "";
+let snippetStatusKey = "";
 const historyEditorSessions = new Map();
 const historyReprocessVersions = new Map();
 let settingsSaveQueue = Promise.resolve();
+const personalizationSaveVersions = {
+  dictionary: 0,
+  snippets: 0
+};
 let processingLanguageErrorOwner = null;
 const processingLanguageRequestVersions = {
   whisperLanguage: 0,
@@ -154,6 +185,8 @@ init();
 function prepareWindowsUiV4Markup() {
   attachTranslationToIconLabel(navHome, "nav.home");
   attachTranslationToIconLabel(navHistory, "nav.history");
+  attachTranslationToIconLabel(navDictionary, "nav.dictionary");
+  attachTranslationToIconLabel(navSnippets, "nav.snippets");
   attachTranslationToIconLabel(navSettings, "nav.settings");
   attachTranslationToIconLabel(editorBack, "history.back");
   attachTranslationToIconLabel(restoreResult, "action.restore");
@@ -213,6 +246,7 @@ async function init() {
   currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
+  renderPersonalizationPages();
   setViewPhase("idle");
   renderEditorState();
   activatePrimaryView("home");
@@ -226,7 +260,7 @@ async function init() {
     button.addEventListener("click", () => activateSettingsSection(button.dataset.settingsSection));
     button.addEventListener("keydown", handleSettingsSectionKeydown);
   }
-  for (const button of [navHome, navHistory]) {
+  for (const button of contentNavigationButtons) {
     button.addEventListener("click", () => activatePrimaryView(button.dataset.primaryView));
   }
   for (const button of primaryNavigationButtons) {
@@ -236,6 +270,24 @@ async function init() {
   historyList.addEventListener("keydown", handleHistoryKeydown);
   historySearch.addEventListener("input", handleHistorySearchInput);
   globalSearch.addEventListener("input", handleHistorySearchInput);
+  dictionarySearch.addEventListener("input", () => {
+    dictionaryQuery = dictionarySearch.value;
+    renderDictionaryPage();
+  });
+  snippetSearch.addEventListener("input", () => {
+    snippetQuery = snippetSearch.value;
+    renderSnippetsPage();
+  });
+  dictionaryAdd.addEventListener("click", beginDictionaryAdd);
+  snippetAdd.addEventListener("click", beginSnippetAdd);
+  dictionaryList.addEventListener("click", handleDictionaryAction);
+  dictionaryList.addEventListener("submit", handleDictionarySubmit);
+  snippetList.addEventListener("click", handleSnippetAction);
+  snippetList.addEventListener("submit", handleSnippetSubmit);
+  manageDictionary.addEventListener("click", () => {
+    closeSettingsDrawer();
+    activatePrimaryView("dictionary", { focus: true });
+  });
   editorBack.addEventListener("click", showHistoryListPane);
   window.addEventListener("resize", syncResponsiveWorkspace);
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
@@ -1542,7 +1594,8 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     llamaRuntimeMirrorUrls: data.get("llamaRuntimeMirrorUrls"),
     qwenModelUrl: data.get("qwenModelUrl"),
     qwenModelMirrorUrls: data.get("qwenModelMirrorUrls"),
-    dictionary: data.get("dictionary")
+    dictionary: normalizeDictionary(currentSettings?.dictionary),
+    snippets: normalizeSnippets(currentSettings?.snippets)
   };
   const fieldValuesAtSave = captureFormFieldValues(Object.keys(next));
 
@@ -1570,13 +1623,375 @@ function fillSettings(settings, { fieldValuesAtSave } = {}) {
 
     if (field.type === "checkbox") {
       field.checked = Boolean(value);
-    } else if (key === "dictionary") {
-      field.value = Array.isArray(value) ? value.join("\n") : "";
     } else {
       field.value = value ?? "";
     }
   }
   commandPolishMode.value = form.polishMode.value;
+  renderPersonalizationPages();
+}
+
+function renderPersonalizationPages() {
+  renderDictionaryPage();
+  renderSnippetsPage();
+}
+
+function renderDictionaryPage() {
+  const dictionary = normalizeDictionary(currentSettings?.dictionary);
+  if (currentSettings) currentSettings = { ...currentSettings, dictionary };
+  const query = normalizeSearchQuery(dictionaryQuery);
+  const rows = dictionary
+    .map((term, index) => ({ term, index }))
+    .filter(({ term }) => !query || normalizeSearchQuery(term).includes(query));
+  const markup = [];
+
+  if (dictionaryEditorIndex === -1) {
+    markup.push(renderDictionaryEditor("", -1));
+  }
+  for (const { term, index } of rows) {
+    if (dictionaryEditorIndex === index) {
+      markup.push(renderDictionaryEditor(term, index));
+      continue;
+    }
+    markup.push(`
+      <article class="personalization-row" data-dictionary-row data-index="${index}">
+        <div class="personalization-copy"><strong>${escapeHtml(term)}</strong></div>
+        <div class="personalization-actions">
+          ${renderIconAction("edit", index, "Pencil", "dictionary.edit")}
+          ${renderIconAction("delete", index, "Trash2", "dictionary.delete", "danger-action")}
+        </div>
+      </article>
+    `);
+  }
+
+  dictionaryList.innerHTML = markup.length
+    ? markup.join("")
+    : `<p class="empty">${escapeHtml(t("dictionary.empty"))}</p>`;
+  applyTranslations(dictionaryList);
+  renderIcons(dictionaryList);
+  renderPersonalizationStatus("dictionary");
+}
+
+function renderDictionaryEditor(term, index) {
+  return `
+    <form class="personalization-editor" data-personalization-form="dictionary" data-index="${index}">
+      <label>
+        <span data-i18n="dictionary.term">${escapeHtml(t("dictionary.term"))}</span>
+        <input
+          name="term"
+          value="${escapeHtml(term)}"
+          maxlength="${PERSONALIZATION_LIMITS.dictionaryTermLength}"
+          autocomplete="off"
+          required
+        />
+      </label>
+      <div class="personalization-actions">
+        ${renderIconAction("save", index, "CheckCircle2", "dictionary.save")}
+        ${renderIconAction("cancel", index, "X", "dictionary.cancel")}
+      </div>
+    </form>
+  `;
+}
+
+function renderSnippetsPage() {
+  const snippets = normalizeSnippets(currentSettings?.snippets);
+  if (currentSettings) currentSettings = { ...currentSettings, snippets };
+  const query = normalizeSearchQuery(snippetQuery);
+  const rows = snippets.filter((snippet) => (
+    !query ||
+    normalizeSearchQuery(snippet.trigger).includes(query) ||
+    normalizeSearchQuery(snippet.text).includes(query)
+  ));
+  const markup = [];
+
+  if (snippetEditorId === "") {
+    markup.push(renderSnippetEditor(null));
+  }
+  for (const snippet of rows) {
+    if (snippetEditorId === snippet.id) {
+      markup.push(renderSnippetEditor(snippet));
+      continue;
+    }
+    markup.push(`
+      <article class="personalization-row" data-snippet-row data-snippet-id="${escapeHtml(snippet.id)}">
+        <div class="personalization-copy">
+          <strong>${escapeHtml(snippet.trigger)}</strong>
+          <span>${escapeHtml(singleLineText(snippet.text))}</span>
+        </div>
+        <div class="personalization-actions">
+          ${renderIconAction("edit", snippet.id, "Pencil", "snippets.edit")}
+          ${renderIconAction("copy", snippet.id, "Copy", "snippets.copy")}
+          ${renderIconAction("delete", snippet.id, "Trash2", "snippets.delete", "danger-action")}
+        </div>
+      </article>
+    `);
+  }
+
+  snippetList.innerHTML = markup.length
+    ? markup.join("")
+    : `<p class="empty">${escapeHtml(t("snippets.empty"))}</p>`;
+  applyTranslations(snippetList);
+  renderIcons(snippetList);
+  renderPersonalizationStatus("snippets");
+}
+
+function renderSnippetEditor(snippet) {
+  const id = snippet?.id || "";
+  return `
+    <form class="personalization-editor" data-personalization-form="snippet" data-snippet-id="${escapeHtml(id)}">
+      <div class="snippet-editor-fields">
+        <label>
+          <span data-i18n="snippets.trigger">${escapeHtml(t("snippets.trigger"))}</span>
+          <input
+            name="trigger"
+            value="${escapeHtml(snippet?.trigger || "")}"
+            maxlength="${PERSONALIZATION_LIMITS.snippetTriggerLength}"
+            autocomplete="off"
+            required
+          />
+        </label>
+        <label>
+          <span data-i18n="snippets.expansion">${escapeHtml(t("snippets.expansion"))}</span>
+          <textarea
+            name="text"
+            maxlength="${PERSONALIZATION_LIMITS.snippetTextLength}"
+            required
+          >${escapeHtml(snippet?.text || "")}</textarea>
+        </label>
+      </div>
+      <div class="personalization-actions">
+        ${renderIconAction("save", id, "CheckCircle2", "snippets.save")}
+        ${renderIconAction("cancel", id, "X", "snippets.cancel")}
+      </div>
+    </form>
+  `;
+}
+
+function renderIconAction(action, value, icon, labelKey, extraClass = "") {
+  return `
+    <button
+      type="${action === "save" ? "submit" : "button"}"
+      class="icon-action ${extraClass}"
+      data-personalization-action="${action}"
+      data-personalization-value="${escapeHtml(value)}"
+      title="${escapeHtml(t(labelKey))}"
+      aria-label="${escapeHtml(t(labelKey))}"
+      data-i18n-title="${labelKey}"
+      data-i18n-aria-label="${labelKey}"
+    >
+      <span data-lucide="${icon}"></span>
+    </button>
+  `;
+}
+
+function beginDictionaryAdd() {
+  dictionaryEditorIndex = -1;
+  setPersonalizationStatus("dictionary", "");
+  renderDictionaryPage();
+  focusPersonalizationEditor(dictionaryList);
+}
+
+function beginSnippetAdd() {
+  snippetEditorId = "";
+  setPersonalizationStatus("snippets", "");
+  renderSnippetsPage();
+  focusPersonalizationEditor(snippetList);
+}
+
+function focusPersonalizationEditor(list) {
+  queueMicrotask(() => list.querySelector("[data-personalization-form] input")?.focus());
+}
+
+function handleDictionaryAction(event) {
+  const button = event.target.closest?.("[data-personalization-action]");
+  if (!button) return;
+  const action = button.dataset.personalizationAction;
+  const index = Number(button.dataset.personalizationValue);
+  const dictionary = normalizeDictionary(currentSettings?.dictionary);
+
+  if (action === "edit" && dictionary[index] !== undefined) {
+    dictionaryEditorIndex = index;
+    setPersonalizationStatus("dictionary", "");
+    renderDictionaryPage();
+    focusPersonalizationEditor(dictionaryList);
+  } else if (action === "cancel") {
+    dictionaryEditorIndex = null;
+    renderDictionaryPage();
+  } else if (action === "delete" && dictionary[index] !== undefined) {
+    dictionaryEditorIndex = null;
+    persistPersonalization("dictionary", dictionary.filter((_, itemIndex) => itemIndex !== index));
+  }
+}
+
+function handleDictionarySubmit(event) {
+  const editor = event.target.closest?.('[data-personalization-form="dictionary"]');
+  if (!editor) return;
+  event.preventDefault();
+  const dictionary = normalizeDictionary(currentSettings?.dictionary);
+  const index = Number(editor.dataset.index);
+  const value = editor.elements.term.value;
+  const candidate = normalizeDictionary([value])[0];
+
+  if (
+    !candidate ||
+    normalizedVisibleLength(value) > PERSONALIZATION_LIMITS.dictionaryTermLength
+  ) {
+    setPersonalizationStatus("dictionary", "personalization.invalid", "error");
+    return;
+  }
+
+  const withoutCurrent = dictionary.filter((_, itemIndex) => itemIndex !== index);
+  if (normalizeDictionary([...withoutCurrent, candidate]).length === withoutCurrent.length) {
+    setPersonalizationStatus("dictionary", "dictionary.duplicate", "error");
+    return;
+  }
+
+  const next = index === -1
+    ? normalizeDictionary([...dictionary, candidate])
+    : normalizeDictionary(dictionary.map((term, itemIndex) => itemIndex === index ? candidate : term));
+  if (next.length !== dictionary.length + (index === -1 ? 1 : 0)) {
+    setPersonalizationStatus("dictionary", "personalization.invalid", "error");
+    return;
+  }
+
+  dictionaryEditorIndex = null;
+  persistPersonalization("dictionary", next);
+}
+
+function handleSnippetAction(event) {
+  const button = event.target.closest?.("[data-personalization-action]");
+  if (!button) return;
+  const action = button.dataset.personalizationAction;
+  const id = button.dataset.personalizationValue;
+  const snippets = normalizeSnippets(currentSettings?.snippets);
+  const snippet = snippets.find((item) => item.id === id);
+
+  if (action === "edit" && snippet) {
+    snippetEditorId = id;
+    setPersonalizationStatus("snippets", "");
+    renderSnippetsPage();
+    focusPersonalizationEditor(snippetList);
+  } else if (action === "cancel") {
+    snippetEditorId = null;
+    renderSnippetsPage();
+  } else if (action === "copy" && snippet) {
+    copySnippetText(snippet.text);
+  } else if (action === "delete" && snippet) {
+    snippetEditorId = null;
+    persistPersonalization("snippets", snippets.filter((item) => item.id !== id));
+  }
+}
+
+function handleSnippetSubmit(event) {
+  const editor = event.target.closest?.('[data-personalization-form="snippet"]');
+  if (!editor) return;
+  event.preventDefault();
+  const snippets = normalizeSnippets(currentSettings?.snippets);
+  const triggerInput = editor.elements.trigger;
+  const expansionInput = editor.elements.text;
+  const existing = snippets.find((item) => item.id === editor.dataset.snippetId);
+  const candidate = existing
+    ? {
+        id: existing.id,
+        trigger: triggerInput.value,
+        text: expansionInput.value
+      }
+    : {
+        id: crypto.randomUUID(),
+        trigger: triggerInput.value,
+        text: expansionInput.value
+      };
+
+  if (
+    normalizedVisibleLength(candidate.trigger) > PERSONALIZATION_LIMITS.snippetTriggerLength ||
+    String(candidate.text).trim().length > PERSONALIZATION_LIMITS.snippetTextLength ||
+    normalizeSnippets([candidate]).length !== 1
+  ) {
+    setPersonalizationStatus("snippets", "personalization.invalid", "error");
+    return;
+  }
+
+  const withoutCurrent = snippets.filter((item) => item.id !== candidate.id);
+  if (normalizeSnippets([...withoutCurrent, candidate]).length === withoutCurrent.length) {
+    setPersonalizationStatus("snippets", "snippets.duplicate", "error");
+    return;
+  }
+
+  const next = existing
+    ? normalizeSnippets(snippets.map((item) => item.id === existing.id ? candidate : item))
+    : normalizeSnippets([...snippets, candidate]);
+  if (next.length !== snippets.length + (existing ? 0 : 1)) {
+    setPersonalizationStatus("snippets", "personalization.invalid", "error");
+    return;
+  }
+
+  snippetEditorId = null;
+  persistPersonalization("snippets", next);
+}
+
+async function copySnippetText(text) {
+  try {
+    await writeClipboardText(text);
+    setPersonalizationStatus("snippets", "status.copied");
+  } catch {
+    setPersonalizationStatus("snippets", "status.copyFailed", "error");
+  }
+}
+
+async function persistPersonalization(settingName, value) {
+  const next = settingName === "dictionary"
+    ? normalizeDictionary(value)
+    : normalizeSnippets(value);
+  const version = personalizationSaveVersions[settingName] + 1;
+  personalizationSaveVersions[settingName] = version;
+  currentSettings = {
+    ...currentSettings,
+    [settingName]: next
+  };
+  renderPersonalizationPages();
+
+  try {
+    const savedSettings = await enqueueSettingsOperation(() => window.localFlow.saveSettings({
+      [settingName]: next
+    }));
+    const localSnapshot = currentSettings;
+    currentSettings = {
+      ...savedSettings,
+      dictionary: normalizeDictionary(localSnapshot?.dictionary),
+      snippets: normalizeSnippets(localSnapshot?.snippets)
+    };
+    renderPersonalizationPages();
+    if (personalizationSaveVersions[settingName] === version) {
+      setPersonalizationStatus(settingName, "personalization.saved");
+    }
+  } catch {
+    if (personalizationSaveVersions[settingName] === version) {
+      setPersonalizationStatus(settingName, "personalization.saveFailed", "error");
+    }
+  }
+}
+
+function setPersonalizationStatus(settingName, key, state = "") {
+  if (settingName === "dictionary") dictionaryStatusKey = key;
+  else snippetStatusKey = key;
+  const element = settingName === "dictionary" ? dictionaryStatus : snippetStatus;
+  element.textContent = key ? t(key) : "";
+  if (state) element.dataset.state = state;
+  else element.removeAttribute("data-state");
+}
+
+function renderPersonalizationStatus(settingName) {
+  const key = settingName === "dictionary" ? dictionaryStatusKey : snippetStatusKey;
+  const element = settingName === "dictionary" ? dictionaryStatus : snippetStatus;
+  if (key) element.textContent = t(key);
+}
+
+function normalizedVisibleLength(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().length;
+}
+
+function normalizeSearchQuery(value) {
+  return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 async function renderHistory() {
@@ -1837,7 +2252,7 @@ async function activatePrimaryView(view, { focus = false } = {}) {
     openSettingsDrawer();
     return;
   }
-  const nextView = view === "history" ? "history" : "home";
+  const nextView = ["history", "dictionary", "snippets"].includes(view) ? view : "home";
   if (nextView === "home") {
     const requestVersion = historySelectionVersion + 1;
     historySelectionVersion = requestVersion;
@@ -1852,6 +2267,11 @@ async function activatePrimaryView(view, { focus = false } = {}) {
   }
   activePrimaryView = nextView;
   document.body.dataset.primaryView = activePrimaryView;
+  workspacePage.hidden = !["home", "history"].includes(activePrimaryView);
+  dictionaryPage.hidden = activePrimaryView !== "dictionary";
+  snippetsPage.hidden = activePrimaryView !== "snippets";
+  appTopbar.hidden = ["dictionary", "snippets"].includes(activePrimaryView);
+  commandStrip.hidden = ["dictionary", "snippets"].includes(activePrimaryView);
   syncPrimaryNavigation({ focus });
   if (activePrimaryView === "home") {
     renderSelectedHistory();
@@ -1862,10 +2282,16 @@ async function activatePrimaryView(view, { focus = false } = {}) {
     document.body.dataset.workspacePane = "list";
     historySearch.focus();
   }
+  if (activePrimaryView === "dictionary") {
+    renderDictionaryPage();
+  }
+  if (activePrimaryView === "snippets") {
+    renderSnippetsPage();
+  }
 }
 
 function syncPrimaryNavigation({ focus = false } = {}) {
-  for (const button of [navHome, navHistory]) {
+  for (const button of contentNavigationButtons) {
     const selected = button.dataset.primaryView === activePrimaryView;
     if (selected) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
@@ -1874,7 +2300,9 @@ function syncPrimaryNavigation({ focus = false } = {}) {
   navSettings.removeAttribute("aria-current");
   navSettings.tabIndex = 0;
   if (focus) {
-    (activePrimaryView === "history" ? navHistory : navHome).focus();
+    contentNavigationButtons
+      .find((button) => button.dataset.primaryView === activePrimaryView)
+      ?.focus();
   }
 }
 
@@ -1945,6 +2373,7 @@ function applyInterfaceLanguage(language) {
   renderEditorState();
   renderHistoryProjection();
   renderSelectedHistory({ syncEditor: false });
+  renderPersonalizationPages();
 }
 
 async function changeCommandPolishMode() {
