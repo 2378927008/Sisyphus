@@ -203,3 +203,51 @@ test("extracts multiline contenteditable text without trimming Unicode or edge w
     "  alpha\nβ😀\ngamma\ndelta  "
   );
 });
+
+test("prunes clean orphan history sessions while retaining recoverable local state", () => {
+  assert.equal(typeof mainViewState.pruneHistorySessionMaps, "function");
+
+  const clean = {
+    editorState: createEditorState("saved"),
+    savePhase: "saved",
+    reprocessPhase: "idle",
+    pendingRestoreTarget: null
+  };
+  const sessions = new Map([
+    ["active", structuredClone(clean)],
+    ["clean-orphan", structuredClone(clean)],
+    ["dirty-orphan", {
+      ...structuredClone(clean),
+      editorState: replaceEditorText(createEditorState("saved"), "draft")
+    }],
+    ["failed-orphan", { ...structuredClone(clean), savePhase: "error" }],
+    ["restore-orphan", { ...structuredClone(clean), pendingRestoreTarget: "restore target" }],
+    ["running-orphan", { ...structuredClone(clean), reprocessPhase: "running" }]
+  ]);
+  const versions = new Map([
+    ["active", 1],
+    ["clean-orphan", 2],
+    ["dirty-orphan", 3],
+    ["failed-orphan", 4],
+    ["restore-orphan", 5],
+    ["running-orphan", 6],
+    ["version-only-orphan", 7]
+  ]);
+
+  mainViewState.pruneHistorySessionMaps(sessions, versions, ["active"]);
+
+  assert.deepEqual([...sessions.keys()], [
+    "active",
+    "dirty-orphan",
+    "failed-orphan",
+    "restore-orphan",
+    "running-orphan"
+  ]);
+  assert.deepEqual([...versions.keys()], [
+    "active",
+    "dirty-orphan",
+    "failed-orphan",
+    "restore-orphan",
+    "running-orphan"
+  ]);
+});

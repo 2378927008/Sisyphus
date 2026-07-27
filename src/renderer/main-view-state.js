@@ -121,6 +121,31 @@ export function readContentEditableText(element) {
   return contenteditableNodeText(element);
 }
 
+function shouldRetainOrphanHistorySession(session) {
+  return Boolean(
+    session?.editorState?.dirty ||
+    session?.savePhase === "saving" ||
+    session?.savePhase === "error" ||
+    session?.reprocessPhase === "running" ||
+    session?.reprocessPhase === "error" ||
+    (session?.pendingRestoreTarget !== null && session?.pendingRestoreTarget !== undefined)
+  );
+}
+
+export function pruneHistorySessionMaps(sessions, operationVersions, activeIds = []) {
+  const active = new Set(activeIds);
+  for (const [id, session] of sessions) {
+    if (!active.has(id) && !shouldRetainOrphanHistorySession(session)) {
+      sessions.delete(id);
+    }
+  }
+  for (const id of operationVersions.keys()) {
+    if (!active.has(id) && !sessions.has(id)) {
+      operationVersions.delete(id);
+    }
+  }
+}
+
 export function projectHistory(entries, limit) {
   const normalizedLimit = normalizeLimit(limit);
   if (!Array.isArray(entries) || normalizedLimit === 0) {

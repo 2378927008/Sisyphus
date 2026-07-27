@@ -40,22 +40,28 @@ export function createVersionedAutosave({
       return { ok: false, cancelled: true, ...request };
     }
     emit("saving", request);
+    let result;
     try {
-      const result = await save({ id: request.id, text: request.text, version: request.version });
+      result = await save({ id: request.id, text: request.text, version: request.version });
       if (result && typeof result === "object" && result.ok === false) {
         throw saveFailure(result);
       }
-      const outcome = { ok: true, ...request, result };
-      onCommit({ id: request.id, text: request.text, version: request.version, result });
-      if (request.version === version) latestOutcome = outcome;
-      emit("saved", request);
-      return outcome;
     } catch (error) {
       const outcome = { ok: false, ...request, error };
       if (request.version === version) latestOutcome = outcome;
       emit("error", request, error);
       return outcome;
     }
+
+    const outcome = { ok: true, ...request, result };
+    try {
+      onCommit({ id: request.id, text: request.text, version: request.version, result });
+    } catch {
+      // Persistence already succeeded; observer failures cannot change that fact.
+    }
+    if (request.version === version) latestOutcome = outcome;
+    emit("saved", request);
+    return outcome;
   }
 
   function queuePending() {

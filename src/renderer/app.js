@@ -18,9 +18,9 @@ import { createVersionedAutosave } from "./versioned-autosave.js";
 import {
   createEditorState,
   normalizeViewPhase,
+  pruneHistorySessionMaps,
   readContentEditableText,
   replaceEditorText,
-  restoreEditorText,
   updateEditorBaseline
 } from "./main-view-state.js";
 import {
@@ -943,7 +943,10 @@ function createHistoryEditorSession(entry) {
     savePhase: "saved",
     reprocessPhase: "idle",
     emptyMessageKey: entry?.status === "failed" ? "result.outputFailed" : "empty.result",
-    commitVersion: 0
+    commitVersion: 0,
+    editorRevision: 0,
+    restoreVersion: 0,
+    pendingRestoreTarget: null
   };
 }
 
@@ -959,8 +962,10 @@ function getHistoryEditorSession(id) {
 
 function storeCurrentEditorSession() {
   if (!selectedHistoryId) return;
-  const existingSession = historyEditorSessions.get(selectedHistoryId);
+  const existingSession = historyEditorSessions.get(selectedHistoryId)
+    || createHistoryEditorSession(allHistory.find((entry) => entry.id === selectedHistoryId));
   historyEditorSessions.set(selectedHistoryId, {
+    ...existingSession,
     editorState,
     savePhase: editorSavePhase,
     reprocessPhase: editorReprocessPhase,
@@ -990,16 +995,24 @@ function invalidateReprocessForHistory(id) {
 }
 
 async function restoreLatestResult() {
-  if (!editorState.dirty) return;
   const operationId = selectedHistoryId;
-  const baselineText = editorState.baselineText;
+  const operationSession = getHistoryEditorSession(operationId);
+  if (!operationSession) return;
+  const pendingRestoreTarget = operationSession.pendingRestoreTarget;
+  if (!editorState.dirty && pendingRestoreTarget === null) return;
+  const baselineText = pendingRestoreTarget === null
+    ? editorState.baselineText
+    : pendingRestoreTarget;
   historyInteractionVersion += 1;
-  const interactionVersion = historyInteractionVersion;
   invalidateReprocessForHistory(operationId);
   if (editorReprocessPhase !== "idle") {
     setEditorReprocessPhase("idle");
   }
-  editorState = restoreEditorText(editorState);
+  operationSession.restoreVersion += 1;
+  const restoreVersion = operationSession.restoreVersion;
+  operationSession.pendingRestoreTarget = baselineText;
+  operationSession.editorRevision += 1;
+  editorState = replaceEditorText(editorState, baselineText);
   editorRevision += 1;
   storeCurrentEditorSession();
   renderEditorState();
@@ -1009,23 +1022,30 @@ async function restoreLatestResult() {
   }
 
   const outcome = await historyAutosave.replace({ id: operationId, text: baselineText });
-  if (
-    selectedHistoryId !== operationId ||
-    historyInteractionVersion !== interactionVersion
-  ) {
-    return;
+  const settledSession = getHistoryEditorSession(operationId);
+  if (settledSession.restoreVersion !== restoreVersion) return;
+  settledSession.savePhase = outcome?.ok ? "saved" : "error";
+  if (outcome?.ok) {
+    settledSession.pendingRestoreTarget = null;
+    settledSession.editorState = createEditorState(baselineText);
   }
-  setEditorSavePhase(outcome?.ok ? "saved" : "error");
-  storeCurrentEditorSession();
+  if (selectedHistoryId !== operationId) return;
+  loadHistoryEditorSession(getSelectedHistoryEntry());
+  setEditorSavePhase(settledSession.savePhase);
   renderEditorState({ syncText: false });
 }
 
 function updateEditorFromInput() {
+  const session = getHistoryEditorSession(selectedHistoryId);
   emptyEditorMessageKey = "empty.result";
   editorState = replaceEditorText(editorState, readContentEditableText(resultText));
   editorRevision += 1;
   historyInteractionVersion += 1;
-  invalidateReprocessForHistory(selectedHistoryId);
+  if (session) {
+    session.editorRevision += 1;
+    session.restoreVersion += 1;
+    session.pendingRestoreTarget = null;
+  }
   if (editorReprocessPhase !== "idle") {
     setEditorReprocessPhase("idle");
   }
@@ -1063,7 +1083,15 @@ function renderEditorState({ syncText = true } = {}) {
   resultCharacterCount.textContent = t("label.characterCount", {
     count: editorState.characterCount
   });
-  restoreResult.disabled = !editorState.dirty;
+  const selectedSession = historyEditorSessions.get(selectedHistoryId);
+  const hasPendingRestore = (
+    selectedSession?.pendingRestoreTarget !== null &&
+    selectedSession?.pendingRestoreTarget !== undefined
+  );
+  restoreResult.disabled = (
+    !editorState.dirty &&
+    !hasPendingRestore
+  );
   copyResult.disabled = editorState.empty;
   insertResult.disabled = editorState.empty;
 }
@@ -1144,25 +1172,20 @@ async function reprocessSelectedHistory() {
   const operationId = selectedHistoryId;
   const entry = allHistory.find((item) => item.id === operationId);
   if (!entry || !hasHistoryTranscript(entry) || editorReprocessPhase === "running") return;
+  const operationSession = getHistoryEditorSession(operationId);
+  const operationEditorRevision = operationSession.editorRevision;
   const operationVersion = (historyReprocessVersions.get(operationId) || 0) + 1;
   historyReprocessVersions.set(operationId, operationVersion);
   historyInteractionVersion += 1;
-  const uiInteractionVersion = historyInteractionVersion;
   setEditorReprocessPhase("running");
   storeCurrentEditorSession();
   try {
     const result = await window.localFlow.reprocessHistory(operationId);
     if (result?.ok !== true || !result.entry || typeof result.entry !== "object") {
       const operationSession = getHistoryEditorSession(operationId);
-      operationSession.reprocessPhase = "idle";
-      if (
-        selectedHistoryId === operationId &&
-        historyReprocessVersions.get(operationId) === operationVersion &&
-        historyInteractionVersion === uiInteractionVersion
-      ) {
-        setEditorReprocessPhase("error");
-        storeCurrentEditorSession();
-      }
+      if (historyReprocessVersions.get(operationId) !== operationVersion) return;
+      operationSession.reprocessPhase = "error";
+      if (selectedHistoryId === operationId) renderHistoryOperationSession(operationId);
       return;
     }
     if (historyReprocessVersions.get(operationId) !== operationVersion) return;
@@ -1175,35 +1198,45 @@ async function reprocessSelectedHistory() {
     allHistory = allHistory.map((item) => (
       item.id === operationId ? updatedEntry : item
     ));
-    const updatedSession = createHistoryEditorSession(updatedEntry);
+    const currentSession = getHistoryEditorSession(operationId);
+    const editedDuringOperation = currentSession.editorRevision !== operationEditorRevision;
+    const updatedSession = editedDuringOperation
+      ? {
+          ...currentSession,
+          editorState: updateEditorBaseline(currentSession.editorState, updatedEntry.text),
+          reprocessPhase: "idle"
+        }
+      : {
+          ...createHistoryEditorSession(updatedEntry),
+          editorRevision: currentSession.editorRevision,
+          restoreVersion: currentSession.restoreVersion
+        };
     historyCommitVersion += 1;
     updatedSession.commitVersion = historyCommitVersion;
     historyEditorSessions.set(operationId, updatedSession);
     renderHistoryProjection();
-    if (
-      selectedHistoryId !== operationId ||
-      historyInteractionVersion !== uiInteractionVersion
-    ) {
-      return;
+    if (editedDuringOperation && updatedSession.editorState.currentText !== updatedEntry.text) {
+      historyAutosave.schedule({
+        id: operationId,
+        text: updatedSession.editorState.currentText
+      });
     }
-
-    loadHistoryEditorSession(updatedEntry);
-    setEditorSavePhase("saved");
-    setEditorReprocessPhase("idle");
-    renderSelectedHistory({ syncEditor: false });
-    renderEditorState();
+    if (selectedHistoryId === operationId) renderHistoryOperationSession(operationId);
   } catch {
     const operationSession = getHistoryEditorSession(operationId);
-    operationSession.reprocessPhase = "idle";
-    if (
-      selectedHistoryId === operationId &&
-      historyReprocessVersions.get(operationId) === operationVersion &&
-      historyInteractionVersion === uiInteractionVersion
-    ) {
-      setEditorReprocessPhase("error");
-      storeCurrentEditorSession();
-    }
+    if (historyReprocessVersions.get(operationId) !== operationVersion) return;
+    operationSession.reprocessPhase = "error";
+    if (selectedHistoryId === operationId) renderHistoryOperationSession(operationId);
   }
+}
+
+function renderHistoryOperationSession(id) {
+  if (selectedHistoryId !== id) return;
+  loadHistoryEditorSession(getSelectedHistoryEntry());
+  setEditorSavePhase(editorSavePhase);
+  setEditorReprocessPhase(editorReprocessPhase);
+  renderSelectedHistory({ syncEditor: false });
+  renderEditorState();
 }
 
 function setEditorReprocessPhase(phase) {
@@ -1557,9 +1590,15 @@ async function renderHistory() {
   const commitVersionBeforeRefresh = historyCommitVersion;
   const history = await window.localFlow.listHistory();
   if (requestVersion !== historyRefreshVersion) return;
+  const historySnapshot = normalizeHistoryEntries(Array.isArray(history) ? history : []);
   allHistory = mergeHistorySnapshotWithSessions(
-    normalizeHistoryEntries(Array.isArray(history) ? history : []),
+    historySnapshot,
     commitVersionBeforeRefresh
+  );
+  pruneHistorySessionMaps(
+    historyEditorSessions,
+    historyReprocessVersions,
+    historySnapshot.map((entry) => entry.id)
   );
   const selectedEntry = allHistory.find((entry) => entry.id === selectedHistoryId);
   selectedHistoryId = activePrimaryView === "home"

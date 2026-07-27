@@ -171,3 +171,89 @@ production code.
 No known functional blocker. Electron host-profile OS crypt and disk/GPU cache
 warnings remain expected test-environment noise. Deliberate unsafe diagnostics
 remain confined to process/test output and are asserted absent from visible UI.
+
+## Fix Round 2
+
+### Independent Re-review Verification
+
+The final `Fix Round 1 Independent Re-review` findings were traced against the
+current renderer before production changes.
+
+- Reprocess result acceptance still depended on the global interaction version.
+  A -> B -> A therefore rejected an otherwise current A operation and left A's
+  visible operation state in `running`.
+- Restore had no durable operation intent. An in-flight D commit could advance
+  the successful baseline before the compensating A write failed, so the next
+  restore captured D instead of retrying A.
+- `onCommit` ran inside the persistence `try/catch`, allowing an observer
+  exception to turn a successful backend write into an error outcome.
+- Renderer session and reprocess-version maps were never pruned after history
+  snapshots dropped clean records.
+
+### RED
+
+- Focused autosave and main-view-state tests: 24 passed, 2 failed.
+  - A successful save followed by a throwing `onCommit` returned `ok: false`.
+  - The required clean-orphan session/version pruning helper did not exist.
+- Delayed V4 reprocess smoke:
+  - A reprocess started, selection moved to B and back to A before release.
+  - The returned A result left the old editor text and `reprocessState=running`,
+    and the smoke timed out on the new acceptance assertion.
+- Delayed restore compensation smoke:
+  - D completed, the first compensating A write failed, selection moved away
+    and back, and a second compensating write was failed deliberately.
+  - With the old restore handler restored for mutation verification, the second
+    attempt displayed D instead of A and failed the new assertion.
+
+### GREEN And Closure
+
+- Reprocess captures the immutable operation ID, per-record operation version,
+  and that session's editor revision. Selection changes no longer invalidate a
+  current A result. Returning to an unedited A accepts success or shows safe
+  failure; neither path can remain in `running`.
+- Local edits during a delayed success or failure keep the A draft. Successful
+  reprocess updates A's persisted baseline and requeues the newer draft so the
+  backend cannot retain the reprocess result over the user's later edit.
+- Each session now owns `pendingRestoreTarget` and a restore version. Started
+  writes may advance the real successful baseline, but failed compensation
+  retains the original target across repeated failures and selection changes.
+  Only successful compensation clears the restore intent.
+- Autosave settles persistence before notifying `onCommit`. Observer exceptions
+  are isolated as best-effort notification failures; the successful outcome,
+  saved UI state, and serial queue remain intact.
+- Refresh prunes clean orphan sessions and operation versions through a tested
+  helper while retaining dirty, saving, failed, pending-restore, and active
+  reprocess state.
+- Existing refresh, failed-draft navigation, multiline, Unicode whitespace,
+  accessibility, safe-text, eight-language, and both Electron smoke paths
+  remain covered without visual or navigation changes.
+
+### Fix Round 2 Changed Files
+
+- `scripts/electron-v4-shell-smoke.mjs`
+- `src/renderer/app.js`
+- `src/renderer/main-view-state.js`
+- `src/renderer/versioned-autosave.js`
+- `tests/main-view-state.test.js`
+- `tests/versioned-autosave.test.js`
+- `.superpowers/sdd/2026-07-27-windows-ui-v4-startup-reliability/task-9-report.md`
+
+### Fix Round 2 Verification
+
+- Focused Task 9 tests:
+  - 83 passed, 0 failed.
+- `npm.cmd test`:
+  - 535 tests, 532 passed, 0 failed, 3 skipped.
+- Two consecutive `npm.cmd run check:app` runs:
+  - Run 1: retained regression smoke `ok: true`; V4 shell smoke `ok: true`.
+  - Run 2: retained regression smoke `ok: true`; V4 shell smoke `ok: true`.
+- Direct post-mutation V4 shell smoke:
+  - `ok: true`.
+- Syntax and `git diff --check`:
+  - Passed.
+
+### Fix Round 2 Concerns
+
+No known functional blocker. Electron still emits expected host-profile OS
+crypt and disk/GPU cache warnings. Deliberate unsafe fixture diagnostics remain
+limited to process/test output and are asserted absent from visible Task 9 UI.

@@ -806,26 +806,28 @@ app.whenReady().then(async () => {
       (state) => state.selectedHistoryId === "history-older" && state.resultText === historyOlderText,
       5000
     );
-    delayedReprocess.release();
-    await waitForState(
-      window,
-      () => historyFixtures.find((entry) => entry.id === "history-yesterday").text === delayedReprocessText,
-      5000
-    );
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const switchedDuringReprocessState = await readRendererState(window);
-    assert.equal(switchedDuringReprocessState.selectedHistoryId, "history-older");
-    assert.equal(switchedDuringReprocessState.resultText, historyOlderText);
-    assert.equal(historyFixtures.find((entry) => entry.id === "history-older").text, historyOlderText);
-
     await window.webContents.executeJavaScript(
       "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
     );
     await waitForState(
       window,
-      (state) => state.selectedHistoryId === "history-yesterday" && state.resultText === delayedReprocessText,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.reprocessState === "running"
+      ),
       5000
     );
+    delayedReprocess.release();
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === delayedReprocessText &&
+        state.reprocessState === "idle"
+      ),
+      5000
+    );
+    assert.equal(historyFixtures.find((entry) => entry.id === "history-older").text, historyOlderText);
 
     const delayedReprocessFailure = delayNextHistoryReprocess({
       ok: false,
@@ -838,8 +840,6 @@ app.whenReady().then(async () => {
       "document.querySelector('[data-history-id=\"history-older\"]').click()"
     );
     await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
-    delayedReprocessFailure.release();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await window.webContents.executeJavaScript(
       "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
     );
@@ -847,17 +847,110 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         state.selectedHistoryId === "history-yesterday" &&
+        state.reprocessState === "running"
+      ),
+      5000
+    );
+    delayedReprocessFailure.release();
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
         state.resultText === delayedReprocessText &&
-        state.reprocessState === "idle"
+        state.reprocessState === "error"
       ),
       5000
     );
 
+    const localEditDuringReprocess = "切回 A 后输入的本地草稿";
+    const delayedEditedReprocess = delayNextHistoryReprocess({
+      ok: true,
+      entry: {
+        ...historyFixtures.find((entry) => entry.id === "history-yesterday"),
+        id: "history-yesterday",
+        text: "不应覆盖本地草稿的重处理结果",
+        status: "complete",
+        processingError: ""
+      }
+    });
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    await delayedEditedReprocess.started;
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await waitForState(window, (state) => state.reprocessState === "running", 5000);
+    await editSelectedHistory(window, localEditDuringReprocess);
+    delayedEditedReprocess.release();
+    await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === localEditDuringReprocess &&
+        state.reprocessState !== "running" &&
+        state.editorSaveState === "saved"
+      ),
+      5000
+    );
+    await waitForState(
+      window,
+      () => historyFixtures.find((entry) => entry.id === "history-yesterday").text === localEditDuringReprocess,
+      5000
+    );
+    assert.deepEqual(historyUpdateCalls.at(-1), {
+      id: "history-yesterday",
+      text: localEditDuringReprocess
+    });
+
+    const localEditDuringFailedReprocess = "失败返回前切回 A 输入的本地草稿";
+    const delayedEditedReprocessFailure = delayNextHistoryReprocess({
+      ok: false,
+      reason: "processing_failed",
+      message: unsafeDiagnostic
+    });
+    await window.webContents.executeJavaScript("document.querySelector('#reprocessResult').click()");
+    await delayedEditedReprocessFailure.started;
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await waitForState(window, (state) => state.reprocessState === "running", 5000);
+    await editSelectedHistory(window, localEditDuringFailedReprocess);
+    delayedEditedReprocessFailure.release();
+    const editedFailedReprocessState = await waitForState(
+      window,
+      (state) => (
+        state.selectedHistoryId === "history-yesterday" &&
+        state.resultText === localEditDuringFailedReprocess &&
+        state.reprocessState === "error" &&
+        state.editorSaveState === "saved"
+      ),
+      5000
+    );
+    await waitForState(
+      window,
+      () => (
+        historyFixtures.find((entry) => entry.id === "history-yesterday").text
+          === localEditDuringFailedReprocess
+      ),
+      5000
+    );
+    assertNoUnsafeDiagnostic(editedFailedReprocessState.visibleMainText, "Edited failed reprocess");
+
     const restoreBaseline = delayedReprocessText;
+    await editSelectedHistory(window, restoreBaseline);
+    await waitForState(window, (state) => state.editorSaveState === "saved", 5000);
     const updatesBeforeInFlightRestore = historyUpdateCalls.length;
     const inFlightRestoreSave = delayNextHistoryUpdate();
     await editSelectedHistory(window, "恢复前已开始写入的旧草稿");
     await inFlightRestoreSave.started;
+    queueHistoryUpdateResult({ ok: false, reason: "save_failed", message: unsafeDiagnostic });
     await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
     inFlightRestoreSave.release();
     await waitForState(
@@ -865,17 +958,71 @@ app.whenReady().then(async () => {
       () => historyUpdateCalls.length >= updatesBeforeInFlightRestore + 2,
       5000
     );
-    const inFlightRestoreState = await waitForState(
+    const firstFailedRestoreState = await waitForState(
       window,
-      (state) => state.resultText === restoreBaseline && state.editorSaveState === "saved",
+      (state) => state.resultText === restoreBaseline && state.editorSaveState === "error",
+      5000
+    );
+    assert.equal(
+      historyFixtures.find((entry) => entry.id === "history-yesterday").text,
+      "恢复前已开始写入的旧草稿"
+    );
+    assert.deepEqual(
+      historyUpdateCalls.slice(updatesBeforeInFlightRestore).map((call) => call.text),
+      ["恢复前已开始写入的旧草稿", restoreBaseline]
+    );
+    assertNoUnsafeDiagnostic(firstFailedRestoreState.visibleMainText, "Failed in-flight restore");
+
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-older\"]').click()"
+    );
+    await waitForState(window, (state) => state.selectedHistoryId === "history-older", 5000);
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-history-id=\"history-yesterday\"]').click()"
+    );
+    await waitForState(
+      window,
+      (state) => (
+        state.resultText === restoreBaseline &&
+        state.editorSaveState === "error"
+      ),
+      5000
+    );
+
+    queueHistoryUpdateResult({ ok: false, reason: "save_failed", message: unsafeDiagnostic });
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    const secondFailedRestoreState = await waitForState(
+      window,
+      (state) => (
+        historyUpdateCalls.length >= updatesBeforeInFlightRestore + 3 &&
+        state.resultText === restoreBaseline &&
+        state.editorSaveState === "error"
+      ),
+      5000
+    );
+    assert.equal(
+      historyFixtures.find((entry) => entry.id === "history-yesterday").text,
+      "恢复前已开始写入的旧草稿"
+    );
+    assert.equal(historyUpdateCalls.at(-1).text, restoreBaseline);
+    assertNoUnsafeDiagnostic(secondFailedRestoreState.visibleMainText, "Retried failed restore");
+
+    await window.webContents.executeJavaScript("document.querySelector('#restoreResult').click()");
+    const recoveredRestoreState = await waitForState(
+      window,
+      (state) => (
+        historyUpdateCalls.length >= updatesBeforeInFlightRestore + 4 &&
+        state.resultText === restoreBaseline &&
+        state.editorSaveState === "saved"
+      ),
       5000
     );
     assert.equal(historyFixtures.find((entry) => entry.id === "history-yesterday").text, restoreBaseline);
     assert.deepEqual(
       historyUpdateCalls.slice(updatesBeforeInFlightRestore).map((call) => call.text),
-      ["恢复前已开始写入的旧草稿", restoreBaseline]
+      ["恢复前已开始写入的旧草稿", restoreBaseline, restoreBaseline, restoreBaseline]
     );
-    assertNoUnsafeDiagnostic(inFlightRestoreState.visibleMainText, "In-flight restore");
+    assertNoUnsafeDiagnostic(recoveredRestoreState.visibleMainText, "Recovered restore");
 
     const saveBGate = delayNextHistoryUpdate();
     await editSelectedHistory(window, "最近成功保存 B");

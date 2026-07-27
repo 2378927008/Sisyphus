@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { createVersionedAutosave } from "../src/renderer/versioned-autosave.js";
 
-function createAutosaveHarness({ save } = {}) {
+function createAutosaveHarness({ save, onCommit } = {}) {
   const timers = [];
   const saved = [];
   const states = [];
@@ -36,6 +36,7 @@ function createAutosaveHarness({ save } = {}) {
     },
     onCommit(commit) {
       commits.push(commit);
+      onCommit?.(commit);
     }
   });
 
@@ -263,4 +264,30 @@ test("replace waits for an in-flight draft before persisting the restored baseli
     { ok: outcome.ok, id: outcome.id, text: outcome.text },
     { ok: true, id: "h1", text: "baseline" }
   );
+});
+
+test("keeps a successful save successful when the commit observer throws", async () => {
+  const saved = [];
+  const harness = createAutosaveHarness({
+    save: async (payload) => {
+      saved.push(payload);
+      return { ok: true };
+    },
+    onCommit() {
+      throw new Error("observer failed");
+    }
+  });
+
+  harness.autosave.schedule({ id: "h1", text: "first" });
+  harness.flushTimer();
+  const firstOutcome = await harness.autosave.flush();
+  harness.autosave.schedule({ id: "h1", text: "second" });
+  harness.flushTimer();
+  const secondOutcome = await harness.autosave.flush();
+
+  assert.equal(firstOutcome.ok, true);
+  assert.equal(secondOutcome.ok, true);
+  assert.deepEqual(saved.map((entry) => entry.text), ["first", "second"]);
+  assert.equal(harness.states.some((state) => state.phase === "error"), false);
+  assert.equal(harness.states.at(-1).phase, "saved");
 });
