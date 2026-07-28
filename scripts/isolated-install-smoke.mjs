@@ -487,9 +487,7 @@ async function removeShortcutIfOwned(shortcutPath, installedExecutable) {
   return true;
 }
 
-async function releaseArtifacts(pkg) {
-  const outputDir = pkg.build?.directories?.output || "dist";
-  const productName = pkg.build?.productName || "Local Flow";
+function requireInstallRegistryGuid(pkg) {
   const installRegistryGuid = String(pkg.build?.nsis?.guid || "").trim();
   if (
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
@@ -501,6 +499,13 @@ async function releaseArtifacts(pkg) {
       "The Windows installer identity is not configured safely."
     );
   }
+  return installRegistryGuid;
+}
+
+async function releaseArtifacts(pkg) {
+  const outputDir = pkg.build?.directories?.output || "dist";
+  const productName = pkg.build?.productName || "Local Flow";
+  requireInstallRegistryGuid(pkg);
   return {
     version: pkg.version,
     installer: await observedFile(
@@ -548,6 +553,7 @@ async function runSmoke() {
     await readFile(path.join(projectRoot, "package.json"), "utf8")
   );
   const productName = pkg.build?.productName || "Local Flow";
+  const installRegistryGuid = requireInstallRegistryGuid(pkg);
   smokeStage = "release_artifacts";
   const release = await releaseArtifacts(pkg);
   const installerPath = path.join(

@@ -259,6 +259,10 @@ test("isolated install smoke guards the clean runner profile and temporary insta
   assert.match(source, /assertSafeIsolatedRoot/);
   assert.match(source, /currentUserRegistrationCountBefore/);
   assert.match(source, /installRegistryGuid/);
+  assert.match(
+    source,
+    /const installRegistryGuid = requireInstallRegistryGuid\(pkg\)/
+  );
   assert.match(source, /existing_install_key_detected/);
   assert.match(source, /queryWindowsKnownFolders/);
   assert.match(source, /existing_shortcut_detected/);
