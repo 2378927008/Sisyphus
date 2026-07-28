@@ -51,3 +51,5 @@ Task 13: review findings fixed with TDD, persistent evidence, and release proven
 Task 13: fix round 2 implemented and verified (focused 30/30; full 608/608; check:product and verify:release passed; awaiting scoped re-review, not complete)
 Task 13: fix round 3 implemented and verified (focused 37/37; full 619/619; check:product and verify:release passed; awaiting scoped re-review, not complete)
 Task 13: fix round 4 implemented and verified (privacy 38/38; evidence 57/57; full 639/639; check:product and verify:release passed; awaiting scoped re-review, not complete)
+Task 13: fix round 4/5 (1 addressed, 0 open; commits 762b059..64c99dd)
+Task 13: complete (commits 641707d..64c99dd, final scoped review clean)
