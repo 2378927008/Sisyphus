@@ -457,6 +457,89 @@ test("Windows UI v4 styles enforce the approved visual and responsive system", a
   assert.doesNotMatch(styles, /record-orb/);
 });
 
+test("visual smoke captures the approved Windows UI v4 viewport contract", async () => {
+  const visualSource = await readFile(
+    new URL("../scripts/electron-visual-smoke.mjs", import.meta.url),
+    "utf8"
+  );
+  const viewportMatch = visualSource.match(
+    /const visualViewports = (?<viewports>\[[\s\S]*?\n\]);/
+  );
+
+  assert.ok(viewportMatch, "visual smoke should declare visualViewports");
+  assert.deepEqual(JSON.parse(viewportMatch.groups.viewports), [
+    { width: 1180, height: 800, state: "desktop-split" },
+    { width: 980, height: 720, state: "compact-split" },
+    { width: 780, height: 600, state: "master-detail" }
+  ]);
+  assert.match(
+    visualSource,
+    /import \{ buildHudWindowOptions \} from "\.\.\/src\/main\/hud-window\.js";/
+  );
+  assert.match(
+    visualSource,
+    /buildHudWindowOptions\(\{\s*preloadPath:\s*hudPreloadPath\s*\}\)/
+  );
+  assert.doesNotMatch(visualSource, /\b560\b/);
+});
+
+test("1180 and compact split layouts preserve command and editor action fit", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+
+  assert.match(
+    styles,
+    /\.language-controls label:first-of-type\s*\{[^}]*flex:\s*0 0 90px/s
+  );
+  assert.match(
+    styles,
+    /\.language-controls label:last-of-type\s*\{[^}]*min-width:\s*170px[^}]*flex:\s*1 1 170px/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*1100px\)\s*and\s*\(max-width:\s*1199px\)[\s\S]*?\.command-strip\s*\{[^}]*minmax\(330px,\s*1\.2fr\)/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*1100px\)\s*and\s*\(max-width:\s*1199px\)[\s\S]*?\.workspace-page\s*\{[^}]*grid-template-columns:\s*40% 60%/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*1100px\)\s*and\s*\(max-width:\s*1199px\)[\s\S]*?\.editor-toolbar\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*1100px\)\s*and\s*\(max-width:\s*1199px\)[\s\S]*?\.button-row\s*\{[^}]*flex-wrap:\s*nowrap/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*1100px\)\s*and\s*\(max-width:\s*1199px\)[\s\S]*?\.result-character-count\s*\{[^}]*display:\s*none/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*900px\)\s*and\s*\(max-width:\s*999px\)[\s\S]*?\.command-strip\s*\{[^}]*minmax\(280px,\s*1\.5fr\)/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*480px\)[\s\S]*?\.command-select,\s*\.language-controls\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*480px\)[\s\S]*?\.language-controls label:first-of-type\s*\{[^}]*flex:\s*0 0 90px/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*480px\)[\s\S]*?\.language-controls label:last-of-type\s*\{[^}]*min-width:\s*150px/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(max-width:\s*480px\)[\s\S]*?#recordButton\s*\{[^}]*grid-row:\s*1/s
+  );
+  assert.match(
+    await readFile(new URL("../scripts/electron-visual-smoke.mjs", import.meta.url), "utf8"),
+    /const nativeSelectArrowSafety = 18;[\s\S]*?textWidth \+ padding \+ nativeSelectArrowSafety \+ 2 <= element\.clientWidth/s
+  );
+});
+
 test("minimum window switches between list and editor without hiding the back action", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
   const narrowStart = styles.indexOf("@media (max-width: 899px)");

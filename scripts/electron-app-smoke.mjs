@@ -9,6 +9,10 @@ import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 import { createSystemInputController } from "../src/main/system-input-controller.js";
+import {
+  appSmokeFixtureSettings,
+  createAppSmokeHistoryFixtures
+} from "./electron-app-smoke-fixtures.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, "..");
@@ -159,10 +163,7 @@ function assertSmokeIpcCoverage() {
 
 let settings = mergeSettings({
   ...defaultSettings,
-  hotkey: "CommandOrControl+Alt+Space",
-  pasteAfterTranscribe: false,
-  whisperCliPath: "C:\\smoke\\whisper-cli.exe",
-  whisperModelPath: "C:\\smoke\\ggml-base.bin"
+  ...appSmokeFixtureSettings
 });
 let settingsAtDictation = null;
 let dictationResult = {
@@ -179,39 +180,7 @@ let deferProcessingLanguageSaves = false;
 let activeSettingsSaveCalls = 0;
 let maxConcurrentSettingsSaveCalls = 0;
 const deferredSettingsSaveResolvers = [];
-const historyFixtures = [
-  {
-    createdAt: "2026-07-11T04:00:00.000Z",
-    transcript: "Legacy history source",
-    status: "complete",
-    text: "Legacy history entry"
-  },
-  {
-    id: "history-zh",
-    createdAt: "2026-07-11T03:00:00.000Z",
-    status: "complete",
-    text: "中文历史记录"
-  },
-  {
-    id: "history-en",
-    createdAt: "2026-07-11T02:00:00.000Z",
-    status: "complete",
-    text: "English history entry"
-  },
-  {
-    id: "history-failed",
-    createdAt: "2026-07-11T01:00:00.000Z",
-    status: "failed",
-    text: "",
-    processingError: "spawn C:\\private\\history-helper.exe ENOENT"
-  },
-  {
-    id: "history-emoji",
-    createdAt: "2026-07-11T00:00:00.000Z",
-    status: "complete",
-    text: "Emoji history entry 🎤"
-  }
-];
+const historyFixtures = createAppSmokeHistoryFixtures();
 const insertTextCalls = [];
 let insertTextResult = { ok: true };
 let historyListCalls = 0;

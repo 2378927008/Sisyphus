@@ -36,3 +36,5 @@ Task 11: re-review round 1 - 1 finding open (Escape globalShortcut activation)
 Task 11: fix round 2 implemented and verified (awaiting independent re-review)
 Task 11: fix round 2/5 (1 addressed, 0 open; commits b6c57dd..4f7ecbd)
 Task 11: complete (commits 7c26238..4f7ecbd, review clean)
+Task 12: in progress
+Task 12: implemented and verified (awaiting independent review)

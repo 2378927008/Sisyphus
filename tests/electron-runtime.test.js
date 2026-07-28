@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { electronRuntimeSwitches } from "../src/main/electron-runtime.js";
+import { createAppSmokeHistoryFixtures } from "../scripts/electron-app-smoke-fixtures.mjs";
 
 function removeLeadingWhitespaceAndComments(source) {
   let remainder = source;
@@ -246,17 +247,16 @@ test("app smoke rejects every focus containment warning instead of only new warn
 
 test("app smoke history fixtures include complete Chinese English and emoji entries", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
-  const fixturesMatch = smokeSource.match(/const historyFixtures = \[(?<fixtures>[\s\S]*?)\n\];/);
+  const completeEntries = createAppSmokeHistoryFixtures()
+    .filter((entry) => entry.status === "complete")
+    .map((entry) => entry.text);
 
-  assert.ok(fixturesMatch, "history fixtures should be declared");
-  const completeEntries = [...fixturesMatch.groups.fixtures.matchAll(/status:\s*"complete"[\s\S]*?text:\s*"([^"]+)"/g)]
-    .map((match) => match[1]);
-
+  assert.match(smokeSource, /createAppSmokeHistoryFixtures\(\)/);
   assert.ok(completeEntries.length >= 3, "smoke history should include three completed entries");
   assert.ok(completeEntries.some((text) => /[\u4e00-\u9fff]/.test(text)), "a completed history entry should be Chinese");
   assert.ok(completeEntries.some((text) => /^[\x00-\x7F]+$/.test(text)), "a completed history entry should be English");
   assert.ok(completeEntries.some((text) => /\p{Extended_Pictographic}/u.test(text)), "a completed history entry should include emoji");
-  assert.match(fixturesMatch.groups.fixtures, /status:\s*"failed"/);
+  assert.ok(createAppSmokeHistoryFixtures().some((entry) => entry.status === "failed"));
 });
 
 test("app smoke registry matches the channels invoked by every exposed preload API", async () => {
