@@ -40,3 +40,5 @@ Task 12: in progress
 Task 12: implemented and verified (awaiting independent review)
 Task 12: review fix round 1 implemented and verified (awaiting scoped re-review)
 Task 12: review fix round 2 implemented and verified (awaiting scoped re-review)
+Task 12: complete (commits b06412e..31317d8, final scoped review clean)
+Task 13: in progress
