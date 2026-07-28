@@ -1,6 +1,8 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { createHudActions, wireHudIpc } from "../src/main/hud-actions.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
@@ -15,11 +17,96 @@ const hudHtmlPath = path.join(projectRoot, "src", "renderer", "hud.html");
 const preloadPath = path.join(projectRoot, "src", "preload.cjs");
 const hudPreloadPath = path.join(projectRoot, "src", "hud-preload.cjs");
 const unsafeDiagnostic = "3221225477 spawn C:\\private\\provider-helper.exe ENOENT stderr";
+const execFileAsync = promisify(execFile);
+const powershellPath = path.join(
+  process.env.SystemRoot || "C:\\Windows",
+  "System32",
+  "WindowsPowerShell",
+  "v1.0",
+  "powershell.exe"
+);
+const windowsEscapeInjectionScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class SmokeKeyboardInput {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct INPUT {
+    public uint type;
+    public InputUnion input;
+  }
+
+  [StructLayout(LayoutKind.Explicit)]
+  private struct InputUnion {
+    [FieldOffset(0)]
+    public MOUSEINPUT mouse;
+    [FieldOffset(0)]
+    public KEYBDINPUT keyboard;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct MOUSEINPUT {
+    public int dx;
+    public int dy;
+    public uint mouseData;
+    public uint flags;
+    public uint time;
+    public UIntPtr extraInfo;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct KEYBDINPUT {
+    public ushort virtualKey;
+    public ushort scanCode;
+    public uint flags;
+    public uint time;
+    public UIntPtr extraInfo;
+  }
+
+  [DllImport("user32.dll", SetLastError = true)]
+  private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
+
+  public static void SendEscape() {
+    SendKeyboardInput(0);
+    Thread.Sleep(40);
+    SendKeyboardInput(0x0002);
+  }
+
+  private static void SendKeyboardInput(uint flags) {
+    INPUT[] inputs = {
+      new INPUT {
+        type = 1,
+        input = new InputUnion {
+          keyboard = new KEYBDINPUT {
+            virtualKey = 0x1B,
+            scanCode = 0x01,
+            flags = flags,
+            time = 0,
+            extraInfo = UIntPtr.Zero
+          }
+        }
+      }
+    };
+    uint sent = SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
+    if (sent != 1) {
+      throw new Win32Exception(Marshal.GetLastWin32Error(), "SendInput did not inject Escape.");
+    }
+  }
+}
+"@
+[SmokeKeyboardInput]::SendEscape()
+"SENT=2 SESSION=$([System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
+`;
+let smokeStage = "startup";
+let lastOsInputEvidence = "";
 
 applyElectronRuntimeSwitches(app);
 
 const timeout = setTimeout(() => {
-  console.error("App smoke test timed out.");
+  console.error(`App smoke test timed out during stage: ${smokeStage}`);
   app.exit(2);
 }, 45000);
 
@@ -48,24 +135,8 @@ let smokeHudWindow = null;
 let smokeMainWindow = null;
 let smokeSystemInputController = null;
 let hudActions = null;
-let ownedEscapeCallback = null;
 let driveRendererRecordingCommands = false;
 const rendererResetCommands = [];
-const smokeGlobalShortcut = {
-  register(accelerator, callback) {
-    const registered = globalShortcut.register(accelerator, callback);
-    if (registered && accelerator === "Escape") {
-      ownedEscapeCallback = callback;
-    }
-    return registered;
-  },
-  unregister(accelerator) {
-    if (accelerator === "Escape") {
-      ownedEscapeCallback = null;
-    }
-    globalShortcut.unregister(accelerator);
-  }
-};
 
 function registerSmokeIpcHandler(channel, handler) {
   if (!smokeIpcChannelRegistry.includes(channel)) {
@@ -372,7 +443,7 @@ app.whenReady().then(async () => {
     }
   });
   hudActions = createHudActions({
-    globalShortcut: smokeGlobalShortcut,
+    globalShortcut,
     systemInputController: smokeSystemInputController,
     revealMainWindow: () => hudActionCalls.push("open")
   });
@@ -392,11 +463,6 @@ app.whenReady().then(async () => {
     }
   });
   smokeMainWindow = window;
-  window.webContents.on("before-input-event", (_event, input) => {
-    if (input.type === "keyDown" && input.key === "Escape") {
-      ownedEscapeCallback?.();
-    }
-  });
   const hudWindow = new BrowserWindow({
     show: false,
     width: 460,
@@ -488,6 +554,7 @@ app.whenReady().then(async () => {
       unauthorizedHudWindow.loadFile(hudHtmlPath)
     ]);
 
+    smokeStage = "unauthorized-hud-ipc";
     const unauthorizedActionCount = hudActionCalls.length;
     await unauthorizedHudWindow.webContents.executeJavaScript(`
       (() => {
@@ -501,10 +568,19 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized renderer was allowed to invoke a HUD action.");
     }
 
-    globalShortcut.register("Escape", () => hudActionCalls.push("conflict-escape"));
+    smokeStage = "escape-conflict-register";
+    const conflictEscapeCount = hudActionCalls.filter((action) => action === "conflict-escape").length;
+    const conflictRegistered = globalShortcut.register(
+      "Escape",
+      () => hudActionCalls.push("conflict-escape")
+    );
+    if (!conflictRegistered) {
+      throw new Error("Could not register the external Escape conflict owner.");
+    }
     await smokeSystemInputController.start();
-    await sendEscapeKey();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    smokeStage = "escape-conflict-os-injection";
+    await sendOsEscapeKey();
+    await waitForHudActionCount("conflict-escape", conflictEscapeCount + 1, 5000);
     if (smokeSystemInputController.getState().phase !== "starting") {
       throw new Error("Conflicting Escape owner should not invoke HUD cancel.");
     }
@@ -514,12 +590,15 @@ app.whenReady().then(async () => {
     }
     globalShortcut.unregister("Escape");
 
+    smokeStage = "escape-owned-register";
     const resetsBeforeEscape = rendererResetCommands.length;
     await smokeSystemInputController.start();
     if (!globalShortcut.isRegistered("Escape")) {
       throw new Error("Escape should be registered while starting.");
     }
-    await sendEscapeKey();
+    smokeStage = "escape-owned-os-injection";
+    await sendOsEscapeKey();
+    smokeStage = "escape-owned-cancel-idle";
     await waitForControllerPhase("idle", 5000);
     if (rendererResetCommands.length !== resetsBeforeEscape + 1) {
       throw new Error("Owned Escape did not reset the active recording operation.");
@@ -2027,6 +2106,7 @@ app.whenReady().then(async () => {
       throw new Error(`Renderer emitted console messages: ${rendererMessages.map((item) => item.message).join(" | ")}`);
     }
 
+    smokeStage = "success-output";
     console.log(JSON.stringify({
       ok: true,
       initialState,
@@ -2041,10 +2121,12 @@ app.whenReady().then(async () => {
       hudState,
       warningHudState,
       hudActionCalls,
+      osInputEvidence: lastOsInputEvidence,
       settingsAtDictation,
       rendererMessages: rendererMessages.filter((item) => item.level >= 2)
     }, null, 2));
     clearTimeout(timeout);
+    smokeStage = "dispose";
     hudActions.dispose();
     if (globalShortcut.isRegistered("Escape")) {
       throw new Error("Escape should be released after HUD actions dispose.");
@@ -2056,6 +2138,8 @@ app.whenReady().then(async () => {
     }));
     console.error(JSON.stringify({
       ok: false,
+      stage: smokeStage,
+      osInputEvidence: lastOsInputEvidence,
       name: error.name,
       message: error.message,
       state,
@@ -2138,15 +2222,24 @@ async function waitForControllerPhase(phase, timeoutMs) {
   throw new Error(`Timed out waiting for controller phase: ${phase}`);
 }
 
-async function sendEscapeKey() {
-  smokeMainWindow.webContents.sendInputEvent({
-    type: "keyDown",
-    keyCode: "Escape"
-  });
-  smokeMainWindow.webContents.sendInputEvent({
-    type: "keyUp",
-    keyCode: "Escape"
-  });
+async function sendOsEscapeKey() {
+  const { stdout } = await execFileAsync(
+    powershellPath,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      windowsEscapeInjectionScript
+    ],
+    {
+      timeout: 5000,
+      windowsHide: true
+    }
+  );
+  lastOsInputEvidence = stdout.trim();
 }
 
 function readRendererState(window) {

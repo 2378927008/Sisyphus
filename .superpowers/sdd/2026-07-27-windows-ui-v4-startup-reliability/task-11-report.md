@@ -150,3 +150,73 @@
   in process logs and are asserted absent from product HUD/status copy.
 - No iPhone files, model/API behavior, Task 8-10 UI behavior, or Task 12 visual
   automation were changed.
+
+## Fix Round 2
+
+### Re-review Round 1
+
+- Independent re-review left one finding open: the Escape smoke still routed an
+  Electron renderer input event through a captured callback instead of proving
+  activation by Electron's registered global accelerator.
+
+### RED
+
+- Added a runtime regression test that rejects `ownedEscapeCallback`,
+  `smokeGlobalShortcut`, `before-input-event`, and renderer
+  `sendInputEvent` bridges.
+- The test requires `createHudActions` to receive Electron's real
+  `globalShortcut`, requires external Windows input injection, and pins the
+  conflict-owner wait and named smoke-stage diagnostics.
+- The first focused run failed as intended: 54 passed, 1 failed.
+
+### GREEN
+
+- Removed every captured-callback and renderer-input bridge from the smoke.
+- The smoke now launches Windows PowerShell outside Electron and calls
+  `user32.SendInput` for an Escape key-down/key-up pair. The helper reports the
+  injected event count and Windows session, but never invokes a registered
+  callback directly or indirectly.
+- A real conflicting `globalShortcut.register("Escape")` owner is installed
+  first. OS Escape must produce `conflict-escape` before the smoke continues,
+  proving the injection mechanism reaches Electron's global accelerator.
+- After releasing the conflict, `createHudActions` owns Escape through the real
+  Electron registry. A second OS Escape must trigger cancel, renderer reset,
+  and idle. Existing release during non-owned phases and disposal checks remain
+  in place.
+- Failure output now identifies the exact smoke stage and includes bounded OS
+  input evidence.
+
+### Environment Evidence
+
+- The default restricted Codex runner uses an isolated
+  `CodexSandboxDesktop-*` desktop. In that desktop, `SendInput` reports
+  `SENT=2 SESSION=1`, but registered global hotkey callbacks do not receive the
+  event; the expected failure stage is `escape-conflict-os-injection`.
+- The identical code was therefore validated on the real Windows Default input
+  desktop with `sandbox_permissions=require_escalated`. This is required
+  execution context for the system-level input contract, not a skipped test.
+- Two final external runs exited 0. On both runs the regression and V4 shell
+  smokes returned `"ok": true`; the regression output contained
+  `conflict-escape`, the owned `cancel`, and
+  `"osInputEvidence": "SENT=2 SESSION=1"`.
+
+### Fix Round 2 Verification
+
+- Focused controller/actions/window/state/markup/runtime/i18n/tray suite:
+  186 passed, 0 failed.
+- `npm.cmd test`: 559 passed, 3 skipped, 0 failed (562 total).
+- `npm.cmd run check:app`: passed twice on the real Windows Default input
+  desktop; both regression and V4 shell smokes returned `"ok": true` on both
+  runs.
+- Task 11 fix round 2 is implemented and verified, but remains pending
+  independent re-review. It is not declared complete here.
+
+### Fix Round 2 Concerns
+
+- Running the system-input smoke inside the restricted Codex desktop will
+  continue to fail at the conflict injection stage by design of that isolated
+  desktop. It must run on the interactive Default input desktop.
+- Deliberate provider diagnostic fixture errors remain in process logs while UI
+  redaction assertions pass.
+- No iPhone files, model/API behavior, Task 8-10 UI behavior, or Task 12 visual
+  automation were changed.

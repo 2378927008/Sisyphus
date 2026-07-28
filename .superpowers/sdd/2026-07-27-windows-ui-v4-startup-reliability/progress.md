@@ -32,3 +32,5 @@ Task 10: complete (commits 868bcd9..7c26238, review clean)
 Task 11: in progress
 Task 11: review findings fixed (round 1)
 Task 11: complete (round 1 verified: focused, full test, double app smoke)
+Task 11: re-review round 1 - 1 finding open (Escape globalShortcut activation)
+Task 11: fix round 2 implemented and verified (awaiting independent re-review)

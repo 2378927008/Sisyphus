@@ -845,6 +845,21 @@ test("app smoke covers keyboard and mouse shortcut recording", async () => {
   assert.match(smokeSource, /pasteLastHotkeyValue:\s*document\.querySelector\('#pasteLastHotkey'\)\?\.value/);
 });
 
+test("app smoke activates Escape only through Windows OS input and Electron globalShortcut", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.doesNotMatch(smokeSource, /ownedEscapeCallback|smokeGlobalShortcut/);
+  assert.doesNotMatch(smokeSource, /before-input-event/);
+  assert.doesNotMatch(smokeSource, /\.sendInputEvent\(/);
+  assert.match(smokeSource, /createHudActions\(\{\s*globalShortcut,/);
+  assert.match(smokeSource, /node:child_process/);
+  assert.match(smokeSource, /powershell(?:\.exe)?/i);
+  assert.match(smokeSource, /user32\.dll/i);
+  assert.match(smokeSource, /\b(?:SendInput|keybd_event)\b/);
+  assert.match(smokeSource, /waitForHudActionCount\("conflict-escape"/);
+  assert.match(smokeSource, /smokeStage/);
+});
+
 test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(command\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);
