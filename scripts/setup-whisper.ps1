@@ -64,12 +64,11 @@ function Test-FileSha256 {
     return $false
   }
 
-  try {
-    $actualSha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    return $actualSha256 -eq $ExpectedSha256.ToLowerInvariant()
-  } catch {
-    return $false
-  }
+  $hashCheck = Invoke-NodeProcess `
+    -Executable $NodeExe `
+    -Arguments @($hashCheckScript, $Path, $ExpectedSha256) `
+    -HideStdout
+  return $hashCheck.ExitCode -eq 0
 }
 
 function Download-WithFallback {
@@ -129,6 +128,7 @@ $binDir = Join-Path $InstallDir "bin"
 $modelDir = Join-Path $InstallDir "models"
 $downloadDir = Join-Path $InstallDir "downloads"
 $downloadScript = Join-Path $repoRoot "scripts\download-file.mjs"
+$hashCheckScript = Join-Path $repoRoot "scripts\check-file-sha256.mjs"
 $manifestPath = Join-Path $repoRoot "scripts\whisper-runtime-manifest.json"
 
 New-Item -ItemType Directory -Force -Path $binDir, $modelDir, $downloadDir | Out-Null

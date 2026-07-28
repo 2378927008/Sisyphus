@@ -46,6 +46,10 @@ function buildReleaseRequirements(pkg) {
       minBytes: 512
     },
     {
+      path: `${outputDir}/win-unpacked/resources/app/scripts/check-file-sha256.mjs`,
+      minBytes: 256
+    },
+    {
       path: `${outputDir}/win-unpacked/resources/vendor/whisper/bin/Release/whisper-cli.exe`,
       minBytes: 100_000
     },

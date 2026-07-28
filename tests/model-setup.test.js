@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -183,6 +191,41 @@ test("setup scripts accept a NodeExe parameter for packaged builds", () => {
     assert.doesNotMatch(script, /\|\s+node\b/);
     assert.match(script, /Invoke-NodeProcess/);
     assert.doesNotMatch(script, /&\s+\$NodeExe\b/);
+    assert.match(script, /check-file-sha256\.mjs/);
+    assert.doesNotMatch(script, /Get-FileHash/);
+  }
+});
+
+test("cross-version hash helper accepts only the expected file digest", () => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), "local-flow-hash-check-"));
+  const filePath = path.join(temporaryRoot, "runtime.bin");
+  const contents = Buffer.from("local-flow-runtime");
+  const expectedSha256 = createHash("sha256").update(contents).digest("hex");
+  writeFileSync(filePath, contents);
+
+  try {
+    const accepted = spawnSync(process.execPath, [
+      path.join(process.cwd(), "scripts", "check-file-sha256.mjs"),
+      filePath,
+      expectedSha256
+    ], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+    const rejected = spawnSync(process.execPath, [
+      path.join(process.cwd(), "scripts", "check-file-sha256.mjs"),
+      filePath,
+      "0".repeat(64)
+    ], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    assert.equal(accepted.status, 0, `${accepted.stdout || ""}\n${accepted.stderr || ""}`);
+    assert.equal(rejected.status, 1);
+    assert.doesNotMatch(`${rejected.stdout || ""}\n${rejected.stderr || ""}`, /[A-Z]:\\|\\\\/i);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
@@ -256,7 +299,8 @@ test("setup-llm uses a pinned verified runtime without GitHub release metadata",
   assert.match(llmScript, /\[switch\]\$RuntimeOnly/);
   assert.match(llmScript, /llama-runtime-manifest\.json/);
   assert.match(llmScript, /check-llama-runtime\.mjs/);
-  assert.match(llmScript, /Get-FileHash/);
+  assert.match(llmScript, /check-file-sha256\.mjs/);
+  assert.doesNotMatch(llmScript, /Get-FileHash/);
   assert.match(llmScript, /Remove-Item -LiteralPath \$binDir -Recurse/);
   assert.doesNotMatch(llmScript, /api\.github\.com\/repos\/ggml-org\/llama\.cpp\/releases\/latest/);
 });
@@ -399,7 +443,8 @@ test("setup-whisper uses pinned verified runtime and model manifests", () => {
   assert.match(baseModel.sha256, /^[a-f0-9]{64}$/);
   assert.ok(baseModel.urls.every((url) => url.includes(manifest.modelRevision)));
   assert.match(whisperScript, /whisper-runtime-manifest\.json/);
-  assert.match(whisperScript, /Get-FileHash/);
+  assert.match(whisperScript, /check-file-sha256\.mjs/);
+  assert.doesNotMatch(whisperScript, /Get-FileHash/);
   assert.match(whisperScript, /whisper_runtime_hash/);
   assert.match(whisperScript, /whisper_cli_hash/);
   assert.match(whisperScript, /whisper_model_hash/);

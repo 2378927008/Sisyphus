@@ -64,6 +64,7 @@ test("release verifier checks installer executable and icon config", async () =>
   assert.match(script, /resources\/app\/scripts\/llama-runtime-manifest\.json/);
   assert.match(script, /resources\/app\/scripts\/qwen-model-manifest\.json/);
   assert.match(script, /resources\/app\/scripts\/whisper-runtime-manifest\.json/);
+  assert.match(script, /resources\/app\/scripts\/check-file-sha256\.mjs/);
   assert.match(script, /resources\/vendor\/whisper\/bin\/Release\/whisper-cli\.exe/);
   assert.match(script, /resources\/vendor\/whisper\/models\/ggml-base\.bin/);
   assert.match(script, /resources\/vendor\/llm\/bin\/llama-cli\.exe/);
