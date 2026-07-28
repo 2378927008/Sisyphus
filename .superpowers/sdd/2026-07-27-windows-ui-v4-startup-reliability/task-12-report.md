@@ -1,67 +1,73 @@
 # Task 12 Report: Visual Regression And Complete Application Verification
 
-Status: implemented and verified, awaiting independent review
+Status: review fix round 1 implemented and verified, awaiting scoped re-review
 
 ## Scope
 
-Implemented Windows UI V4 visual regression only. No iPhone, model/API policy, or Task 13 packaging changes were made.
+Implemented and repaired Windows UI V4 visual regression only. No iPhone, model/API policy, or Task 13 packaging changes were made.
 
-## RED
+## Initial RED/GREEN
 
-1. Added the exact `check:visual` package contract and approved viewport contract.
-2. Ran `node --test tests/packaging-config.test.js tests/renderer-markup.test.js`.
-3. Observed the expected failure: `check:visual` was undefined and `scripts/electron-visual-smoke.mjs` did not exist (42 passed, 2 failed).
-4. Added stricter failing contracts during visual repair for the real 460 x 72 HUD, 1180/980 language and toolbar fit, the 2x narrow command layout, and Windows native-select arrow clearance.
+- RED: the package and viewport contracts failed because `check:visual` and its script did not exist.
+- GREEN: added the real-preload deterministic Electron capture flow, shared app-smoke fixture, five required artifacts, real 460 x 72 HUD, 2x master-detail workflow, native-select safety, and responsive visual fixes.
 
-## GREEN
+## Review Fix RED
 
-- Added `scripts/electron-visual-smoke.mjs` using the real preload, real IPC shape, deterministic shared app-smoke fixtures, Electron `capturePage()`, fixed viewports, and a side-by-side approved-reference comparison.
-- Extracted app smoke settings/history to `scripts/electron-app-smoke-fixtures.mjs` so app and visual checks consume the same data source.
-- Used `buildHudWindowOptions` directly and asserted the real 460 x 72 HUD dimensions, clipping, and overlap.
-- Added runtime checks for blank captures, horizontal overflow, select text fit, command/button clipping, focus visibility, overlap, icon rendering, and editor action rows.
-- Reserved an explicit 18 px Windows native-select arrow margin in language text-fit assertions.
-- Verified the 2x master-detail search/select/edit/copy/insert workflow without weakening clipping assertions.
-- Applied bounded responsive CSS fixes for 1180, 980, and the 2x narrow CSS viewport.
+Added three failing focused contracts before implementation:
 
-## Visual artifacts
+1. Required captures must re-focus after all settling work, re-check the declared target immediately before `capturePage()`, and verify an in-bounds focus treatment in the captured pixels.
+2. The real HUD collision set must include waveform, title, message, timer, and every visible action control instead of excluding text.
+3. The 780 master-detail record button must remain at most 54 px high and use a compact command layout.
 
-- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\desktop-split.png` (1180 x 800, 104036 bytes)
-- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\compact-split.png` (980 x 720, 89762 bytes)
-- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\master-detail-list.png` (780 x 600, 45934 bytes)
-- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\master-detail-editor.png` (780 x 600, 55915 bytes)
-- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\reference-comparison.png` (1900 x 730, 701434 bytes)
+`node --test tests/renderer-markup.test.js` initially reported 35 passed and 3 failed for these missing guarantees.
+
+During GREEN integration, the real visual run also exposed two meaningful edge cases:
+
+- An inset outline has no outward viewport extent when `outlineOffset + outlineWidth <= 0`.
+- Windows anti-aliases the focus ring, so the captured-pixel check uses a bounded 36-channel tolerance around the computed focus color.
+
+Both edge cases received failing focused contracts before their implementation changes.
+
+## Review Fix GREEN
+
+- Moved required focus handling into the final capture step after state assertions and waits.
+- Added a final `activeElement`, `:focus-visible`, visible-treatment, and viewport-bounds assertion immediately before each capture.
+- Added dynamic screenshot-pixel verification around the runtime treatment rectangle; no screenshot coordinates are hard-coded.
+- Kept `#resultText` as the editor active element while using the in-bounds `#resultEditor:focus-within` viewport as the visible editor treatment.
+- Expanded HUD clipping and collision checks to independently laid-out leaf regions: waveform, title, message, timer, cancel, stop, and open-main. The explicit allowed-overlap set is empty.
+- Reworked only the 700-899 px command grid so the 780 record button is 46 px high and language controls remain complete.
+- Kept all existing blank, overflow, clipping, overlap, native-select, icon, pane, and 2x workflow assertions.
+
+## Visual Artifacts
+
+- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\desktop-split.png` (1180 x 800, 104429 bytes)
+- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\compact-split.png` (980 x 720, 90388 bytes)
+- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\master-detail-list.png` (780 x 600, 49439 bytes)
+- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\master-detail-editor.png` (780 x 600, 54712 bytes)
+- `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\reference-comparison.png` (1900 x 730, 701478 bytes)
 - `C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\.tmp\ui-v4-visual\design-qa.md`
 
-## Comparison conclusion
+## Manual Visual Conclusion
 
 Result: passed.
 
-All five PNGs were opened and inspected, not only generated. The final 1180 comparison has complete `自动` and `自动（同语音）` text, one-row editor actions, a real 460 x 72 HUD, readable content, and no blocking hierarchy, density, spacing, button-fit, focus, clipping, or overlap mismatch. The 980 and both 780 states are usable and clean. Detailed repair rounds and visual judgments are recorded in `design-qa.md`.
+All five required PNGs were opened at original detail. Desktop and master editor visibly outline their editor viewports; compact and master list visibly outline their search inputs. The declared target has the visible blue treatment in every required image. The real HUD is clean at 460 x 72 with no text/timer/button collision. The 780 command strip is materially tighter, its record button is 46 px high, and no label, button, or workflow is clipped.
 
-Computed evidence from the final visual run:
-
-- 1180 recognition/output selects: 90 px / 179 px, both `textFits=true`; editor action tops: `[173, 173, 173, 173]`.
-- 980 recognition/output selects: 90 px / 186 px, both `textFits=true`.
-- 780 recognition/output selects: 90 px / 364 px, both `textFits=true`.
-- 2x recognition/output selects: 90 px / 167 px, both `textFits=true`.
-- Select text-fit calculations reserve 18 px beyond text and padding for the Windows native arrow.
-- HUD capture: 460 x 72, clipped `[]`, overlaps `[]`.
+The combined comparison retains the approved hierarchy, density, spacing, complete language labels, one-row 1180 editor actions, and bottom HUD. No blocking reference mismatch remains.
 
 ## Verification
 
 - `node --check scripts/electron-visual-smoke.mjs`: exit 0.
-- Focused contracts: 45 passed, 0 failed.
-- `node --test tests/electron-runtime.test.js`: 55 passed, 0 failed.
-- `npm.cmd test`: 564 tests; 561 passed, 3 skipped, 0 failed.
-- `npm.cmd run check:app` run 1: exit 0; app and V4 shell both `ok: true`; OS input `SENT=2 SESSION=1`.
-- `npm.cmd run check:app` run 2: exit 0; app and V4 shell both `ok: true`; OS input `SENT=2 SESSION=1`.
+- Focused contracts (`packaging-config`, `renderer-markup`, `electron-runtime`): 103 passed, 0 failed.
+- `npm.cmd test`: 567 tests; 564 passed, 3 skipped, 0 failed.
+- `npm.cmd run check:app`: exit 0; app and V4 shell both `ok: true`; real OS input evidence `SENT=2 SESSION=1`.
 - `npm.cmd run check:microphone`: exit 0; 3 audio inputs and 3 audio outputs detected before and after permission.
-- Final `npm.cmd run check:visual`: exit 0; five required PNG files exist and are non-empty; 2x workflow passed.
-- Pre-commit `git diff --check 08fc526`: exit 0.
-- Post-commit `git diff --check 08fc526..HEAD`: exit 0.
+- `npm.cmd run check:visual`: exit 0 on the approved real Windows desktop; five required PNGs, 460 x 72 HUD, four focus captures, and 2x workflow passed.
+- `git diff --check`: exit 0 before documentation update and before commit.
+- Post-commit `git diff --check b06412e..HEAD` and `git diff --check 08fc526..HEAD`: exit 0.
 
 ## Concerns
 
 - No open product or visual blocker.
-- App smoke intentionally exercises raw diagnostic failures in main-process test output; the renderer and HUD assertions confirm those strings do not leak into normal product UI.
-- Task 12 remains awaiting independent review and is not marked complete.
+- App smoke intentionally emits raw diagnostic exceptions to process stderr as negative fixtures; renderer and HUD checks continue to prevent these strings from leaking into normal product UI.
+- Task 12 is not complete. It remains awaiting scoped independent re-review.

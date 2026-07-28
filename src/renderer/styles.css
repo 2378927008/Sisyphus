@@ -810,6 +810,15 @@ body[data-primary-view="snippets"] #commandStrip {
   white-space: pre-wrap;
 }
 
+.result-text:focus-visible {
+  outline: 0;
+}
+
+.result-editor:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 .result-text[data-empty-result="true"] {
   color: var(--muted);
 }
@@ -1043,6 +1052,45 @@ body[data-primary-view="snippets"] #commandStrip {
 
   .snippet-editor-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 700px) and (max-width: 899px) {
+  .command-strip {
+    grid-template-columns: minmax(150px, 180px) minmax(270px, 1fr) minmax(152px, 172px);
+  }
+
+  .shortcut-hint {
+    grid-column: 1 / 3;
+    grid-row: 1;
+  }
+
+  .command-select {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .language-controls {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    padding-left: 10px;
+    border-left: 1px solid var(--line);
+  }
+
+  #recordButton {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .command-status {
+    grid-column: 1 / 3;
+    grid-row: 3;
+  }
+
+  .provider-status {
+    grid-column: 3;
+    grid-row: 3;
   }
 }
 

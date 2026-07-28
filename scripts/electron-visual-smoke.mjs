@@ -68,6 +68,7 @@ const historyUpdateCalls = [];
 const insertTextCalls = [];
 const rendererMessages = [];
 const visualMeasurements = [];
+const focusCaptures = [];
 const windows = new Set();
 
 app.setPath("userData", path.join(outputDir, "electron-profile"));
@@ -96,7 +97,6 @@ async function runVisualSmoke() {
 
     const hudImage = await captureRecordingHud();
     await setViewport(mainWindow, visualViewports[0]);
-    await focusAndAssert(mainWindow, "#resultText", "desktop editor", { keyboard: true });
     await assertVisualState(mainWindow, {
       state: "desktop-split",
       expectedPane: "split",
@@ -104,12 +104,14 @@ async function runVisualSmoke() {
       expectedHeight: 800,
       expectedEditorActionRows: 1
     });
-    const desktopMainImage = await captureChecked(mainWindow, "desktop main");
-    const desktopImage = await captureDesktopWithHud(mainWindow, hudImage);
+    const desktopImage = await captureDesktopWithHud(mainWindow, hudImage, {
+      focusTarget: "#resultText",
+      focusTreatment: "#resultEditor",
+      focusLabel: "desktop editor"
+    });
     await writeCapture("desktop-split.png", desktopImage, visualViewports[0]);
 
     await setViewport(mainWindow, visualViewports[1]);
-    await focusAndAssert(mainWindow, "#historySearch", "compact history search", { keyboard: true });
     await assertVisualState(mainWindow, {
       state: "compact-split",
       expectedPane: "split",
@@ -118,7 +120,10 @@ async function runVisualSmoke() {
     });
     await writeCapture(
       "compact-split.png",
-      await captureChecked(mainWindow, "compact split"),
+      await captureChecked(mainWindow, "compact split", {
+        focusTarget: "#historySearch",
+        focusLabel: "compact history search"
+      }),
       visualViewports[1]
     );
 
@@ -129,16 +134,19 @@ async function runVisualSmoke() {
       () => readVisualState(mainWindow),
       (state) => state.workspacePane === "list" && state.historyPaneVisible && !state.editorPaneVisible
     );
-    await focusAndAssert(mainWindow, "#historySearch", "master list search", { keyboard: true });
     await assertVisualState(mainWindow, {
       state: "master-detail-list",
       expectedPane: "list",
       expectedWidth: 780,
-      expectedHeight: 600
+      expectedHeight: 600,
+      expectedMaxRecordButtonHeight: 54
     });
     await writeCapture(
       "master-detail-list.png",
-      await captureChecked(mainWindow, "master detail list"),
+      await captureChecked(mainWindow, "master detail list", {
+        focusTarget: "#historySearch",
+        focusLabel: "master list search"
+      }),
       visualViewports[2]
     );
 
@@ -150,16 +158,20 @@ async function runVisualSmoke() {
       () => readVisualState(mainWindow),
       (state) => state.workspacePane === "editor" && state.editorPaneVisible && !state.historyPaneVisible
     );
-    await focusAndAssert(mainWindow, "#resultText", "master editor", { keyboard: true });
     await assertVisualState(mainWindow, {
       state: "master-detail-editor",
       expectedPane: "editor",
       expectedWidth: 780,
-      expectedHeight: 600
+      expectedHeight: 600,
+      expectedMaxRecordButtonHeight: 54
     });
     await writeCapture(
       "master-detail-editor.png",
-      await captureChecked(mainWindow, "master detail editor"),
+      await captureChecked(mainWindow, "master detail editor", {
+        focusTarget: "#resultText",
+        focusTreatment: "#resultEditor",
+        focusLabel: "master editor"
+      }),
       visualViewports[2]
     );
 
@@ -177,6 +189,7 @@ async function runVisualSmoke() {
       hudCaptured: true,
       zoomFactor: 2,
       zoomWorkflow: ["search", "select", "edit", "copy", "insert"],
+      focusCaptures,
       measurements: visualMeasurements
     }, null, 2));
     clearTimeout(timeout);
@@ -453,9 +466,19 @@ function readHudVisualState(window) {
         const rect = element.getBoundingClientRect();
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
       };
-      const controls = [...document.querySelectorAll('#hudCancel, #hudStop, #hudOpenMain')].filter(visible);
-      const text = [...document.querySelectorAll('#hudTitle, #hudMessage, #hudTimer')].filter(visible);
-      const clipped = [...controls, ...text].flatMap((element) => {
+      const collisionSelectors = [
+        '#hudWaveform',
+        '#hudTitle',
+        '#hudMessage',
+        '#hudTimer',
+        '#hudCancel',
+        '#hudStop',
+        '#hudOpenMain'
+      ];
+      const collisionRegions = collisionSelectors
+        .map((selector) => document.querySelector(selector))
+        .filter(visible);
+      const clipped = collisionRegions.flatMap((element) => {
         const rect = element.getBoundingClientRect();
         const outside = (
           rect.left < rootRect.left - 1 ||
@@ -469,14 +492,19 @@ function readHudVisualState(window) {
         );
         return outside || contentClipped ? [element.id] : [];
       });
+      const allowedOverlapPairs = new Set([]);
       const overlaps = [];
-      for (let index = 0; index < controls.length; index += 1) {
-        const first = controls[index].getBoundingClientRect();
-        for (let other = index + 1; other < controls.length; other += 1) {
-          const second = controls[other].getBoundingClientRect();
+      for (let index = 0; index < collisionRegions.length; index += 1) {
+        const first = collisionRegions[index].getBoundingClientRect();
+        for (let other = index + 1; other < collisionRegions.length; other += 1) {
+          const second = collisionRegions[other].getBoundingClientRect();
           const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
           const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
-          if (width * height > 1) overlaps.push(controls[index].id + ' overlaps ' + controls[other].id);
+          const overlapArea = width * height;
+          const pairKey = [collisionRegions[index].id, collisionRegions[other].id].sort().join('|');
+          if (overlapArea > 1 && !allowedOverlapPairs.has(pairKey)) {
+            overlaps.push(collisionRegions[index].id + ' overlaps ' + collisionRegions[other].id);
+          }
         }
       }
       return { clipped, overlaps };
@@ -496,7 +524,7 @@ async function setViewport(window, viewport) {
   await new Promise((resolve) => setTimeout(resolve, 120));
 }
 
-async function focusAndAssert(window, selector, label, options = {}) {
+async function focusAndAssert(window, selector, treatmentSelector, label, options = {}) {
   if (options.keyboard) {
     window.webContents.focus();
     await window.webContents.executeJavaScript(
@@ -509,30 +537,82 @@ async function focusAndAssert(window, selector, label, options = {}) {
     window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Tab", modifiers: ["shift"] });
     await new Promise((resolve) => setTimeout(resolve, 40));
   }
-  const focusState = await window.webContents.executeJavaScript(`
+  const focusState = await readFocusState(window, selector, treatmentSelector);
+  assertFocusState(focusState, label);
+  return focusState;
+}
+
+function readFocusState(window, selector, treatmentSelector = selector) {
+  return window.webContents.executeJavaScript(`
     (() => {
       const element = document.querySelector(${JSON.stringify(selector)});
-      if (!element) return { exists: false };
-      if (!${Boolean(options.keyboard)}) element.focus();
-      const style = getComputedStyle(element);
+      const treatment = document.querySelector(${JSON.stringify(treatmentSelector)});
+      if (!element || !treatment) {
+        return {
+          exists: Boolean(element),
+          treatmentExists: Boolean(treatment)
+        };
+      }
+      const style = getComputedStyle(treatment);
+      const bounds = treatment.getBoundingClientRect();
       return {
         exists: true,
+        treatmentExists: true,
         active: document.activeElement === element,
         focusVisible: element.matches(':focus-visible'),
+        treatmentVisible: treatment === element || treatment.matches(':focus-within'),
         outlineStyle: style.outlineStyle,
         outlineWidth: parseFloat(style.outlineWidth) || 0,
-        outlineColor: style.outlineColor
+        outlineOffset: parseFloat(style.outlineOffset) || 0,
+        outlineColor: style.outlineColor,
+        rect: {
+          left: bounds.left,
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+          width: bounds.width,
+          height: bounds.height
+        },
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight
+        }
       };
     })()
   `);
+}
+
+function assertFocusState(focusState, label) {
   assert.equal(focusState.exists, true, `${label} focus target should exist`);
+  assert.equal(focusState.treatmentExists, true, `${label} focus treatment should exist`);
   assert.equal(focusState.active, true, `${label} should receive focus`);
   assert.equal(focusState.focusVisible, true, `${label} should expose :focus-visible`);
+  assert.equal(focusState.treatmentVisible, true, `${label} focus treatment should be active`);
   assert.notEqual(focusState.outlineStyle, "none", `${label} should have an outline`);
   assert.ok(
     focusState.outlineWidth >= 2,
     `${label} rendered outline should remain visible: ${JSON.stringify(focusState)}`
   );
+  const outwardOutline = Math.max(0, focusState.outlineOffset + focusState.outlineWidth);
+  assert.ok(
+    focusState.rect.left - outwardOutline >= -1 &&
+      focusState.rect.top - outwardOutline >= -1 &&
+      focusState.rect.right + outwardOutline <= focusState.viewport.width + 1 &&
+      focusState.rect.bottom + outwardOutline <= focusState.viewport.height + 1,
+    `${label} focus treatment must remain within the viewport: ${JSON.stringify(focusState)}`
+  );
+}
+
+async function waitForNextPaint(window) {
+  await window.webContents.executeJavaScript(`
+    new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  `);
+}
+
+async function assertFinalFocusTarget(window, selector, treatmentSelector, label) {
+  const focusState = await readFocusState(window, selector, treatmentSelector);
+  assertFocusState(focusState, `${label} immediately before capture`);
+  return focusState;
 }
 
 async function assertVisualState(window, expectation) {
@@ -555,6 +635,12 @@ async function assertVisualState(window, expectation) {
       state.editorActionRows,
       expectation.expectedEditorActionRows,
       `${expectation.state} editor action rows`
+    );
+  }
+  if (expectation.expectedMaxRecordButtonHeight) {
+    assert.ok(
+      state.layout.recordButton.height <= expectation.expectedMaxRecordButtonHeight,
+      `${expectation.state} record button height: ${state.layout.recordButton.height}`
     );
   }
 
@@ -681,6 +767,7 @@ function readVisualState(window) {
         editorActionRows: new Set(editorActionTops).size,
         layout: {
           commandGridColumns: getComputedStyle(document.querySelector('#commandStrip')).gridTemplateColumns,
+          recordButton: rect(document.querySelector('#recordButton')),
           languageControls: rect(document.querySelector('#languageControls')),
           recognitionSelect: {
             ...rect(document.querySelector('#whisperLanguage')),
@@ -713,11 +800,89 @@ function readVisualState(window) {
   `);
 }
 
-async function captureChecked(window, label) {
+async function captureChecked(
+  window,
+  label,
+  {
+    focusTarget = null,
+    focusTreatment = focusTarget,
+    focusLabel = label
+  } = {}
+) {
   await new Promise((resolve) => setTimeout(resolve, 100));
+  let finalFocusState = null;
+  if (focusTarget) {
+    await focusAndAssert(window, focusTarget, focusTreatment, focusLabel, { keyboard: true });
+    await waitForNextPaint(window);
+    finalFocusState = await assertFinalFocusTarget(window, focusTarget, focusTreatment, focusLabel);
+  }
   const image = await window.webContents.capturePage();
   assertCaptureHasContent(image, label);
+  if (finalFocusState) {
+    assertCapturedFocusTreatment(image, finalFocusState, focusLabel);
+    focusCaptures.push({
+      label: focusLabel,
+      selector: focusTarget,
+      treatmentSelector: focusTreatment,
+      rect: finalFocusState.rect,
+      outlineColor: finalFocusState.outlineColor
+    });
+  }
   return image;
+}
+
+function assertCapturedFocusTreatment(image, focusState, label) {
+  const colorMatch = focusState.outlineColor.match(
+    /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/
+  );
+  assert.ok(colorMatch, `${label} focus color must be an RGB value`);
+  const expected = colorMatch.slice(1, 4).map(Number);
+  const focusColorTolerance = 36;
+  const size = image.getSize();
+  const bitmap = image.toBitmap();
+  const scaleX = size.width / focusState.viewport.width;
+  const scaleY = size.height / focusState.viewport.height;
+  const rect = {
+    left: Math.max(0, Math.floor(focusState.rect.left * scaleX)),
+    top: Math.max(0, Math.floor(focusState.rect.top * scaleY)),
+    right: Math.min(size.width - 1, Math.ceil(focusState.rect.right * scaleX)),
+    bottom: Math.min(size.height - 1, Math.ceil(focusState.rect.bottom * scaleY))
+  };
+  const bandX = Math.max(
+    4,
+    Math.ceil((focusState.outlineWidth + Math.abs(focusState.outlineOffset) + 2) * scaleX)
+  );
+  const bandY = Math.max(
+    4,
+    Math.ceil((focusState.outlineWidth + Math.abs(focusState.outlineOffset) + 2) * scaleY)
+  );
+  const scan = {
+    left: Math.max(0, rect.left - bandX),
+    top: Math.max(0, rect.top - bandY),
+    right: Math.min(size.width - 1, rect.right + bandX),
+    bottom: Math.min(size.height - 1, rect.bottom + bandY)
+  };
+  let matchingPixels = 0;
+  for (let y = scan.top; y <= scan.bottom; y += 1) {
+    for (let x = scan.left; x <= scan.right; x += 1) {
+      const nearVerticalEdge = Math.abs(x - rect.left) <= bandX || Math.abs(x - rect.right) <= bandX;
+      const nearHorizontalEdge = Math.abs(y - rect.top) <= bandY || Math.abs(y - rect.bottom) <= bandY;
+      if (!nearVerticalEdge && !nearHorizontalEdge) continue;
+      const offset = (y * size.width + x) * 4;
+      const actual = [bitmap[offset + 2], bitmap[offset + 1], bitmap[offset]];
+      if (
+        actual.every(
+          (channel, index) => Math.abs(channel - expected[index]) <= focusColorTolerance
+        )
+      ) {
+        matchingPixels += 1;
+      }
+    }
+  }
+  assert.ok(
+    matchingPixels >= 8,
+    `${label} capture must contain its visible focus treatment; matched ${matchingPixels} pixels`
+  );
 }
 
 function assertCaptureHasContent(image, label) {
@@ -757,7 +922,7 @@ async function writeCapture(fileName, image, expectedViewport = null) {
   await writeFile(path.join(outputDir, fileName), image.toPNG());
 }
 
-async function captureDesktopWithHud(window, hudImage) {
+async function captureDesktopWithHud(window, hudImage, focusOptions = {}) {
   const hudDataUrl = hudImage.toDataURL();
   const hudSize = hudImage.getSize();
   await window.webContents.executeJavaScript(`
@@ -799,7 +964,7 @@ async function captureDesktopWithHud(window, hudImage) {
         state.height === hudSize.height
       )
     );
-    return await captureChecked(window, "desktop with HUD");
+    return await captureChecked(window, "desktop with HUD", focusOptions);
   } finally {
     await window.webContents.executeJavaScript(
       "document.querySelector('#visualHudOverlay')?.remove()"
@@ -966,7 +1131,13 @@ async function verifyTwoTimesZoomWorkflow(window) {
       insertTextCalls.at(-1) === zoomEditedText
     )
   );
-  await focusAndAssert(window, "#resultText", "2x zoom editor", { keyboard: true });
+  await focusAndAssert(
+    window,
+    "#resultText",
+    "#resultEditor",
+    "2x zoom editor",
+    { keyboard: true }
+  );
   await assertVisualState(window, {
     state: "2x-master-detail-editor",
     expectedPane: "editor",

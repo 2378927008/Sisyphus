@@ -483,6 +483,89 @@ test("visual smoke captures the approved Windows UI v4 viewport contract", async
   assert.doesNotMatch(visualSource, /\b560\b/);
 });
 
+test("required PNG captures re-focus and verify the rendered focus treatment at capture time", async () => {
+  const visualSource = await readFile(
+    new URL("../scripts/electron-visual-smoke.mjs", import.meta.url),
+    "utf8"
+  );
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const captureChecked = visualSource.slice(
+    visualSource.indexOf("async function captureChecked"),
+    visualSource.indexOf("function assertCaptureHasContent")
+  );
+
+  assert.match(
+    captureChecked,
+    /async function captureChecked\(\s*window,\s*label,\s*\{\s*focusTarget = null,\s*focusTreatment = focusTarget,\s*focusLabel = label\s*\} = \{\}\s*\)/
+  );
+  assert.match(
+    captureChecked,
+    /await new Promise[\s\S]*?await focusAndAssert\(window, focusTarget, focusTreatment, focusLabel, \{ keyboard: true \}\)[\s\S]*?await waitForNextPaint\(window\)[\s\S]*?await assertFinalFocusTarget\(window, focusTarget, focusTreatment, focusLabel\)[\s\S]*?await window\.webContents\.capturePage\(\)[\s\S]*?assertCapturedFocusTreatment\(image, finalFocusState, focusLabel\)/
+  );
+  assert.match(
+    visualSource,
+    /captureDesktopWithHud\(mainWindow, hudImage, \{\s*focusTarget: "#resultText",\s*focusTreatment: "#resultEditor",\s*focusLabel: "desktop editor"\s*\}\)/
+  );
+  assert.match(
+    visualSource,
+    /captureChecked\(mainWindow, "compact split", \{\s*focusTarget: "#historySearch",\s*focusLabel: "compact history search"\s*\}\)/
+  );
+  assert.match(
+    visualSource,
+    /captureChecked\(mainWindow, "master detail list", \{\s*focusTarget: "#historySearch",\s*focusLabel: "master list search"\s*\}\)/
+  );
+  assert.match(
+    visualSource,
+    /captureChecked\(mainWindow, "master detail editor", \{\s*focusTarget: "#resultText",\s*focusTreatment: "#resultEditor",\s*focusLabel: "master editor"\s*\}\)/
+  );
+  assert.match(
+    visualSource,
+    /function assertCapturedFocusTreatment\(image, focusState, label\)[\s\S]*?image\.toBitmap\(\)/
+  );
+  assert.match(visualSource, /focusState\.outlineColor\.match/);
+  assert.match(visualSource, /focusState\.rect\.(?:left|top|right|bottom)/);
+  assert.match(
+    visualSource,
+    /const outwardOutline = Math\.max\(0, focusState\.outlineOffset \+ focusState\.outlineWidth\)/
+  );
+  assert.match(
+    visualSource,
+    /const focusColorTolerance = 36;[\s\S]*?Math\.abs\(channel - expected\[index\]\) <= focusColorTolerance/
+  );
+  assert.match(
+    styles,
+    /\.result-text:focus-visible\s*\{[^}]*outline:\s*0[^}]*\}[\s\S]*?\.result-editor:focus-within\s*\{[^}]*outline:\s*2px solid var\(--focus\)[^}]*outline-offset:\s*-2px/s
+  );
+});
+
+test("real HUD collision checks include every independently laid-out visible region", async () => {
+  const visualSource = await readFile(
+    new URL("../scripts/electron-visual-smoke.mjs", import.meta.url),
+    "utf8"
+  );
+  const hudStateSource = visualSource.slice(
+    visualSource.indexOf("function readHudVisualState"),
+    visualSource.indexOf("async function setViewport")
+  );
+
+  assert.match(
+    hudStateSource,
+    /const collisionSelectors = \[\s*'#hudWaveform',\s*'#hudTitle',\s*'#hudMessage',\s*'#hudTimer',\s*'#hudCancel',\s*'#hudStop',\s*'#hudOpenMain'\s*\]/
+  );
+  assert.match(
+    hudStateSource,
+    /const collisionRegions = collisionSelectors[\s\S]*?const clipped = collisionRegions\.flatMap/
+  );
+  assert.match(
+    hudStateSource,
+    /const allowedOverlapPairs = new Set\(\[\]\)[\s\S]*?if \(overlapArea > 1 && !allowedOverlapPairs\.has\(pairKey\)\)/
+  );
+  assert.match(
+    hudStateSource,
+    /for \(let index = 0; index < collisionRegions\.length; index \+= 1\)[\s\S]*?collisionRegions\[index\]\.id \+ ' overlaps ' \+ collisionRegions\[other\]\.id/
+  );
+});
+
 test("1180 and compact split layouts preserve command and editor action fit", async () => {
   const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
 
@@ -537,6 +620,31 @@ test("1180 and compact split layouts preserve command and editor action fit", as
   assert.match(
     await readFile(new URL("../scripts/electron-visual-smoke.mjs", import.meta.url), "utf8"),
     /const nativeSelectArrowSafety = 18;[\s\S]*?textWidth \+ padding \+ nativeSelectArrowSafety \+ 2 <= element\.clientWidth/s
+  );
+});
+
+test("780 master-detail keeps the primary recording action compact", async () => {
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const visualSource = await readFile(
+    new URL("../scripts/electron-visual-smoke.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*700px\)\s*and\s*\(max-width:\s*899px\)[\s\S]*?#recordButton\s*\{[^}]*grid-row:\s*1[^}]*align-self:\s*center/s
+  );
+  assert.match(
+    styles,
+    /@media\s*\(min-width:\s*700px\)\s*and\s*\(max-width:\s*899px\)[\s\S]*?\.language-controls\s*\{[^}]*grid-column:\s*2\s*\/\s*4[^}]*grid-row:\s*2/s
+  );
+  assert.equal(
+    [...visualSource.matchAll(/state: "master-detail-(?:list|editor)",[\s\S]*?expectedMaxRecordButtonHeight: 54/g)].length,
+    2
+  );
+  assert.match(
+    visualSource,
+    /state\.layout\.recordButton\.height <= expectation\.expectedMaxRecordButtonHeight/
   );
 });
 
