@@ -47,7 +47,15 @@ test("manifest validation permits normalized role placeholders", async () => {
   manifest.source.normalizedExamples = [
     "%APPDATA%/Microsoft/Windows/Start Menu/Programs/Local Flow.lnk",
     "%USERPROFILE%/Desktop/Local Flow.lnk",
-    "<existing-install-root>/Local Flow.exe"
+    "<existing-install-root>/Local Flow.exe",
+    "<isolated-install-root>/Local Flow.exe",
+    "<isolated-test-profile>/Local Flow insertion.txt",
+    "<project-root>/dist/Local Flow Setup.exe",
+    "<redacted-machine-path>",
+    "<redacted-user>",
+    "<redacted-sid>",
+    "<redacted-command-line>",
+    "<redacted-sensitive-value>"
   ];
 
   assert.deepEqual(
@@ -92,6 +100,104 @@ test("manifest validation and redaction cover sensitive nested object keys", asy
 
   assert.equal(validation.ok, false);
   assert.doesNotMatch(JSON.stringify(redacted), /SensitiveUser|C:\\Users\\/i);
+});
+
+test("arbitrary angle-bracket identities are rejected and redacted in values and keys", async () => {
+  const manifest = await loadEvidenceFixture();
+  manifest.source.identityValueProbe = "<Administrator>";
+  manifest.source.identityKeyProbe = {
+    "<Administrator>": "collector identity"
+  };
+  const options = { sensitiveTokens: ["Administrator"] };
+
+  const validation = evidenceCore.validateCleanInstallEvidence(manifest, options);
+  const redacted = evidenceCore.redactEvidenceValue(manifest, options);
+
+  assert.equal(validation.ok, false);
+  assert.doesNotMatch(JSON.stringify(redacted), /Administrator/i);
+  assert.deepEqual(
+    evidenceCore.validateCleanInstallEvidence(redacted, options),
+    { ok: true, errors: [] }
+  );
+});
+
+test("embedded UNC paths are rejected and redacted in values and keys", async () => {
+  const manifest = await loadEvidenceFixture();
+  manifest.source.uncValueProbe = "location=\\\\private-server\\share";
+  manifest.source.uncKeyProbe = {
+    "location=\\\\private-server\\share": "registry source"
+  };
+
+  const validation = evidenceCore.validateCleanInstallEvidence(manifest);
+  const redacted = evidenceCore.redactEvidenceValue(manifest);
+
+  assert.equal(validation.ok, false);
+  assert.doesNotMatch(JSON.stringify(redacted), /private-server|\\\\share/i);
+  assert.deepEqual(
+    evidenceCore.validateCleanInstallEvidence(redacted),
+    { ok: true, errors: [] }
+  );
+});
+
+test("command-bearing fields and explicit command keys are rejected and redacted", async () => {
+  const manifest = await loadEvidenceFixture();
+  manifest.source.command = "git status";
+  manifest.source.commandLine = "whoami /user";
+  manifest.source.shellCommand = "LocalFlow.exe record";
+  manifest.source.args = ["--profile", "<isolated-test-profile>"];
+  manifest.source.commandKeyProbe = {
+    "LocalFlow.exe record": "captured command"
+  };
+
+  const validation = evidenceCore.validateCleanInstallEvidence(manifest);
+  const redacted = evidenceCore.redactEvidenceValue(manifest);
+
+  assert.equal(validation.ok, false);
+  assert.equal(redacted.source.command, "<redacted-command-line>");
+  assert.equal(redacted.source.commandLine, "<redacted-command-line>");
+  assert.equal(redacted.source.shellCommand, "<redacted-command-line>");
+  assert.deepEqual(redacted.source.args, [
+    "<redacted-command-line>",
+    "<redacted-command-line>"
+  ]);
+  assert.deepEqual(redacted.source.commandKeyProbe, {
+    "<redacted-command-line>": "captured command"
+  });
+  assert.deepEqual(
+    evidenceCore.validateCleanInstallEvidence(redacted),
+    { ok: true, errors: [] }
+  );
+});
+
+test("benign ASCII evidence explanations are preserved outside command fields", async () => {
+  const manifest = await loadEvidenceFixture();
+  const explanation = "The node runtime is available for evidence collection.";
+  manifest.source.reason = explanation;
+
+  assert.deepEqual(
+    evidenceCore.validateCleanInstallEvidence(manifest),
+    { ok: true, errors: [] }
+  );
+  assert.equal(
+    evidenceCore.redactEvidenceValue(explanation),
+    explanation
+  );
+});
+
+test("Chinese explanations and allowed relative paths remain valid and unchanged", async () => {
+  const allowed = [
+    "证据收集器可以正常运行。",
+    "scripts/clean-install-evidence.mjs",
+    "docs/release/evidence/windows-clean-install-v4.json"
+  ];
+  const manifest = await loadEvidenceFixture();
+  manifest.source.safeExamples = allowed;
+
+  assert.deepEqual(
+    evidenceCore.validateCleanInstallEvidence(manifest),
+    { ok: true, errors: [] }
+  );
+  assert.deepEqual(evidenceCore.redactEvidenceValue(allowed), allowed);
 });
 
 test("recursive evidence redaction removes sensitive values without damaging role placeholders", () => {

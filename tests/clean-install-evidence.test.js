@@ -209,7 +209,26 @@ test("clean-install evidence rejects observed statuses when passed proof values 
   assert.ok(result.errors.some((error) => error.includes("productTextInsertion.targetFile.sha256")));
 });
 
-test("clean-install evidence accepts a passed trial with complete normalized proof", () => {
+function registryScope(role, matchingEntryCount) {
+  return {
+    role,
+    status: "observed",
+    collectionContextRole: "interactive_user",
+    matchingEntryCount
+  };
+}
+
+function registryEntry(role) {
+  return {
+    role,
+    displayName: "Local Flow",
+    displayVersion: "0.1.0",
+    installLocationRole: "isolated_install_root",
+    uninstallTargetRole: "isolated_install_uninstaller"
+  };
+}
+
+function createPassedManifest() {
   const manifest = createTruthfulManifest();
   manifest.cleanInstallTrial = {
     status: "passed",
@@ -239,63 +258,28 @@ test("clean-install evidence accepts a passed trial with complete normalized pro
         status: "observed",
         executionContextRole: "interactive_user",
         scopes: [
-          {
-            role: "collector_current_user",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 1
-          },
-          {
-            role: "local_machine_64",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          },
-          {
-            role: "local_machine_32",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          },
-          {
-            role: "loaded_user_profiles",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 1
-          }
+          registryScope("collector_current_user", 1),
+          registryScope("local_machine_64", 0),
+          registryScope("local_machine_32", 0),
+          registryScope("loaded_user_profiles", 1)
         ],
-        matchingEntries: [{ role: "collector_current_user", displayName: "Local Flow 0.1.0" }]
+        matchingEntries: [
+          registryEntry("collector_current_user"),
+          registryEntry("loaded_user_profiles")
+        ],
+        conclusion: "present"
       },
       after: {
         status: "observed",
         executionContextRole: "interactive_user",
         scopes: [
-          {
-            role: "collector_current_user",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          },
-          {
-            role: "local_machine_64",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          },
-          {
-            role: "local_machine_32",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          },
-          {
-            role: "loaded_user_profiles",
-            status: "observed",
-            collectionContextRole: "interactive_user",
-            matchingEntryCount: 0
-          }
+          registryScope("collector_current_user", 0),
+          registryScope("local_machine_64", 0),
+          registryScope("local_machine_32", 0),
+          registryScope("loaded_user_profiles", 0)
         ],
-        matchingEntries: []
+        matchingEntries: [],
+        conclusion: "absent"
       }
     },
     processScope: {
@@ -326,8 +310,83 @@ test("clean-install evidence accepts a passed trial with complete normalized pro
       isolatedProfileRole: "isolated_test_profile"
     }
   };
+  return manifest;
+}
 
-  assert.deepEqual(validateCleanInstallEvidence(manifest), { ok: true, errors: [] });
+test("clean-install evidence accepts a passed trial with complete normalized proof", () => {
+  assert.deepEqual(
+    validateCleanInstallEvidence(createPassedManifest()),
+    { ok: true, errors: [] }
+  );
+});
+
+test("passed evidence rejects null uninstall registry entries", () => {
+  const manifest = createPassedManifest();
+  manifest.cleanInstallTrial.uninstallRegistration.before.matchingEntries[0] = null;
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("matchingEntries[0]")));
+});
+
+test("passed evidence rejects registry scope and entry count mismatches", () => {
+  const manifest = createPassedManifest();
+  manifest.cleanInstallTrial.uninstallRegistration.before.scopes[0].matchingEntryCount = 2;
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("matchingEntryCount")));
+});
+
+test("passed evidence rejects duplicate standard registry scope roles", () => {
+  const manifest = createPassedManifest();
+  const scopes = manifest.cleanInstallTrial.uninstallRegistration.before.scopes;
+  scopes.push({ ...scopes[0] });
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("exactly once")));
+});
+
+test("passed evidence rejects missing standard registry scope roles", () => {
+  const manifest = createPassedManifest();
+  manifest.cleanInstallTrial.uninstallRegistration.before.scopes.pop();
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("standard registry roles")));
+});
+
+test("passed evidence rejects malformed registry entry metadata and target roles", () => {
+  const manifest = createPassedManifest();
+  const entry =
+    manifest.cleanInstallTrial.uninstallRegistration.before.matchingEntries[0];
+  entry.displayName = null;
+  entry.displayVersion = {};
+  entry.installLocationRole = "C:\\private";
+  entry.uninstallTargetRole = "arbitrary_target";
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("displayName")));
+  assert.ok(result.errors.some((error) => error.includes("displayVersion")));
+  assert.ok(result.errors.some((error) => error.includes("installLocationRole")));
+  assert.ok(result.errors.some((error) => error.includes("uninstallTargetRole")));
+});
+
+test("passed evidence requires zero isolated processes after the trial", () => {
+  const manifest = createPassedManifest();
+  manifest.cleanInstallTrial.processScope.matchingProcessCount = 999;
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("must be zero")));
 });
 
 test("committed clean-install evidence is valid, normalized, and explicitly not run", async () => {

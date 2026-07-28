@@ -1,6 +1,6 @@
 # Task 13 Report: Packaged Startup And Windows Installer
 
-Status: Fix Round 2 implemented and verified (awaiting scoped re-review; Task
+Status: Fix Round 3 implemented and verified (awaiting scoped re-review; Task
 13 not complete)
 
 ## Scope
@@ -377,3 +377,108 @@ Fresh Fix Round 2 verification:
 No real-desktop manual validation was run or claimed in this round. No
 installer/uninstaller was executed, no release artifact was rebuilt, and the
 existing installation root was not accessed.
+
+## Fix Round 3 (2026-07-28)
+
+Status: implemented and verified with TDD; awaiting scoped re-review. Task 13
+is not complete.
+
+This round is limited to the three Important findings in
+`task-13-re-review-round-2.md`. It changes the clean-install evidence
+validator, focused evidence tests, and Task 13 records only. The collector's
+registry identity and access decisions are unchanged. No UI, iPhone, model,
+API, release package, installer, uninstaller, or existing installation was
+accessed or modified.
+
+### RED
+
+Passed-proof consistency:
+
+```text
+node --test tests/clean-install-evidence.test.js
+14 tests: 9 passed, 5 failed
+- null matchingEntries element was accepted
+- per-role matchingEntryCount mismatch was accepted
+- duplicate standard scope role was accepted
+- malformed display metadata and target roles were not fully rejected
+- matchingProcessCount=999 was accepted
+```
+
+The existing missing-role guard remained GREEN during RED. The complete
+positive fixture was corrected to retain both claimed before entries and
+remained GREEN.
+
+Privacy and benign-ASCII behavior:
+
+```text
+node --test tests/clean-install-evidence-privacy.test.js
+18 tests: 14 passed, 4 failed
+- <Administrator> was protected in nested values and keys
+- location=\\private-server\share bypassed nested value/key checks
+- git status, whoami /user, and LocalFlow.exe record survived command fields
+- The node runtime is available for evidence collection. was rejected
+```
+
+### GREEN
+
+For a `passed` trial, each uninstall-registration snapshot now:
+
+- requires every matching entry to be a non-null object;
+- validates a standard scope role, bounded string display metadata, and
+  allowlisted install/uninstall target roles;
+- requires every standard scope role exactly once;
+- reconciles each scope's count with retained entries for that role;
+- reconciles `present`/`absent` conclusion with the retained entries; and
+- requires every scope and snapshot to be observed under the interactive role.
+
+A passed trial now requires the final isolated process count to equal zero.
+The complete positive fixture includes two before entries matching its
+current-user and loaded-profile counts, plus an empty and `absent` after
+snapshot.
+
+Privacy handling now:
+
+- protects only explicit schema placeholders such as `%APPDATA%`,
+  `%USERPROFILE%`, `<existing-install-root>`, `<isolated-install-root>`,
+  `<isolated-test-profile>`, `<project-root>`, and redaction roles;
+- detects embedded backslash UNC paths without requiring a leading boundary;
+- passes command-bearing field context recursively for `command`,
+  `commandLine`, `args`, `argv`, and `shellCommand`;
+- treats an executable-plus-arguments form as explicit command grammar for
+  dynamic keys and unstructured values; and
+- preserves ordinary English and Chinese explanations and allowed relative
+  paths.
+
+Validation and redaction tests are symmetric for arbitrary angle-bracket user
+tokens, embedded UNC values/keys, command-bearing fields, explicit command
+keys, legal placeholders, benign ASCII, Chinese text, and relative paths.
+
+### Verification
+
+```text
+node --test tests/clean-install-evidence.test.js tests/clean-install-evidence-privacy.test.js tests/clean-install-registry-evidence.test.js tests/task-13-review-fixes.test.js
+37 passed, 0 failed
+
+node --check scripts/clean-install-evidence-core.mjs
+exit 0
+
+node --check scripts/clean-install-evidence.mjs
+exit 0
+
+npm.cmd test
+619 passed, 0 failed, 0 cancelled, 0 skipped
+
+npm.cmd run check:product
+exit 0; ok=true; automatedArtifactReadiness=true
+
+npm.cmd run verify:release
+exit 0; ok=true; version=0.1.0; artifactSkewMs=46844
+
+git diff --check
+exit 0
+```
+
+The committed evidence manifest remains valid and deliberately unchanged with
+`cleanInstallTrial.status = "not_run"`. A real isolated install/uninstall,
+microphone-to-Notepad insertion, and the other documented desktop/device
+trials remain manual-only. No such trial is claimed by this round.

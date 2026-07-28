@@ -18,6 +18,39 @@ const EXECUTION_CONTEXT_ROLES = new Set([
   "restricted_process",
   "unknown"
 ]);
+const INSTALL_LOCATION_ROLES = new Set([
+  "none",
+  "existing_install_root",
+  "isolated_install_root",
+  "redacted_other_location"
+]);
+const UNINSTALL_TARGET_ROLES = new Set([
+  "none",
+  "existing_install_uninstaller",
+  "isolated_install_uninstaller",
+  "redacted_other_target"
+]);
+const ALLOWED_ROLE_PLACEHOLDERS = new Set([
+  "%appdata%",
+  "%userprofile%",
+  "<existing-install-root>",
+  "<isolated-install-root>",
+  "<isolated-test-profile>",
+  "<project-root>",
+  "<redacted-machine-path>",
+  "<redacted-user>",
+  "<redacted-sid>",
+  "<redacted-command-line>",
+  "<redacted-sensitive-value>"
+]);
+const COMMAND_FIELD_KEYS = new Set([
+  "command",
+  "commandline",
+  "args",
+  "arguments",
+  "argv",
+  "shellcommand"
+]);
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -48,11 +81,25 @@ function replaceTokenInsensitive(value, search, replacement) {
   );
 }
 
+function replaceAngleTokenInsensitive(value, search, replacement) {
+  if (typeof search !== "string" || search.length < 3) {
+    return value;
+  }
+  const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(
+    new RegExp(`<\\s*${escaped}\\s*>`, "gi"),
+    replacement
+  );
+}
+
 function protectRolePlaceholders(value) {
   const placeholders = [];
   const protectedValue = value.replace(
-    /%(?:APPDATA|USERPROFILE)%|<[a-z0-9][a-z0-9_-]*>/gi,
+    /%[a-z0-9_-]+%|<[a-z0-9][a-z0-9_-]*>/gi,
     (placeholder) => {
+      if (!ALLOWED_ROLE_PLACEHOLDERS.has(placeholder.toLowerCase())) {
+        return placeholder;
+      }
       const index = placeholders.push(placeholder) - 1;
       return `\u0000${index}\u0000`;
     }
@@ -83,25 +130,40 @@ function defaultSensitiveTokens(options = {}) {
   );
 }
 
-function containsCommandLine(value) {
+function isCommandField(key) {
   return (
-    /\bcommand\s*line\b/i.test(value) ||
-    /\b(?:powershell|pwsh|cmd|node|electron)(?:\.exe)?\s+(?:"|--?|\/|\w)/i.test(value) ||
-    /(?:^|\s)(?:--?[a-z][\w-]*|\/(?:currentuser|allusers|silent|verysilent))\b/i.test(value)
+    typeof key === "string" &&
+    COMMAND_FIELD_KEYS.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase())
   );
 }
 
-function privacyViolations(value, sensitiveTokens) {
+function hasExplicitCommandGrammar(value) {
+  return /^(?:"[^"\r\n]+\.(?:exe|cmd|bat|ps1)"|[^\s"'`]+\.(?:exe|cmd|bat|ps1))\s+\S+(?:\s+[^\r\n]+)*$/i.test(
+    value.trim()
+  );
+}
+
+function containsCommandLine(value, context = {}) {
+  if (value === "<redacted-command-line>") {
+    return false;
+  }
+  return (
+    (context.commandBearing === true && value.trim().length > 0) ||
+    hasExplicitCommandGrammar(value)
+  );
+}
+
+function containsUncPath(value) {
+  return /\\\\[^\\\s]+\\[^\s]+/i.test(value);
+}
+
+function privacyViolations(value, sensitiveTokens, context = {}) {
   const protectedValue = protectRolePlaceholders(value).value;
   const violations = [];
   if (/[a-z]:[\\/]/i.test(protectedValue)) {
     violations.push("absolute drive path");
   }
-  if (
-    /(?:^|[\s"'(])(?:\\\\|\/\/)[^\\/ \r\n]+[\\/][^ \r\n]+/i.test(
-      protectedValue
-    )
-  ) {
+  if (containsUncPath(protectedValue)) {
     violations.push("UNC path");
   }
   if (/(?:^|[\\/])Users[\\/][^%<\\/]+/i.test(protectedValue)) {
@@ -117,7 +179,7 @@ function privacyViolations(value, sensitiveTokens) {
   ) {
     violations.push("user identity");
   }
-  if (containsCommandLine(protectedValue)) {
+  if (containsCommandLine(value, context)) {
     violations.push("command line");
   }
   if (
@@ -134,16 +196,21 @@ function privacyViolations(value, sensitiveTokens) {
   return violations;
 }
 
-export function redactEvidenceValue(value, options = {}) {
+function redactEvidenceNode(value, options, context) {
   if (Array.isArray(value)) {
-    return value.map((item) => redactEvidenceValue(item, options));
+    return value.map((item) => redactEvidenceNode(item, options, context));
   }
   if (isObject(value)) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, nestedValue]) => [
-        redactEvidenceValue(key, options),
-        redactEvidenceValue(nestedValue, options)
-      ])
+      Object.entries(value).map(([key, nestedValue]) => {
+        const nestedContext = {
+          commandBearing: context.commandBearing || isCommandField(key)
+        };
+        return [
+          redactEvidenceNode(key, options, { commandBearing: false }),
+          redactEvidenceNode(nestedValue, options, nestedContext)
+        ];
+      })
     );
   }
   if (typeof value !== "string") {
@@ -167,6 +234,7 @@ export function redactEvidenceValue(value, options = {}) {
   const protectedValue = protectRolePlaceholders(redacted);
   redacted = protectedValue.value;
   for (const token of defaultSensitiveTokens(options)) {
+    redacted = replaceAngleTokenInsensitive(redacted, token, "<redacted-user>");
     redacted = replaceTokenInsensitive(redacted, token, "<redacted-user>");
   }
   redacted = redacted.replace(
@@ -178,17 +246,21 @@ export function redactEvidenceValue(value, options = {}) {
     "<redacted-sid>"
   );
 
-  if (containsCommandLine(redacted)) {
+  if (containsCommandLine(redacted, context)) {
     return "<redacted-command-line>";
   }
   if (
     /[a-z]:[\\/]/i.test(redacted) ||
-    /(?:^|[\s"'(])(?:\\\\|\/\/)[^\\/ \r\n]+[\\/][^ \r\n]+/i.test(redacted) ||
+    containsUncPath(redacted) ||
     /(?:^|[\\/])Users[\\/][^%<\\/]+/i.test(redacted)
   ) {
     return "<redacted-machine-path>";
   }
   return protectedValue.restore(redacted);
+}
+
+export function redactEvidenceValue(value, options = {}) {
+  return redactEvidenceNode(value, options, { commandBearing: false });
 }
 
 export function buildUninstallRegistrationEvidence({
@@ -315,6 +387,7 @@ function isNormalizedRolePath(value) {
 }
 
 function validatePassedRegistrySnapshot(errors, snapshot, field) {
+  addError(errors, snapshot?.status === "observed", `${field}.status must be observed`);
   addError(
     errors,
     snapshot?.executionContextRole === "interactive_user",
@@ -327,63 +400,145 @@ function validatePassedRegistrySnapshot(errors, snapshot, field) {
     `${field}.matchingEntries must be an array`
   );
 
-  const requiredRoles = new Set([
-    "collector_current_user",
-    "local_machine_64",
-    "local_machine_32",
-    "loaded_user_profiles"
-  ]);
+  const roleOccurrences = new Map(
+    REGISTRY_SCOPE_ROLES.map((role) => [role, 0])
+  );
+  const matchingEntriesByRole = new Map(
+    REGISTRY_SCOPE_ROLES.map((role) => [role, 0])
+  );
+  for (const [index, entry] of (snapshot?.matchingEntries || []).entries()) {
+    const entryField = `${field}.matchingEntries[${index}]`;
+    addError(errors, isObject(entry), `${entryField} must be an object`);
+    if (!isObject(entry)) {
+      continue;
+    }
+    addError(
+      errors,
+      REGISTRY_SCOPE_ROLES.includes(entry.role),
+      `${entryField}.role must be a standard registry role`
+    );
+    addError(
+      errors,
+      typeof entry.displayName === "string" &&
+        entry.displayName.trim().length > 0 &&
+        entry.displayName.length <= 256,
+      `${entryField}.displayName is invalid`
+    );
+    addError(
+      errors,
+      typeof entry.displayVersion === "string" &&
+        entry.displayVersion.length <= 128,
+      `${entryField}.displayVersion is invalid`
+    );
+    addError(
+      errors,
+      INSTALL_LOCATION_ROLES.has(entry.installLocationRole),
+      `${entryField}.installLocationRole is invalid`
+    );
+    addError(
+      errors,
+      UNINSTALL_TARGET_ROLES.has(entry.uninstallTargetRole),
+      `${entryField}.uninstallTargetRole is invalid`
+    );
+    if (matchingEntriesByRole.has(entry.role)) {
+      matchingEntriesByRole.set(
+        entry.role,
+        matchingEntriesByRole.get(entry.role) + 1
+      );
+    }
+  }
+
   for (const scope of snapshot?.scopes || []) {
-    requiredRoles.delete(scope.role);
+    const role = scope?.role;
+    if (roleOccurrences.has(role)) {
+      roleOccurrences.set(role, roleOccurrences.get(role) + 1);
+    }
     addError(
       errors,
-      scope.status === "observed",
-      `${field}.scopes ${scope.role || "unknown"} must be observed`
+      REGISTRY_SCOPE_ROLES.includes(role),
+      `${field}.scopes ${role || "unknown"} role is invalid`
     );
     addError(
       errors,
-      scope.collectionContextRole === "interactive_user",
-      `${field}.scopes ${scope.role || "unknown"} context must be interactive_user`
+      scope?.status === "observed",
+      `${field}.scopes ${role || "unknown"} must be observed`
     );
     addError(
       errors,
-      Number.isSafeInteger(scope.matchingEntryCount) && scope.matchingEntryCount >= 0,
-      `${field}.scopes ${scope.role || "unknown"} matchingEntryCount is invalid`
+      scope?.collectionContextRole === "interactive_user",
+      `${field}.scopes ${role || "unknown"} context must be interactive_user`
+    );
+    addError(
+      errors,
+      Number.isSafeInteger(scope?.matchingEntryCount) &&
+        scope.matchingEntryCount >= 0,
+      `${field}.scopes ${role || "unknown"} matchingEntryCount is invalid`
+    );
+    if (matchingEntriesByRole.has(role)) {
+      addError(
+        errors,
+        scope?.matchingEntryCount === matchingEntriesByRole.get(role),
+        `${field}.scopes ${role} matchingEntryCount does not match retained entries`
+      );
+    }
+  }
+  for (const role of REGISTRY_SCOPE_ROLES) {
+    addError(
+      errors,
+      roleOccurrences.get(role) === 1,
+      `${field}.scopes role ${role} must appear exactly once`
     );
   }
   addError(
     errors,
-    requiredRoles.size === 0,
+    [...roleOccurrences.values()].every((count) => count > 0),
     `${field}.scopes must include all standard registry roles`
+  );
+  const expectedConclusion =
+    (snapshot?.matchingEntries || []).length > 0 ? "present" : "absent";
+  addError(
+    errors,
+    snapshot?.conclusion === expectedConclusion,
+    `${field}.conclusion does not match retained entries`
   );
 }
 
 function validateNoSensitiveMachineData(errors, manifest, options) {
   const sensitiveTokens = defaultSensitiveTokens(options);
 
-  function visit(value, field) {
+  function visit(value, field, context = { commandBearing: false }) {
     if (typeof value === "string") {
-      const violations = privacyViolations(value, sensitiveTokens);
+      const violations = privacyViolations(value, sensitiveTokens, context);
       for (const violation of violations) {
         errors.push(`${field} must not contain ${violation}`);
       }
       return;
     }
     if (Array.isArray(value)) {
-      value.forEach((item, index) => visit(item, `${field}[${index}]`));
+      value.forEach((item, index) =>
+        visit(item, `${field}[${index}]`, context)
+      );
       return;
     }
     if (!isObject(value)) {
       return;
     }
     for (const [key, nestedValue] of Object.entries(value)) {
-      for (const violation of privacyViolations(key, sensitiveTokens)) {
+      for (const violation of privacyViolations(
+        key,
+        sensitiveTokens,
+        { commandBearing: false }
+      )) {
         errors.push(`${field} key must not contain ${violation}`);
       }
-      if (/^(?:userName|userSid|commandLine|command)$/i.test(key)) {
+      if (/^(?:userName|userSid)$/i.test(key)) {
         errors.push(`${field}.${key} is a prohibited sensitive field`);
       }
-      visit(nestedValue, `${field}.${key}`);
+      visit(
+        nestedValue,
+        `${field}.${key}`,
+        { commandBearing: context.commandBearing || isCommandField(key) }
+      );
     }
   }
 
@@ -670,8 +825,8 @@ function validateCleanInstallTrial(errors, trial) {
     addError(
       errors,
       Number.isSafeInteger(trial.processScope?.matchingProcessCount) &&
-        trial.processScope.matchingProcessCount >= 0,
-      "cleanInstallTrial.processScope.matchingProcessCount is invalid"
+        trial.processScope.matchingProcessCount === 0,
+      "cleanInstallTrial.processScope.matchingProcessCount must be zero"
     );
 
     const targetFile = trial.productTextInsertion?.targetFile;
