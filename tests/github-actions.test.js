@@ -50,6 +50,7 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /name:\s*Windows Installer Artifact/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /push:/);
+  assert.match(workflow, /-\s+"codex\/\*\*"/);
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /runs-on:\s*windows-latest/);
   assert.match(workflow, /actions\/checkout@v4/);
