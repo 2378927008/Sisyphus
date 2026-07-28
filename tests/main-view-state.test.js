@@ -111,15 +111,11 @@ test("filters unusable history entries and preserves supplied non-empty ids", ()
 });
 
 test("normalizes known view phases and falls back to idle", () => {
-  for (const phase of ["idle", "starting", "recording", "stopping", "transcribing", "pasting", "done", "warning", "error"]) {
+  for (const phase of ["idle", "starting", "recording", "stopping", "transcribing", "polishing", "pasting", "done", "warning", "error"]) {
     assert.equal(normalizeViewPhase(phase), phase);
   }
   assert.equal(normalizeViewPhase("unexpected"), "idle");
   assert.equal(normalizeViewPhase(null), "idle");
-});
-
-test("maps polishing work onto the transcribing view phase", () => {
-  assert.equal(normalizeViewPhase("polishing"), "transcribing");
 });
 
 test("handles invalid inputs without throwing and normalizes the limit", () => {

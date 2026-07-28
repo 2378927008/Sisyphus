@@ -44,14 +44,14 @@ test("getHudViewState hides raw diagnostics in HUD messages", () => {
   assert.equal(view.message, "录音响应超时，请重试");
 });
 
-test("getHudViewState uses safe short status messages for non-terminal phases without known reasons", () => {
+test("getHudViewState ignores unknown raw messages in non-terminal phases", () => {
   const view = getHudViewState({
     phase: "starting",
     message: "Text saved for review.",
     language: "en"
   });
 
-  assert.equal(view.message, "Text saved for review.");
+  assert.equal(view.message, "Preparing microphone.");
 });
 
 test("getHudViewState rejects unsafe raw diagnostic status messages without known reasons", () => {
@@ -137,9 +137,13 @@ test("getHudViewState rejects provider and model diagnostics from non-terminal p
   }
 });
 
-test("getHudViewState rejects URLs and stderr from non-terminal phases", () => {
+test("getHudViewState rejects every URL scheme and stderr from non-terminal phases", () => {
   for (const message of [
     "See https://example.invalid/private-log for details",
+    "See ftp://example.invalid/private-log for details",
+    "Open custom-provider://private/runtime/error",
+    "mailto:private@example.invalid",
+    "data:text/plain,private diagnostics",
     "stderr: microphone initialization failed"
   ]) {
     const view = getHudViewState({
@@ -300,7 +304,7 @@ test("getHudViewState ignores stale reasons outside warning and error phases", (
     language: "en"
   });
 
-  assert.equal(view.message, "Starting recording");
+  assert.equal(view.message, "Preparing microphone.");
 });
 
 test("formatElapsed clamps invalid and long values", () => {

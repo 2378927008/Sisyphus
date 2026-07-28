@@ -180,18 +180,12 @@ async function registerHotkey(settings = lastSettings) {
   return status;
 }
 
-function sendRecordingStartCommand() {
-  systemInputController.setPhase("starting", {
-    message: "Starting recording..."
-  });
-  sendWindowMessage(mainWindow, "recording:start");
+function sendRecordingStartCommand(command) {
+  sendWindowMessage(mainWindow, "recording:start", command);
 }
 
-function sendRecordingStopCommand() {
-  systemInputController.setPhase("stopping", {
-    message: "Stopping recording..."
-  });
-  sendWindowMessage(mainWindow, "recording:stop");
+function sendRecordingStopCommand(command) {
+  sendWindowMessage(mainWindow, "recording:stop", command);
 }
 
 function sendStatus(payload) {
@@ -199,14 +193,14 @@ function sendStatus(payload) {
   if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", payload);
   }
-  systemInputController?.handleRendererStatus(payload);
+  systemInputController?.handleSystemStatus(payload);
 }
 
 function sendTransientStatus(payload) {
   if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", payload);
   }
-  systemInputController?.handleRendererStatus(payload);
+  systemInputController?.handleSystemStatus(payload);
 }
 
 async function pasteLastDictation() {
@@ -322,6 +316,9 @@ function sanitizeRecordingStatusPayload(payload = {}) {
   const source = payload && typeof payload === "object" ? payload : {};
   const phase = rendererRecordingPhases.has(source.phase) ? source.phase : "idle";
   return {
+    operationId: Number.isSafeInteger(source.operationId) && source.operationId > 0
+      ? source.operationId
+      : null,
     phase,
     message: sanitizeRendererStatusText(source.message),
     reason: sanitizeRendererStatusText(source.reason)
@@ -361,6 +358,13 @@ function wireIpc() {
 
     const status = sanitizeRecordingStatusPayload(payload);
     systemInputController?.handleRendererStatus(status);
+  });
+  ipcMain.on("recording:toggle-request", (_event) => {
+    if (_event.sender !== mainWindow?.webContents) {
+      return;
+    }
+
+    void systemInputController?.toggle();
   });
   ipcMain.handle("dictation:insert-text", async (_event, text) => {
     if (_event.sender !== mainWindow?.webContents) {
@@ -466,14 +470,14 @@ if (ownsSingleInstance) {
   systemInputController = createSystemInputController({
     sendToMain: sendSystemInputStatus,
     sendToHud: () => {},
-    startRecording: async () => {
-      sendRecordingStartCommand();
+    startRecording: async (command) => {
+      sendRecordingStartCommand(command);
     },
-    stopRecording: async () => {
-      sendRecordingStopCommand();
+    stopRecording: async (command) => {
+      sendRecordingStopCommand(command);
     },
     isReadyToRecord: () => true,
-    requestRendererReset: () => sendWindowMessage(mainWindow, "recording:reset")
+    requestRendererReset: (command) => sendWindowMessage(mainWindow, "recording:reset", command)
   });
   hudActions = createHudActions({
     globalShortcut,

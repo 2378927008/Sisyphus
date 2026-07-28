@@ -6,41 +6,49 @@ const supportedTrayLanguages = {
   en: {
     show: "Show",
     recording: "Recording",
+    polishing: "Polishing",
     notice: "Local Flow is still running in the background. Use the tray icon to reopen it."
   },
   "zh-Hans": {
     show: "显示主窗口",
     recording: "正在录音",
+    polishing: "正在润色",
     notice: "Local Flow 仍在后台运行，可以通过托盘图标重新打开。"
   },
   ja: {
     show: "表示",
     recording: "録音中",
+    polishing: "文章を調整中",
     notice: "Local Flow はバックグラウンドで実行中です。トレイアイコンから再度開けます。"
   },
   ko: {
     show: "표시",
     recording: "녹음 중",
+    polishing: "텍스트 다듬는 중",
     notice: "Local Flow가 백그라운드에서 실행 중입니다. 트레이 아이콘을 사용해 다시 열 수 있습니다."
   },
   "zh-Hant": {
     show: "顯示主視窗",
     recording: "正在錄音",
+    polishing: "正在潤飾",
     notice: "Local Flow 仍在背景執行，可透過系統匣圖示重新開啟。"
   },
   fr: {
     show: "Afficher",
     recording: "Enregistrement",
+    polishing: "Amélioration",
     notice: "Local Flow fonctionne toujours en arrière-plan. Utilisez l'icône de la zone de notification pour le rouvrir."
   },
   ru: {
     show: "Показать",
     recording: "Запись",
+    polishing: "Улучшение текста",
     notice: "Local Flow продолжает работать в фоновом режиме. Откройте его снова через значок в области уведомлений."
   },
   es: {
     show: "Mostrar",
     recording: "Grabando",
+    polishing: "Mejorando texto",
     notice: "Local Flow sigue ejecutándose en segundo plano. Usa el icono de la bandeja para volver a abrirlo."
   }
 };
@@ -153,6 +161,7 @@ test("getTrayTooltip returns localized phase status and fallback", () => {
     ["recording", "Local Flow - 正在录音"],
     ["stopping", "Local Flow - 正在停止"],
     ["transcribing", "Local Flow - 正在转写"],
+    ["polishing", "Local Flow - 正在润色"],
     ["pasting", "Local Flow - 正在粘贴"],
     ["done", "Local Flow - 已完成"],
     ["warning", "Local Flow - 需要确认"],
@@ -177,6 +186,11 @@ test("tray tooltip selects every exact supported interface language", () => {
     assert.equal(
       getTrayTooltip({ language, state: { phase: "recording" } }),
       `Local Flow - ${expected.recording}`,
+      language
+    );
+    assert.equal(
+      getTrayTooltip({ language, state: { phase: "polishing" } }),
+      `Local Flow - ${expected.polishing}`,
       language
     );
   }

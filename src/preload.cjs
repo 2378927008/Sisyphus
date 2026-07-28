@@ -17,17 +17,18 @@ contextBridge.exposeInMainWorld("localFlow", {
   getLatestStatus: () => ipcRenderer.invoke("dictation:status-latest"),
   insertText: (text) => ipcRenderer.invoke("dictation:insert-text", text),
   processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
+  requestRecordingToggle: () => ipcRenderer.send("recording:toggle-request"),
   onShortcutToggle: (callback) => {
     ipcRenderer.on("recording:toggle", () => callback());
   },
   onRecordingStart: (callback) => {
-    ipcRenderer.on("recording:start", () => callback());
+    ipcRenderer.on("recording:start", (_event, command) => callback(command));
   },
   onRecordingStop: (callback) => {
-    ipcRenderer.on("recording:stop", () => callback());
+    ipcRenderer.on("recording:stop", (_event, command) => callback(command));
   },
   onRecordingReset: (callback) => {
-    ipcRenderer.on("recording:reset", () => callback());
+    ipcRenderer.on("recording:reset", (_event, command) => callback(command));
   },
   onStatus: (callback) => {
     ipcRenderer.on("dictation:status", (_event, payload) => callback(payload));

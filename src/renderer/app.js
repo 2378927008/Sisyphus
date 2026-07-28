@@ -117,6 +117,7 @@ let recorder = null;
 let isRecording = false;
 let recordingLifecyclePhase = "idle";
 let recordingOperationToken = 0;
+let activeRecordingOperationId = null;
 let currentSettings = null;
 let currentProviderStatus = null;
 let currentSetupStatus = null;
@@ -165,6 +166,7 @@ const ACTIVE_LANGUAGE_STATUS_PHASES = new Set([
   "recording",
   "stopping",
   "transcribing",
+  "polishing",
   "pasting"
 ]);
 const shortcutRecorder = createShortcutRecorder({
@@ -1484,28 +1486,28 @@ function closeSettingsFromBackdrop(event) {
 }
 
 async function toggleRecording() {
-  if (recordingLifecyclePhase === "recording") {
-    await stopRecording();
-  } else if (recordingLifecyclePhase === "idle") {
-    await startRecording();
-  }
+  window.localFlow.requestRecordingToggle();
 }
 
-async function startRecording() {
+async function startRecording(command = {}) {
   if (recordingLifecyclePhase !== "idle") return;
+  const operationId = normalizeRecordingOperationId(command.operationId);
+  if (operationId === null) return;
 
+  activeRecordingOperationId = operationId;
   const operationToken = beginRecordingOperation("starting");
   reportRecordingLifecycle({ phase: "starting", message: t("status.preparing") });
 
   try {
     await saveSettingsFromCurrentForm({ updateStatus: false });
   } catch {
-    failRecordingStart(operationToken, t(SETTINGS_SAVE_FAILED_KEY), "settings_save_failed");
+    failRecordingStart(operationToken, operationId, t(SETTINGS_SAVE_FAILED_KEY), "settings_save_failed");
     return;
   }
 
-  if (!isCurrentRecordingOperation(operationToken)) return;
+  if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
+  let nextRecorder = null;
   try {
     if (!ensureRecordReady()) {
       const message = recordButton.title || statusText.textContent || "Recording is not ready.";
@@ -1516,13 +1518,14 @@ async function startRecording() {
         reason: "not_ready",
         message
       });
+      activeRecordingOperationId = null;
       return;
     }
 
-    const nextRecorder = new WavRecorder();
+    nextRecorder = new WavRecorder();
     recorder = nextRecorder;
     await nextRecorder.start();
-    if (!isCurrentRecordingOperation(operationToken)) {
+    if (!isCurrentRecordingOperation(operationToken, operationId)) {
       cleanupRecorder(nextRecorder);
       return;
     }
@@ -1534,12 +1537,16 @@ async function startRecording() {
     setStatus(t("status.recording"));
     reportRecordingLifecycle({ phase: "recording", message: t("status.recording") });
   } catch {
-    failRecordingStart(operationToken, t("status.microphoneFailed"), "microphone_start_failed");
+    if (!isCurrentRecordingOperation(operationToken, operationId)) {
+      cleanupRecorder(nextRecorder);
+      return;
+    }
+    failRecordingStart(operationToken, operationId, t("status.microphoneFailed"), "microphone_start_failed");
   }
 }
 
-function failRecordingStart(operationToken, message, reason) {
-  if (!isCurrentRecordingOperation(operationToken)) return;
+function failRecordingStart(operationToken, operationId, message, reason) {
+  if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
   setStatus(message);
   cleanupRecorder();
@@ -1550,10 +1557,13 @@ function failRecordingStart(operationToken, message, reason) {
   updateRecordLabel();
   applyRecordReadiness();
   reportRecordingLifecycle({ phase: "error", reason, message });
+  activeRecordingOperationId = null;
 }
 
-async function stopRecording() {
+async function stopRecording(command = {}) {
   if (recordingLifecyclePhase !== "recording") return;
+  const operationId = normalizeRecordingOperationId(command.operationId);
+  if (operationId === null || operationId !== activeRecordingOperationId) return;
 
   const operationToken = beginRecordingOperation("stopping");
   reportRecordingLifecycle({ phase: "stopping", message: t("status.preparing") });
@@ -1569,27 +1579,28 @@ async function stopRecording() {
 
     const activeRecorder = recorder;
     const wav = await activeRecorder.stop();
-    if (!isCurrentRecordingOperation(operationToken)) return;
+    if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
     if (recorder === activeRecorder) {
       recorder = null;
     }
 
     const entry = await window.localFlow.processWav(wav);
-    if (!isCurrentRecordingOperation(operationToken)) return;
+    if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
     activePrimaryView = "home";
     document.body.dataset.primaryView = activePrimaryView;
     syncPrimaryNavigation();
     await renderHistory();
-    if (!isCurrentRecordingOperation(operationToken)) return;
+    if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
     renderDictationResult(entry);
     document.body.dataset.workspacePane = "editor";
     setRecordingLifecyclePhase("idle");
     setViewPhase(entry?.status === "failed" ? "warning" : "done");
+    activeRecordingOperationId = null;
   } catch {
-    if (!isCurrentRecordingOperation(operationToken)) return;
+    if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
     const message = t("status.processingFailed");
     setStatus(message);
@@ -1601,6 +1612,7 @@ async function stopRecording() {
     updateRecordLabel();
     applyRecordReadiness();
     reportRecordingLifecycle({ phase: "error", reason: "processing_failed", message });
+    activeRecordingOperationId = null;
   }
 }
 
@@ -2699,7 +2711,11 @@ function setStatus(message) {
 }
 
 function reportRecordingLifecycle(payload) {
-  window.localFlow.reportRecordingStatus?.(payload);
+  if (activeRecordingOperationId === null) return;
+  window.localFlow.reportRecordingStatus?.({
+    ...payload,
+    operationId: activeRecordingOperationId
+  });
 }
 
 function beginRecordingOperation(phase) {
@@ -2708,18 +2724,28 @@ function beginRecordingOperation(phase) {
   return recordingOperationToken;
 }
 
-function isCurrentRecordingOperation(operationToken) {
-  return operationToken === recordingOperationToken;
+function isCurrentRecordingOperation(operationToken, operationId) {
+  return (
+    operationToken === recordingOperationToken &&
+    operationId === activeRecordingOperationId
+  );
 }
 
-function resetRecordingLifecycle() {
+function resetRecordingLifecycle(command = {}) {
+  if (command.operationId !== activeRecordingOperationId) return;
+
   recordingOperationToken += 1;
+  activeRecordingOperationId = null;
   cleanupRecorder();
   isRecording = false;
   setRecordingLifecyclePhase("idle");
   document.body.classList.remove("recording");
   updateRecordLabel();
   applyRecordReadiness();
+}
+
+function normalizeRecordingOperationId(operationId) {
+  return Number.isSafeInteger(operationId) && operationId > 0 ? operationId : null;
 }
 
 function cleanupRecorder(targetRecorder = recorder) {

@@ -35,15 +35,19 @@ test("system input controller toggles recording through injected callbacks", asy
 test("system input controller exposes explicit start and stop commands", async () => {
   const calls = [];
   const controller = createSystemInputController({
-    startRecording: async () => calls.push("start"),
-    stopRecording: async () => calls.push("stop")
+    startRecording: async (command) => calls.push(["start", command]),
+    stopRecording: async (command) => calls.push(["stop", command])
   });
 
   await controller.start();
-  controller.setPhase("recording");
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
   await controller.stop();
 
-  assert.deepEqual(calls, ["start", "stop"]);
+  assert.deepEqual(calls, [
+    ["start", { operationId }],
+    ["stop", { operationId }]
+  ]);
 });
 
 test("system input controller keeps polishing distinct and busy", async () => {
@@ -53,7 +57,7 @@ test("system input controller keeps polishing distinct and busy", async () => {
     stopRecording: async () => calls.push("stop")
   });
 
-  controller.handleRendererStatus({ phase: "polishing", message: "Polishing" });
+  controller.handleSystemStatus({ phase: "polishing", message: "Polishing" });
   await controller.start();
   await controller.stop();
 
@@ -66,15 +70,177 @@ test("cancel resets the renderer and returns directly to idle", async () => {
   for (const phase of ["starting", "recording"]) {
     const resets = [];
     const controller = createSystemInputController({
-      requestRendererReset: () => resets.push("reset")
+      startRecording: async () => {},
+      requestRendererReset: (command) => resets.push(command)
     });
 
-    controller.setPhase(phase);
+    await controller.start();
+    const operationId = controller.getState().operationId;
+    if (phase === "recording") {
+      controller.handleRendererStatus({ operationId, phase });
+    }
     await controller.cancel();
 
-    assert.deepEqual(resets, ["reset"], phase);
+    assert.deepEqual(resets, [{ operationId }], phase);
     assert.equal(controller.getState().phase, "idle", phase);
+    assert.equal(controller.getState().operationId, undefined, phase);
   }
+});
+
+test("main owns monotonically increasing recording operation ids", async () => {
+  const commands = [];
+  const controller = createSystemInputController({
+    startRecording: async (command) => commands.push(command)
+  });
+
+  await controller.start();
+  const firstOperationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId: firstOperationId, phase: "error" });
+  await controller.start();
+  const secondOperationId = controller.getState().operationId;
+
+  assert.equal(Number.isSafeInteger(firstOperationId), true);
+  assert.equal(secondOperationId, firstOperationId + 1);
+  assert.deepEqual(commands, [
+    { operationId: firstOperationId },
+    { operationId: secondOperationId }
+  ]);
+});
+
+test("cancel during pending start invalidates late statuses from that operation", async () => {
+  let releaseStart;
+  const startCommands = [];
+  const resetCommands = [];
+  const pendingStart = new Promise((resolve) => {
+    releaseStart = resolve;
+  });
+  const controller = createSystemInputController({
+    startRecording: async (command) => {
+      startCommands.push(command);
+      if (startCommands.length === 1) {
+        await pendingStart;
+      }
+    },
+    requestRendererReset: (command) => resetCommands.push(command)
+  });
+
+  const start = controller.start();
+  const operationId = controller.getState().operationId;
+  assert.equal(controller.getState().phase, "starting");
+
+  await controller.cancel();
+  await controller.start();
+  const nextOperationId = controller.getState().operationId;
+  controller.handleRendererStatus({
+    operationId,
+    phase: "recording",
+    message: "late recording"
+  });
+
+  assert.deepEqual(resetCommands, [{ operationId }]);
+  assert.equal(nextOperationId, operationId + 1);
+  assert.deepEqual(startCommands, [
+    { operationId },
+    { operationId: nextOperationId }
+  ]);
+  assert.equal(controller.getState().phase, "starting");
+  releaseStart();
+  await start;
+  assert.equal(controller.getState().phase, "starting");
+  assert.equal(controller.getState().operationId, nextOperationId);
+});
+
+test("cancel ignores repeated requests and late same-generation recording", async () => {
+  const resets = [];
+  const controller = createSystemInputController({
+    startRecording: async () => {},
+    requestRendererReset: (command) => resets.push(command)
+  });
+
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
+
+  await controller.cancel();
+  await controller.cancel();
+  controller.handleRendererStatus({ operationId, phase: "recording" });
+
+  assert.deepEqual(resets, [{ operationId }]);
+  assert.equal(controller.getState().phase, "idle");
+});
+
+test("stop wins a stop-then-cancel race without resetting the renderer", async () => {
+  let releaseStop;
+  const stopCommands = [];
+  const resets = [];
+  const pendingStop = new Promise((resolve) => {
+    releaseStop = resolve;
+  });
+  const controller = createSystemInputController({
+    startRecording: async () => {},
+    stopRecording: async (command) => {
+      stopCommands.push(command);
+      await pendingStop;
+    },
+    requestRendererReset: (command) => resets.push(command)
+  });
+
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
+
+  const stop = controller.stop();
+  await controller.cancel();
+
+  assert.equal(controller.getState().phase, "stopping");
+  assert.deepEqual(stopCommands, [{ operationId }]);
+  assert.deepEqual(resets, []);
+  releaseStop();
+  await stop;
+});
+
+test("cancel wins a cancel-then-stop race and leaves the controller idle", async () => {
+  const stopCommands = [];
+  const resets = [];
+  const controller = createSystemInputController({
+    startRecording: async () => {},
+    stopRecording: async (command) => stopCommands.push(command),
+    requestRendererReset: (command) => resets.push(command)
+  });
+
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
+
+  await controller.cancel();
+  await controller.stop();
+
+  assert.deepEqual(resets, [{ operationId }]);
+  assert.deepEqual(stopCommands, []);
+  assert.equal(controller.getState().phase, "idle");
+});
+
+test("renderer statuses require the current main-owned operation id", async () => {
+  const controller = createSystemInputController({
+    startRecording: async () => {}
+  });
+
+  await controller.start();
+  const firstOperationId = controller.getState().operationId;
+  controller.handleRendererStatus({ phase: "recording" });
+  controller.handleRendererStatus({ operationId: firstOperationId - 1, phase: "recording" });
+  assert.equal(controller.getState().phase, "starting");
+
+  controller.handleRendererStatus({ operationId: firstOperationId, phase: "recording" });
+  assert.equal(controller.getState().phase, "recording");
+
+  controller.handleRendererStatus({ operationId: firstOperationId, phase: "error" });
+  await controller.start();
+  const secondOperationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId: firstOperationId, phase: "recording" });
+
+  assert.equal(controller.getState().phase, "starting");
+  assert.equal(controller.getState().operationId, secondOperationId);
 });
 
 test("cancel ignores every non-cancellable phase", async () => {
@@ -108,20 +274,23 @@ test("stop remains idempotent while a stop command is pending", async () => {
     releaseStop = resolve;
   });
   const controller = createSystemInputController({
-    stopRecording: async () => {
-      calls.push("stop");
+    startRecording: async () => {},
+    stopRecording: async (command) => {
+      calls.push(command);
       await pendingStop;
     }
   });
 
-  controller.setPhase("recording");
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
   const firstStop = controller.stop();
   const secondStop = controller.stop();
 
-  assert.deepEqual(calls, ["stop"]);
+  assert.deepEqual(calls, [{ operationId }]);
   releaseStop();
   await Promise.all([firstStop, secondStop]);
-  assert.deepEqual(calls, ["stop"]);
+  assert.deepEqual(calls, [{ operationId }]);
 });
 
 test("system input controller explicit commands ignore invalid lifecycle states", async () => {
@@ -146,7 +315,7 @@ test("system input controller exposes starting and stopping lifecycle phases", (
 
   controller.setPhase("starting", { message: "Starting" });
   assert.equal(controller.getState().phase, "starting");
-  controller.handleRendererStatus({ phase: "stopping", message: "Stopping" });
+  controller.handleSystemStatus({ phase: "stopping", message: "Stopping" });
   assert.equal(controller.getState().phase, "stopping");
 });
 
@@ -237,7 +406,7 @@ test("system input controller does not start when setup is not ready", async () 
 test("system input controller preserves warning renderer status", () => {
   const controller = createSystemInputController();
 
-  controller.handleRendererStatus({ phase: "warning", message: "Raw transcript saved" });
+  controller.handleSystemStatus({ phase: "warning", message: "Raw transcript saved" });
 
   assert.equal(controller.getState().phase, "warning");
   assert.equal(controller.getState().message, "Raw transcript saved");
@@ -401,12 +570,17 @@ test("system input controller stamps and clears recording start time", () => {
 
 test("system input controller preserves recording start time during recording status refreshes", () => {
   const now = createManualClock();
-  const controller = createSystemInputController({ now });
+  const controller = createSystemInputController({
+    now,
+    startRecording: async () => {}
+  });
 
-  controller.setPhase("recording", { message: "Recording" });
+  void controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording", message: "Recording" });
   const recordingStartedAt = controller.getState().recordingStartedAt;
 
-  controller.handleRendererStatus({ phase: "recording", message: "Still recording" });
+  controller.handleRendererStatus({ operationId, phase: "recording", message: "Still recording" });
 
   assert.equal(controller.getState().phase, "recording");
   assert.equal(controller.getState().message, "Still recording");

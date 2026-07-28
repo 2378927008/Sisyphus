@@ -108,6 +108,7 @@ async function getActualPreloadInvokeChannels(preloadSource) {
     "refreshModelSetupStatus",
     "reportRecordingStatus",
     "reprocessHistory",
+    "requestRecordingToggle",
     "saveSettings",
     "startModelSetup",
     "updateHistory"
@@ -141,9 +142,13 @@ async function getActualPreloadInvokeChannels(preloadSource) {
     subscribe(() => undefined);
   }
   exposedApi.reportRecordingStatus({ phase: "idle" });
+  exposedApi.requestRecordingToggle();
 
   assert.equal(listeners.size, 7, "every exposed subscription API should register a listener");
-  assert.deepEqual(sent, [{ channel: "recording:status", payload: { phase: "idle" } }]);
+  assert.deepEqual(sent, [
+    { channel: "recording:status", payload: { phase: "idle" } },
+    { channel: "recording:toggle-request", payload: undefined }
+  ]);
   return [...new Set(invoked.map((item) => item.channel))].sort();
 }
 
@@ -351,13 +356,13 @@ test("preload exposes explicit recording command listeners without raw IPC event
   const calls = [];
   exposedApi.onRecordingStart((...args) => calls.push(["start", args]));
   exposedApi.onRecordingStop((...args) => calls.push(["stop", args]));
-  listeners.get("recording:start")({ sender: "main" }, "unexpected");
-  listeners.get("recording:stop")({ sender: "main" }, "unexpected");
+  listeners.get("recording:start")({ sender: "main" }, { operationId: 41 });
+  listeners.get("recording:stop")({ sender: "main" }, { operationId: 41 });
 
   assert.equal(exposedApi.ipcRenderer, undefined);
   assert.deepEqual(calls, [
-    ["start", []],
-    ["stop", []]
+    ["start", [{ operationId: 41 }]],
+    ["stop", [{ operationId: 41 }]]
   ]);
 });
 
@@ -390,10 +395,10 @@ test("preload exposes recording reset listener without raw IPC events", async ()
 
   const calls = [];
   exposedApi.onRecordingReset((...args) => calls.push(args));
-  listeners.get("recording:reset")({ sender: "main" }, "unexpected");
+  listeners.get("recording:reset")({ sender: "main" }, { operationId: 41 });
 
   assert.equal(exposedApi.ipcRenderer, undefined);
-  assert.deepEqual(calls, [[]]);
+  assert.deepEqual(calls, [[{ operationId: 41 }]]);
 });
 
 test("preload exposes model setup IPC without raw ipcRenderer access", async () => {
@@ -842,21 +847,22 @@ test("app smoke covers keyboard and mouse shortcut recording", async () => {
 
 test("main process uses explicit renderer commands for system input start and stop", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);
-  const stopRecordingMatch = mainSource.match(/stopRecording:\s*async\s*\(\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*isReadyToRecord:/);
+  const startRecordingMatch = mainSource.match(/startRecording:\s*async\s*\(command\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*stopRecording:/);
+  const stopRecordingMatch = mainSource.match(/stopRecording:\s*async\s*\(command\)\s*=>\s*\{(?<body>[\s\S]*?)\r?\n\s*\},\r?\n\s*isReadyToRecord:/);
 
   assert.ok(startRecordingMatch, "system input controller should use a block startRecording handler");
   assert.ok(stopRecordingMatch, "system input controller should use a block stopRecording handler");
   assert.doesNotMatch(startRecordingMatch.groups.body, /setPhase\("recording"/);
   assert.doesNotMatch(startRecordingMatch.groups.body, /toggleRecording\(\)/);
   assert.doesNotMatch(stopRecordingMatch.groups.body, /toggleRecording\(\)/);
-  assert.match(startRecordingMatch.groups.body, /sendRecordingStartCommand\(\)/);
-  assert.match(stopRecordingMatch.groups.body, /sendRecordingStopCommand\(\)/);
-  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:start"\)/);
-  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:stop"\)/);
+  assert.match(startRecordingMatch.groups.body, /sendRecordingStartCommand\(command\)/);
+  assert.match(stopRecordingMatch.groups.body, /sendRecordingStopCommand\(command\)/);
+  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:start", command\)/);
+  assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:stop", command\)/);
   assert.match(mainSource, /ipcMain\.on\("recording:status"/);
   assert.match(mainSource, /const status = sanitizeRecordingStatusPayload\(payload\)/);
   assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
+  assert.match(mainSource, /ipcMain\.on\("recording:toggle-request"/);
 });
 
 test("main process injects renderer reset into the system input controller", async () => {
@@ -868,7 +874,7 @@ test("main process injects renderer reset into the system input controller", asy
   assert.ok(controllerOptionsMatch, "system input controller options should be inline and inspectable");
   assert.match(
     controllerOptionsMatch.groups.body,
-    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+    /requestRendererReset:\s*\(command\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset", command\)/
   );
 });
 
@@ -943,11 +949,9 @@ test("main process removes the default application menu after creating the main 
 test("main process delegates recording command timeouts to the system input controller", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
 
-  assert.match(mainSource, /systemInputController\.setPhase\("starting"/);
-  assert.match(mainSource, /systemInputController\.setPhase\("stopping"/);
   assert.match(
     mainSource,
-    /requestRendererReset:\s*\(\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset"\)/
+    /requestRendererReset:\s*\(command\)\s*=>\s*sendWindowMessage\(mainWindow, "recording:reset", command\)/
   );
   assert.doesNotMatch(mainSource, /scheduleRecordingCommandTimeout/);
   assert.doesNotMatch(mainSource, /clearRecordingCommandTimeout/);
@@ -1009,16 +1013,17 @@ test("main process shows terminal HUD states without owning terminal auto-idle",
   assert.match(mainSource, /"stopping"/);
 });
 
-test("renderer reports recording lifecycle only after start succeeds and before stop processing", async () => {
+test("renderer reports main-owned operation ids after start and before stop processing", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
-  const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
-  const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const startRecordingMatch = appSource.match(/async function startRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+  const stopRecordingMatch = appSource.match(/async function stopRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
   const failRecordingStartMatch = appSource.match(/function failRecordingStart\([^)]*\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(startRecordingMatch, "startRecording should be defined");
   assert.ok(stopRecordingMatch, "stopRecording should be defined");
   assert.ok(failRecordingStartMatch, "failRecordingStart should be defined");
   assert.match(appSource, /function reportRecordingLifecycle\(payload\) \{/);
+  assert.match(appSource, /operationId: activeRecordingOperationId/);
   assert.ok(
     startRecordingMatch.groups.body.indexOf("await nextRecorder.start()") <
       startRecordingMatch.groups.body.indexOf('reportRecordingLifecycle({ phase: "recording"'),
@@ -1037,15 +1042,16 @@ test("renderer reports recording lifecycle only after start succeeds and before 
 test("renderer uses explicit command handlers and local lifecycle guards", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const toggleRecordingMatch = appSource.match(/async function toggleRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
-  const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
-  const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const startRecordingMatch = appSource.match(/async function startRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+  const stopRecordingMatch = appSource.match(/async function stopRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.match(appSource, /let recordingLifecyclePhase = "idle";/);
+  assert.match(appSource, /let activeRecordingOperationId = null;/);
   assert.match(appSource, /window\.localFlow\.onRecordingStart\(startRecording\)/);
   assert.match(appSource, /window\.localFlow\.onRecordingStop\(stopRecording\)/);
-  assert.match(toggleRecordingMatch.groups.body, /recordingLifecyclePhase === "idle"/);
-  assert.match(toggleRecordingMatch.groups.body, /recordingLifecyclePhase === "recording"/);
+  assert.match(toggleRecordingMatch.groups.body, /window\.localFlow\.requestRecordingToggle\(\)/);
   assert.match(startRecordingMatch.groups.body, /if \(recordingLifecyclePhase !== "idle"\) return;/);
+  assert.match(startRecordingMatch.groups.body, /command\.operationId/);
   assert.match(startRecordingMatch.groups.body, /beginRecordingOperation\("starting"\)/);
   assert.match(startRecordingMatch.groups.body, /if \(!ensureRecordReady\(\)\) \{/);
   assert.match(startRecordingMatch.groups.body, /reportRecordingLifecycle\(\{\s*phase: "error",[\s\S]*reason: "not_ready"/);
@@ -1053,6 +1059,10 @@ test("renderer uses explicit command handlers and local lifecycle guards", async
   assert.match(stopRecordingMatch.groups.body, /beginRecordingOperation\("stopping"\)/);
   assert.match(stopRecordingMatch.groups.body, /reportRecordingLifecycle\(\{ phase: "stopping"/);
   assert.match(appSource, /function setRecordingLifecyclePhase\(phase\) \{/);
+  assert.match(
+    appSource,
+    /const ACTIVE_LANGUAGE_STATUS_PHASES = new Set\(\[[\s\S]*?"transcribing",[\s\S]*?"polishing",[\s\S]*?"pasting"[\s\S]*?\]\)/
+  );
 });
 
 test("renderer opens the settings drawer when main process requests settings", async () => {
@@ -1092,23 +1102,25 @@ test("renderer sends Windows productization fields when settings form saves", as
 
 test("renderer resets stale recording operations and ignores late completions", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
-  const startRecordingMatch = appSource.match(/async function startRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
-  const stopRecordingMatch = appSource.match(/async function stopRecording\(\) \{(?<body>[\s\S]*?)\n\}/);
-  const resetMatch = appSource.match(/function resetRecordingLifecycle\(\) \{(?<body>[\s\S]*?)\n\}/);
+  const startRecordingMatch = appSource.match(/async function startRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+  const stopRecordingMatch = appSource.match(/async function stopRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
+  const resetMatch = appSource.match(/function resetRecordingLifecycle\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.match(appSource, /let recordingOperationToken = 0;/);
   assert.match(appSource, /window\.localFlow\.onRecordingReset\(resetRecordingLifecycle\)/);
   assert.match(appSource, /function beginRecordingOperation\(phase\) \{/);
-  assert.match(appSource, /function isCurrentRecordingOperation\(operationToken\) \{/);
+  assert.match(appSource, /function isCurrentRecordingOperation\(operationToken, operationId\) \{/);
   assert.match(appSource, /function cleanupRecorder\(/);
   assert.ok(startRecordingMatch, "startRecording should be defined");
   assert.ok(stopRecordingMatch, "stopRecording should be defined");
   assert.ok(resetMatch, "resetRecordingLifecycle should be defined");
   assert.match(startRecordingMatch.groups.body, /const operationToken = beginRecordingOperation\("starting"\)/);
   assert.match(stopRecordingMatch.groups.body, /const operationToken = beginRecordingOperation\("stopping"\)/);
-  assert.match(startRecordingMatch.groups.body, /if \(!isCurrentRecordingOperation\(operationToken\)\) return;/);
-  assert.match(stopRecordingMatch.groups.body, /if \(!isCurrentRecordingOperation\(operationToken\)\) return;/);
+  assert.match(startRecordingMatch.groups.body, /if \(!isCurrentRecordingOperation\(operationToken, operationId\)\) return;/);
+  assert.match(stopRecordingMatch.groups.body, /if \(!isCurrentRecordingOperation\(operationToken, operationId\)\) return;/);
   assert.match(resetMatch.groups.body, /recordingOperationToken \+= 1/);
+  assert.match(resetMatch.groups.body, /command\.operationId !== activeRecordingOperationId/);
+  assert.match(resetMatch.groups.body, /activeRecordingOperationId = null/);
   assert.match(resetMatch.groups.body, /cleanupRecorder\(\)/);
   assert.match(resetMatch.groups.body, /setRecordingLifecyclePhase\("idle"\)/);
   assert.match(appSource, /dispose\(\) \{/);

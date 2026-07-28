@@ -32,8 +32,10 @@ export function createSystemInputController({
     reason: "",
     updatedAt: now()
   };
-  let startRecordingPending = false;
-  let stopRecordingPending = false;
+  let startRecordingPendingOperationId = null;
+  let stopRecordingPendingOperationId = null;
+  let nextOperationId = 1;
+  let activeOperationId = null;
   let commandTimeout = null;
   let terminalAutoIdleTimeout = null;
 
@@ -51,6 +53,7 @@ export function createSystemInputController({
     const hasMessage = Object.prototype.hasOwnProperty.call(patch, "message");
     const hasReason = Object.prototype.hasOwnProperty.call(patch, "reason");
     const hasRecordingStartedAt = Object.prototype.hasOwnProperty.call(patch, "recordingStartedAt");
+    const hasOperationId = Object.prototype.hasOwnProperty.call(patch, "operationId");
     state = {
       ...state,
       ...patch,
@@ -66,13 +69,23 @@ export function createSystemInputController({
     if (phase !== "recording" && !hasRecordingStartedAt) {
       delete state.recordingStartedAt;
     }
+    if ((phase === "idle" || hasOperationId && patch.operationId === undefined)) {
+      delete state.operationId;
+    }
+    if (phase === "idle" || terminalPhases.has(phase)) {
+      activeOperationId = null;
+    }
     refreshLifecycleTimers(phase, updatedAt);
     broadcast();
     return getState();
   }
 
   async function start() {
-    if (state.phase === "recording" || startRecordingPending || isBusyPhase(state.phase)) {
+    if (
+      state.phase === "recording" ||
+      startRecordingPendingOperationId !== null ||
+      isBusyPhase(state.phase)
+    ) {
       return;
     }
 
@@ -84,24 +97,44 @@ export function createSystemInputController({
       return;
     }
 
-    startRecordingPending = true;
+    const operationId = nextOperationId;
+    nextOperationId += 1;
+    activeOperationId = operationId;
+    setPhase("starting", {
+      operationId,
+      message: "Starting recording..."
+    });
+    startRecordingPendingOperationId = operationId;
     try {
-      await startRecording();
+      await startRecording({ operationId });
     } finally {
-      startRecordingPending = false;
+      if (startRecordingPendingOperationId === operationId) {
+        startRecordingPendingOperationId = null;
+      }
     }
   }
 
   async function stop() {
-    if (state.phase !== "recording" || stopRecordingPending) {
+    if (state.phase !== "recording" || stopRecordingPendingOperationId !== null) {
       return;
     }
 
-    stopRecordingPending = true;
+    const operationId = activeOperationId;
+    if (!isValidOperationId(operationId)) {
+      return;
+    }
+
+    setPhase("stopping", {
+      operationId,
+      message: "Stopping recording..."
+    });
+    stopRecordingPendingOperationId = operationId;
     try {
-      await stopRecording();
+      await stopRecording({ operationId });
     } finally {
-      stopRecordingPending = false;
+      if (stopRecordingPendingOperationId === operationId) {
+        stopRecordingPendingOperationId = null;
+      }
     }
   }
 
@@ -110,8 +143,17 @@ export function createSystemInputController({
       return;
     }
 
-    requestRendererReset();
-    setPhase("idle");
+    const operationId = activeOperationId;
+    if (!isValidOperationId(operationId)) {
+      return;
+    }
+
+    activeOperationId = null;
+    if (startRecordingPendingOperationId === operationId) {
+      startRecordingPendingOperationId = null;
+    }
+    requestRendererReset({ operationId });
+    setPhase("idle", { operationId: undefined });
   }
 
   async function toggle() {
@@ -124,6 +166,23 @@ export function createSystemInputController({
   }
 
   function handleRendererStatus(payload = {}) {
+    if (
+      !isValidOperationId(activeOperationId) ||
+      payload.operationId !== activeOperationId
+    ) {
+      return false;
+    }
+
+    const phase = normalizeRendererPhase(payload.phase);
+    setPhase(phase, {
+      operationId: activeOperationId,
+      message: payload.message || "",
+      reason: payload.reason || ""
+    });
+    return true;
+  }
+
+  function handleSystemStatus(payload = {}) {
     const phase = normalizeRendererPhase(payload.phase);
     setPhase(phase, {
       message: payload.message || "",
@@ -158,7 +217,11 @@ export function createSystemInputController({
         return;
       }
       commandTimeout = null;
-      requestRendererReset();
+      const operationId = activeOperationId;
+      activeOperationId = null;
+      requestRendererReset(
+        isValidOperationId(operationId) ? { operationId } : undefined
+      );
       setPhase("error", {
         reason: "renderer_timeout",
         message: phase === "starting" ? "Recording did not start." : "Recording did not stop."
@@ -201,8 +264,13 @@ export function createSystemInputController({
     stop,
     cancel,
     toggle,
-    handleRendererStatus
+    handleRendererStatus,
+    handleSystemStatus
   };
+}
+
+function isValidOperationId(operationId) {
+  return Number.isSafeInteger(operationId) && operationId > 0;
 }
 
 function normalizeRendererPhase(phase) {

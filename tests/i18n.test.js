@@ -50,10 +50,12 @@ const windowsUiV4Keys = [
   "phase.recording",
   "phase.stopping",
   "phase.transcribing",
+  "phase.polishing",
   "phase.pasting",
   "phase.done",
   "phase.warning",
-  "phase.error"
+  "phase.error",
+  "status.polishing"
 ];
 
 const personalizationKeys = [
@@ -115,6 +117,23 @@ test("Windows UI v4 keys are explicit in every supported dictionary", () => {
       assert.equal(Object.hasOwn(dictionary, key), true, `${language}.${key}`);
       assert.notEqual(String(dictionary[key]).trim(), "", `${language}.${key}`);
     }
+  }
+});
+
+test("polishing status copy is localized in every supported language", () => {
+  const expected = {
+    en: "Cleaning up dictation...",
+    "zh-Hans": "正在整理口述内容...",
+    ja: "口述内容を整えています...",
+    ko: "텍스트를 다듬는 중...",
+    "zh-Hant": "正在整理口述內容...",
+    fr: "Nettoyage de la dictée...",
+    ru: "Обработка текста диктовки...",
+    es: "Depurando el dictado..."
+  };
+
+  for (const [language, copy] of Object.entries(expected)) {
+    assert.equal(getUiText(language, "status.polishing"), copy, language);
   }
 });
 

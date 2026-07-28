@@ -6,6 +6,7 @@ import { createHudActions, wireHudIpc } from "../src/main/hud-actions.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
+import { createSystemInputController } from "../src/main/system-input-controller.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, "..");
@@ -20,7 +21,7 @@ applyElectronRuntimeSwitches(app);
 const timeout = setTimeout(() => {
   console.error("App smoke test timed out.");
   app.exit(2);
-}, 30000);
+}, 45000);
 
 const expectedInterfaceLanguageCodes = ["en", "zh-Hans", "ja", "ko", "zh-Hant", "fr", "ru", "es"];
 const smokeIpcChannelRegistry = [
@@ -44,7 +45,27 @@ const smokeIpcChannelRegistry = [
 const registeredSmokeIpcChannels = new Set();
 const hudActionCalls = [];
 let smokeHudWindow = null;
+let smokeMainWindow = null;
+let smokeSystemInputController = null;
 let hudActions = null;
+let ownedEscapeCallback = null;
+let driveRendererRecordingCommands = false;
+const rendererResetCommands = [];
+const smokeGlobalShortcut = {
+  register(accelerator, callback) {
+    const registered = globalShortcut.register(accelerator, callback);
+    if (registered && accelerator === "Escape") {
+      ownedEscapeCallback = callback;
+    }
+    return registered;
+  },
+  unregister(accelerator) {
+    if (accelerator === "Escape") {
+      ownedEscapeCallback = null;
+    }
+    globalShortcut.unregister(accelerator);
+  }
+};
 
 function registerSmokeIpcHandler(channel, handler) {
   if (!smokeIpcChannelRegistry.includes(channel)) {
@@ -296,10 +317,23 @@ function wireIpc() {
   registerSmokeIpcHandler("dictation:wav", () => {
     if (dictationWavError) throw new Error(dictationWavError);
     settingsAtDictation = { ...settings };
+    smokeSystemInputController?.handleSystemStatus({
+      phase: dictationResult.status === "failed" ? "warning" : "done"
+    });
     return dictationResult;
   });
   ipcMain.on("recording:status", (_event, payload) => {
+    if (_event.sender !== smokeMainWindow?.webContents) {
+      return;
+    }
     recordingStatusReports.push(payload);
+    smokeSystemInputController?.handleRendererStatus(payload);
+  });
+  ipcMain.on("recording:toggle-request", (_event) => {
+    if (_event.sender !== smokeMainWindow?.webContents) {
+      return;
+    }
+    void smokeSystemInputController?.toggle();
   });
   wireHudIpc({
     ipcMain,
@@ -310,12 +344,36 @@ function wireIpc() {
 
 app.whenReady().then(async () => {
   configureMediaPermissions(session.defaultSession);
-  hudActions = createHudActions({
-    globalShortcut,
-    systemInputController: {
-      stop: async () => hudActionCalls.push("stop"),
-      cancel: async () => hudActionCalls.push("cancel")
+  smokeSystemInputController = createSystemInputController({
+    sendToMain: (state) => {
+      hudActions?.syncPhase(state.phase);
+      smokeHudWindow?.webContents.send("system-input:status", {
+        ...state,
+        language: "en"
+      });
     },
+    startRecording: async (command) => {
+      if (driveRendererRecordingCommands) {
+        smokeMainWindow?.webContents.send("recording:start", command);
+      }
+    },
+    stopRecording: async (command) => {
+      hudActionCalls.push("stop");
+      if (driveRendererRecordingCommands) {
+        smokeMainWindow?.webContents.send("recording:stop", command);
+      }
+    },
+    requestRendererReset: (command) => {
+      hudActionCalls.push("cancel");
+      rendererResetCommands.push(command);
+      if (driveRendererRecordingCommands) {
+        smokeMainWindow?.webContents.send("recording:reset", command);
+      }
+    }
+  });
+  hudActions = createHudActions({
+    globalShortcut: smokeGlobalShortcut,
+    systemInputController: smokeSystemInputController,
     revealMainWindow: () => hudActionCalls.push("open")
   });
   wireIpc();
@@ -333,7 +391,23 @@ app.whenReady().then(async () => {
       nodeIntegration: false
     }
   });
+  smokeMainWindow = window;
+  window.webContents.on("before-input-event", (_event, input) => {
+    if (input.type === "keyDown" && input.key === "Escape") {
+      ownedEscapeCallback?.();
+    }
+  });
   const hudWindow = new BrowserWindow({
+    show: false,
+    width: 460,
+    height: 72,
+    webPreferences: {
+      preload: hudPreloadPath,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  const unauthorizedHudWindow = new BrowserWindow({
     show: false,
     width: 460,
     height: 72,
@@ -409,65 +483,94 @@ app.whenReady().then(async () => {
       throw new Error(`HUD emitted console errors: ${hudErrors.map((item) => item.message).join(" | ")}`);
     }
 
-    await window.loadFile(htmlPath);
+    await Promise.all([
+      window.loadFile(htmlPath),
+      unauthorizedHudWindow.loadFile(hudHtmlPath)
+    ]);
 
     const unauthorizedActionCount = hudActionCalls.length;
-    for (const channel of ["hud:stop", "hud:cancel", "hud:open-main-window"]) {
-      ipcMain.emit(channel, { sender: window.webContents });
-    }
+    await unauthorizedHudWindow.webContents.executeJavaScript(`
+      (() => {
+        window.localFlow.stop();
+        window.localFlow.cancel();
+        window.localFlow.openMainWindow();
+      })()
+    `);
     await new Promise((resolve) => setTimeout(resolve, 100));
     if (hudActionCalls.length !== unauthorizedActionCount) {
-      throw new Error("Main-window sender was allowed to invoke a HUD action.");
+      throw new Error("Unauthorized renderer was allowed to invoke a HUD action.");
     }
 
-    hudActions.syncPhase("recording");
-    if (!globalShortcut.isRegistered("Escape")) {
-      throw new Error("Escape should be registered while recording.");
+    globalShortcut.register("Escape", () => hudActionCalls.push("conflict-escape"));
+    await smokeSystemInputController.start();
+    await sendEscapeKey();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (smokeSystemInputController.getState().phase !== "starting") {
+      throw new Error("Conflicting Escape owner should not invoke HUD cancel.");
     }
-    hudWindow.webContents.send("system-input:status", {
-      phase: "recording",
-      language: "en",
-      recordingStartedAt: new Date().toISOString()
+    await smokeSystemInputController.cancel();
+    if (!globalShortcut.isRegistered("Escape")) {
+      throw new Error("HUD cleanup removed an Escape binding it did not own.");
+    }
+    globalShortcut.unregister("Escape");
+
+    const resetsBeforeEscape = rendererResetCommands.length;
+    await smokeSystemInputController.start();
+    if (!globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be registered while starting.");
+    }
+    await sendEscapeKey();
+    await waitForControllerPhase("idle", 5000);
+    if (rendererResetCommands.length !== resetsBeforeEscape + 1) {
+      throw new Error("Owned Escape did not reset the active recording operation.");
+    }
+    if (globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be released after it cancels recording.");
+    }
+
+    await smokeSystemInputController.start();
+    const stopOperationId = smokeSystemInputController.getState().operationId;
+    smokeSystemInputController.handleRendererStatus({
+      operationId: stopOperationId,
+      phase: "recording"
     });
     await waitForHudState(
       hudWindow,
       (state) => state.phase === "recording" && !state.cancelHidden && !state.stopHidden && !state.stopDisabled,
       5000
     );
+    const stopsBeforeClick = hudActionCalls.filter((action) => action === "stop").length;
     await hudWindow.webContents.executeJavaScript("document.querySelector('#hudStop').click()");
-    await waitForHudAction("stop", 5000);
+    await waitForHudActionCount("stop", stopsBeforeClick + 1, 5000);
 
-    hudActions.syncPhase("polishing");
+    smokeSystemInputController.handleSystemStatus({ phase: "polishing" });
     if (globalShortcut.isRegistered("Escape")) {
       throw new Error("Escape should be released while polishing.");
     }
+    smokeSystemInputController.handleSystemStatus({ phase: "idle" });
 
-    hudActions.syncPhase("starting");
+    await smokeSystemInputController.start();
     if (!globalShortcut.isRegistered("Escape")) {
       throw new Error("Escape should be registered while starting.");
     }
-    hudWindow.webContents.send("system-input:status", {
-      phase: "starting",
-      language: "en"
-    });
     await waitForHudState(
       hudWindow,
       (state) => state.phase === "starting" && !state.cancelHidden && !state.stopHidden && state.stopDisabled,
       5000
     );
+    const cancelsBeforeClick = hudActionCalls.filter((action) => action === "cancel").length;
     await hudWindow.webContents.executeJavaScript("document.querySelector('#hudCancel').click()");
-    await waitForHudAction("cancel", 5000);
+    await waitForHudActionCount("cancel", cancelsBeforeClick + 1, 5000);
+    await waitForControllerPhase("idle", 5000);
 
-    hudActions.syncPhase("warning");
-    if (globalShortcut.isRegistered("Escape")) {
-      throw new Error("Escape should be released for warning.");
-    }
-    hudWindow.webContents.send("system-input:status", {
+    smokeSystemInputController.handleSystemStatus({
       phase: "warning",
-      language: "en",
       reason: "paste_failed",
       message: unsafeDiagnostic
     });
+    if (globalShortcut.isRegistered("Escape")) {
+      throw new Error("Escape should be released for warning.");
+    }
     const warningHudState = await waitForHudState(
       hudWindow,
       (state) => state.phase === "warning" && !state.openMainHidden,
@@ -1684,10 +1787,59 @@ app.whenReady().then(async () => {
           originalClose.call(this).catch(() => {});
           return Promise.resolve();
         };
+        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        let releasePendingGetUserMedia;
+        const pendingGetUserMedia = new Promise((resolve) => {
+          releasePendingGetUserMedia = resolve;
+        });
+        window.__pendingGetUserMediaReady = false;
+        window.__pendingOldStream = null;
+        window.__releasePendingGetUserMedia = () => releasePendingGetUserMedia();
+        window.__restoreGetUserMedia = () => {
+          Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+            configurable: true,
+            value: originalGetUserMedia
+          });
+        };
+        Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+          configurable: true,
+          value: async (...args) => {
+            const stream = await originalGetUserMedia(...args);
+            window.__pendingOldStream = stream;
+            window.__pendingGetUserMediaReady = true;
+            await pendingGetUserMedia;
+            return stream;
+          }
+        });
       })()
     `);
-    window.webContents.send("recording:start");
-    window.webContents.send("recording:start");
+    driveRendererRecordingCommands = true;
+    await smokeSystemInputController.start();
+    const cancelledPendingOperationId = smokeSystemInputController.getState().operationId;
+    await waitForState(
+      window,
+      (state) => (
+        state.pendingGetUserMediaReady &&
+        state.bodyPhase === "starting" &&
+        recordingStatusReports.some((report) => (
+          report.operationId === cancelledPendingOperationId &&
+          report.phase === "starting"
+        ))
+      ),
+      10000
+    );
+    await smokeSystemInputController.cancel();
+    if (smokeSystemInputController.getState().phase !== "idle") {
+      throw new Error("Pending getUserMedia cancellation did not return the controller to idle.");
+    }
+    await window.webContents.executeJavaScript("window.__restoreGetUserMedia()");
+
+    await smokeSystemInputController.start();
+    await smokeSystemInputController.start();
+    const activeRecordingOperationId = smokeSystemInputController.getState().operationId;
+    if (activeRecordingOperationId !== cancelledPendingOperationId + 1) {
+      throw new Error("A new recording operation did not start immediately after pending cancellation.");
+    }
     await waitForState(
       window,
       (state) => (
@@ -1698,6 +1850,18 @@ app.whenReady().then(async () => {
       ),
       10000
     );
+    await window.webContents.executeJavaScript("window.__releasePendingGetUserMedia()");
+    await waitForState(
+      window,
+      (state) => state.isRecording && state.pendingOldTracksEnded,
+      10000
+    );
+    if (recordingStatusReports.some((report) => (
+      report.operationId === cancelledPendingOperationId &&
+      report.phase === "recording"
+    ))) {
+      throw new Error("Cancelled pending operation reported a late recording state.");
+    }
     await waitForState(
       window,
       (state) => (
@@ -1717,7 +1881,7 @@ app.whenReady().then(async () => {
     }
     deferProcessingLanguageSaves = false;
 
-    window.webContents.send("recording:stop");
+    await smokeSystemInputController.stop();
     const completedState = await waitForState(
       window,
       (state) => (
@@ -1845,6 +2009,15 @@ app.whenReady().then(async () => {
     if (successfulSetupCancels < 1) {
       throw new Error("Successful model setup cancellation was not exercised.");
     }
+    for (const phase of ["starting", "recording", "stopping", "transcribing", "error"]) {
+      const reports = recordingStatusReports.filter((report) => report.phase === phase);
+      if (!reports.length) {
+        throw new Error(`Recording lifecycle did not report ${phase}.`);
+      }
+      if (reports.some((report) => !Number.isSafeInteger(report.operationId) || report.operationId <= 0)) {
+        throw new Error(`Recording lifecycle ${phase} report omitted its operation id.`);
+      }
+    }
 
     const blockedWarnings = rendererMessages.filter((item) => isBlockedRendererWarning(item.message));
     if (blockedWarnings.length) {
@@ -1938,6 +2111,44 @@ async function waitForHudAction(action, timeoutMs) {
   throw new Error(`Timed out waiting for HUD action: ${action}`);
 }
 
+async function waitForHudActionCount(action, expectedCount, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const count = hudActionCalls.filter((item) => item === action).length;
+    if (count >= expectedCount) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error(`Timed out waiting for HUD action count: ${action} x ${expectedCount}`);
+}
+
+async function waitForControllerPhase(phase, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (smokeSystemInputController?.getState().phase === phase) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error(`Timed out waiting for controller phase: ${phase}`);
+}
+
+async function sendEscapeKey() {
+  smokeMainWindow.webContents.sendInputEvent({
+    type: "keyDown",
+    keyCode: "Escape"
+  });
+  smokeMainWindow.webContents.sendInputEvent({
+    type: "keyUp",
+    keyCode: "Escape"
+  });
+}
+
 function readRendererState(window) {
   return window.webContents.executeJavaScript(`
     (() => ({
@@ -1948,6 +2159,11 @@ function readRendererState(window) {
       hasRecentHistoryList: Boolean(document.querySelector('#historyList')),
       hasFooterHealthText: Boolean(document.querySelector('#headerHealthText')),
       isRecording: document.body.classList.contains('recording'),
+      pendingGetUserMediaReady: Boolean(window.__pendingGetUserMediaReady),
+      pendingOldTracksEnded: Boolean(
+        window.__pendingOldStream?.getTracks().length &&
+        window.__pendingOldStream.getTracks().every((track) => track.readyState === 'ended')
+      ),
       recordLabel: document.querySelector('#recordLabel')?.textContent || '',
       statusText: document.querySelector('#statusText')?.textContent || '',
       headerHealthText: document.querySelector('#headerHealthText')?.textContent || '',

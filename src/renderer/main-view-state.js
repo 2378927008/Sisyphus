@@ -6,6 +6,7 @@ const VIEW_PHASES = new Set([
   "recording",
   "stopping",
   "transcribing",
+  "polishing",
   "pasting",
   "done",
   "warning",
@@ -174,6 +175,5 @@ export function projectHistory(entries, limit) {
 }
 
 export function normalizeViewPhase(phase) {
-  if (phase === "polishing") return "transcribing";
   return VIEW_PHASES.has(phase) ? phase : "idle";
 }
