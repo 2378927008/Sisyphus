@@ -5,8 +5,9 @@
   "readinessScope": "read-only-current-state-and-manual-clean-install-plan",
   "source": {
     "collector": "scripts/clean-install-evidence.mjs",
-    "command": "npm.cmd run collect:clean-install-evidence",
-    "existingInstallInput": "LOCAL_FLOW_EXISTING_INSTALL_ROOT=<existing-install-root>"
+    "collectionMode": "repository_persistent_read_only_snapshot",
+    "existingInstallInputRole": "normalized_existing_install_root",
+    "registrySnapshotDisposition": "legacy_scope_access_confirmation_not_retained"
   },
   "safety": {
     "existingInstallMutation": "prohibited",
@@ -36,7 +37,8 @@
     }
   },
   "currentState": {
-    "status": "observed",
+    "status": "partial",
+    "executionContextRole": "unknown",
     "existingInstallation": {
       "status": "observed",
       "role": "existing_user_install",
@@ -69,46 +71,36 @@
       "exists": false
     },
     "uninstallRegistration": {
-      "status": "observed",
+      "status": "unsupported",
+      "executionContextRole": "unknown",
       "scopes": [
         {
-          "role": "current_user",
-          "status": "observed",
-          "matchingEntryCount": 1
+          "role": "collector_current_user",
+          "status": "unsupported",
+          "collectionContextRole": "unknown",
+          "reason": "legacy snapshot did not retain per-scope access confirmation"
         },
         {
           "role": "local_machine_64",
-          "status": "observed",
-          "matchingEntryCount": 0
+          "status": "unsupported",
+          "collectionContextRole": "unknown",
+          "reason": "legacy snapshot did not retain per-scope access confirmation"
         },
         {
           "role": "local_machine_32",
-          "status": "observed",
-          "matchingEntryCount": 0
+          "status": "unsupported",
+          "collectionContextRole": "unknown",
+          "reason": "legacy snapshot did not retain per-scope access confirmation"
         },
         {
-          "role": "loaded_users",
-          "status": "observed",
-          "matchingEntryCount": 1
+          "role": "loaded_user_profiles",
+          "status": "unsupported",
+          "collectionContextRole": "unknown",
+          "reason": "legacy snapshot did not retain per-scope access confirmation"
         }
       ],
-      "matchingEntries": [
-        {
-          "role": "current_user",
-          "displayName": "Local Flow 0.1.0",
-          "displayVersion": "0.1.0",
-          "installLocation": "",
-          "uninstallString": "\"<existing-install-root>/Uninstall Local Flow.exe\" /currentuser"
-        },
-        {
-          "role": "loaded_users",
-          "displayName": "Local Flow 0.1.0",
-          "displayVersion": "0.1.0",
-          "installLocation": "",
-          "uninstallString": "\"<existing-install-root>/Uninstall Local Flow.exe\" /currentuser"
-        }
-      ],
-      "conclusion": "present"
+      "matchingEntries": [],
+      "conclusion": "unknown"
     },
     "scopedProcesses": {
       "status": "observed",

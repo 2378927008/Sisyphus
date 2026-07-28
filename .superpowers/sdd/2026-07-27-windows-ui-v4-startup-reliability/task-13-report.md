@@ -1,6 +1,7 @@
 # Task 13 Report: Packaged Startup And Windows Installer
 
-Status: review findings fixed and verified (awaiting independent re-review)
+Status: Fix Round 2 implemented and verified (awaiting scoped re-review; Task
+13 not complete)
 
 ## Scope
 
@@ -218,3 +219,161 @@ The following must not be represented as unattended proof:
 - Qwen installation remains optional and network-dependent; its model file is
   intentionally excluded from the installer.
 - Native iPhone verification still requires macOS and Xcode.
+
+## Fix Round 2 (2026-07-28)
+
+Status: implemented and verified with TDD; awaiting scoped re-review. Task 13
+is not complete.
+
+This round addresses the three Important findings in
+`task-13-re-review.md`. It changes only the Windows clean-install evidence
+collector, validator, persistent manifest, tests, and this Task 13 record. It
+does not change iPhone source, Task 12 UI, model selection, or API policy. No
+installer or uninstaller was run, no release package was rebuilt, and the
+existing installation root was not accessed or modified.
+
+### Passed Proof Shape
+
+A `passed` trial now requires actual proof instead of nine status strings:
+
+- normalized `<isolated-install-root>` role and value;
+- sentinel before/after SHA-256;
+- shortcut before/after normalized target and SHA-256;
+- uninstall-registration before/after snapshots with all four registry views,
+  an interactive execution-context role, per-view counts, and entry arrays;
+- exact isolated executable/profile roles and a non-negative process count;
+- a reproducible Notepad insertion path, normalized target-file role/path,
+  target-file SHA-256 and size, UTC observation timestamp, and isolated profile
+  role.
+
+RED:
+
+```text
+node --test tests/clean-install-evidence.test.js
+8 tests: 7 passed, 1 failed
+observed statuses with null proof returned true instead of false
+```
+
+GREEN:
+
+```text
+8 tests: 8 passed, 0 failed
+```
+
+### Registry Identity And Scope Readability
+
+The collector no longer uses `SilentlyContinue` for uninstall registration.
+Each scope uses terminating access checks and reports `observed` only when the
+query succeeds and its execution context is trusted for that view. The
+non-sensitive roles are:
+
+- `collector_current_user`;
+- `local_machine_64`;
+- `local_machine_32`;
+- `loaded_user_profiles`.
+
+Every scope records `collectionContextRole`; the snapshot records
+`executionContextRole` as `interactive_user`, `restricted_process`, or
+`unknown`. Restricted collection cannot use current-user or loaded-profile
+views as interactive-user proof. Unknown identity produces only
+`unsupported`; partial coverage produces `partial`; neither can conclude
+`absent`.
+
+RED:
+
+```text
+registry pure tests: missing buildUninstallRegistrationEvidence export
+collector integration: executionContextRole and trusted scope roles absent
+```
+
+GREEN:
+
+```text
+registry pure tests: 3 passed, 0 failed
+collector integration: 1 passed, 0 failed
+```
+
+The committed legacy registry snapshot did not retain per-scope access
+confirmation. It is therefore conservatively reclassified as:
+
+```text
+currentState.status = partial
+executionContextRole = unknown
+uninstallRegistration.status = unsupported
+uninstallRegistration.conclusion = unknown
+```
+
+The earlier normalized executable, uninstaller, shortcut, process, and
+temporary-artifact observations remain retained. The historical interactive
+registry observation remains narrative context only; it is not promoted to a
+new current trusted snapshot.
+
+### Full Output Privacy
+
+The validator now checks every nested string value and object key. It rejects
+raw drive paths, UNC paths, user-profile paths, SIDs, user identity values,
+command lines, prohibited identity fields, and configured current-user/profile
+tokens. `%APPDATA%`, `%USERPROFILE%`, and `<existing-install-root>` remain
+valid normalized roles.
+
+The collector applies the same recursive redaction before JSON persistence,
+before success output, and before failure output. PowerShell failures are
+reduced to normalized reasons; raw exception messages are not printed.
+Registry results retain only display metadata and normalized target roles, not
+raw uninstall command lines.
+
+RED:
+
+```text
+privacy tests: 4 passed, 6 failed
+- UNC, user-name, and command-line values were accepted
+- recursive redaction was absent
+- a synthetic sensitive user-profile path was printed verbatim
+
+nested-object-key test: validation returned true
+
+specific-root precedence test:
+%USERPROFILE% replaced the exact normalized install-root role
+
+placeholder-collision test:
+short user-name tokens rejected valid normalized role placeholders
+```
+
+GREEN:
+
+```text
+privacy tests: 10 passed, 0 failed
+nested-object-key test: 1 passed, 0 failed
+specific-root precedence test: 1 passed, 0 failed
+placeholder-collision test: 1 passed, 0 failed
+```
+
+### Evidence And Manual Boundary
+
+`docs/release/evidence/windows-clean-install-v4.json` still records:
+
+- `cleanInstallTrial.status = "not_run"`;
+- sentinel, shortcut, uninstall-registration, and process proof as `not_run`;
+- Notepad insertion as `manual_required`;
+- `installerRun = false`;
+- `uninstallerRun = false`.
+
+A complete isolated install/uninstall trial and live microphone-to-Notepad
+insertion remain manual-only. The complete manual-validation list in Automated
+Readiness remains unchanged.
+
+Fresh Fix Round 2 verification:
+
+- focused evidence, registry, privacy, readiness, and provenance tests:
+  30 passed, 0 failed;
+- `npm.cmd test`: 608 passed, 0 failed, 0 cancelled, 0 skipped;
+- `npm.cmd run check:product`: exit 0,
+  `automatedArtifactReadiness=true`;
+- `npm.cmd run verify:release`: exit 0, existing same-build provenance accepted
+  with 46,844 ms artifact skew;
+- both changed evidence scripts passed `node --check`;
+- `git diff --check`: passed.
+
+No real-desktop manual validation was run or claimed in this round. No
+installer/uninstaller was executed, no release artifact was rebuilt, and the
+existing installation root was not accessed.

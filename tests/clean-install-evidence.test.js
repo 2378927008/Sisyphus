@@ -50,6 +50,7 @@ function createTruthfulManifest() {
     },
     currentState: {
       status: "observed",
+      executionContextRole: "interactive_user",
       existingInstallation: {
         status: "observed",
         role: "existing_user_install",
@@ -79,11 +80,32 @@ function createTruthfulManifest() {
       },
       uninstallRegistration: {
         status: "observed",
+        executionContextRole: "interactive_user",
         scopes: [
-          { role: "current_user", status: "observed", matchingEntryCount: 0 },
-          { role: "local_machine_64", status: "observed", matchingEntryCount: 0 },
-          { role: "local_machine_32", status: "observed", matchingEntryCount: 0 },
-          { role: "loaded_users", status: "observed", matchingEntryCount: 0 }
+          {
+            role: "collector_current_user",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "local_machine_64",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "local_machine_32",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "loaded_user_profiles",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          }
         ],
         matchingEntries: [],
         conclusion: "absent"
@@ -162,6 +184,152 @@ test("clean-install evidence schema rejects success claims without observed proo
   assert.ok(result.errors.some((error) => error.includes("cleanInstallTrial.status")));
 });
 
+test("clean-install evidence rejects observed statuses when passed proof values are empty", () => {
+  const manifest = createTruthfulManifest();
+  const trial = manifest.cleanInstallTrial;
+  trial.status = "passed";
+  trial.isolatedInstallRoot.status = "observed";
+  trial.sentinel.before.status = "observed";
+  trial.sentinel.after.status = "observed";
+  trial.shortcuts.before.status = "observed";
+  trial.shortcuts.after.status = "observed";
+  trial.uninstallRegistration.before.status = "observed";
+  trial.uninstallRegistration.after.status = "observed";
+  trial.processScope.status = "observed";
+  trial.productTextInsertion.status = "observed";
+
+  const result = validateCleanInstallEvidence(manifest);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("isolatedInstallRoot.value")));
+  assert.ok(result.errors.some((error) => error.includes("sentinel.before.sha256")));
+  assert.ok(result.errors.some((error) => error.includes("shortcuts.before.target")));
+  assert.ok(result.errors.some((error) => error.includes("uninstallRegistration.before.scopes")));
+  assert.ok(result.errors.some((error) => error.includes("processScope.matchingProcessCount")));
+  assert.ok(result.errors.some((error) => error.includes("productTextInsertion.targetFile.sha256")));
+});
+
+test("clean-install evidence accepts a passed trial with complete normalized proof", () => {
+  const manifest = createTruthfulManifest();
+  manifest.cleanInstallTrial = {
+    status: "passed",
+    isolatedInstallRoot: {
+      status: "observed",
+      role: "isolated_install_root",
+      value: "<isolated-install-root>"
+    },
+    sentinel: {
+      before: { status: "observed", sha256: "1".repeat(64) },
+      after: { status: "observed", sha256: "1".repeat(64) }
+    },
+    shortcuts: {
+      before: {
+        status: "observed",
+        target: "<existing-install-root>/Local Flow.exe",
+        sha256: "2".repeat(64)
+      },
+      after: {
+        status: "observed",
+        target: "<existing-install-root>/Local Flow.exe",
+        sha256: "2".repeat(64)
+      }
+    },
+    uninstallRegistration: {
+      before: {
+        status: "observed",
+        executionContextRole: "interactive_user",
+        scopes: [
+          {
+            role: "collector_current_user",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 1
+          },
+          {
+            role: "local_machine_64",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "local_machine_32",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "loaded_user_profiles",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 1
+          }
+        ],
+        matchingEntries: [{ role: "collector_current_user", displayName: "Local Flow 0.1.0" }]
+      },
+      after: {
+        status: "observed",
+        executionContextRole: "interactive_user",
+        scopes: [
+          {
+            role: "collector_current_user",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "local_machine_64",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "local_machine_32",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          },
+          {
+            role: "loaded_user_profiles",
+            status: "observed",
+            collectionContextRole: "interactive_user",
+            matchingEntryCount: 0
+          }
+        ],
+        matchingEntries: []
+      }
+    },
+    processScope: {
+      status: "observed",
+      executableRole: "isolated_install_executable",
+      userDataRole: "isolated_test_profile",
+      matchingProcessCount: 0
+    },
+    productTextInsertion: {
+      status: "observed",
+      targetApplication: "Windows Notepad",
+      path: [
+        "global_shortcut",
+        "microphone",
+        "whisper",
+        "output_pipeline",
+        "send_input",
+        "notepad"
+      ],
+      expectedText: "Local Flow clean-install insertion trial",
+      targetFile: {
+        role: "isolated_notepad_output",
+        path: "<isolated-test-profile>/Local Flow insertion.txt",
+        sha256: "3".repeat(64),
+        bytes: 41
+      },
+      observedAt: "2026-07-28T08:05:00.000Z",
+      isolatedProfileRole: "isolated_test_profile"
+    }
+  };
+
+  assert.deepEqual(validateCleanInstallEvidence(manifest), { ok: true, errors: [] });
+});
+
 test("committed clean-install evidence is valid, normalized, and explicitly not run", async () => {
   const manifest = JSON.parse(await readFile(
     new URL("../docs/release/evidence/windows-clean-install-v4.json", import.meta.url),
@@ -174,10 +342,9 @@ test("committed clean-install evidence is valid, normalized, and explicitly not 
   assert.doesNotMatch(serialized, /S-1-5-21-/);
   assert.doesNotMatch(serialized, /C:\\\\Users\\\\/i);
   assert.doesNotMatch(serialized, /E:\\\\/i);
-  assert.equal(
-    registration.conclusion,
-    registration.matchingEntries.length === 0 ? "absent" : "present"
-  );
+  assert.equal(registration.status, "unsupported");
+  assert.equal(registration.executionContextRole, "unknown");
+  assert.equal(registration.conclusion, "unknown");
   assert.equal(manifest.cleanInstallTrial.status, "not_run");
   assert.equal(manifest.cleanInstallTrial.productTextInsertion.status, "manual_required");
 });
@@ -225,6 +392,29 @@ test("collector stays truthful when no existing-install root is supplied", async
 
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(await readFile(outputPath, "utf8"));
+  const registration = manifest.currentState.uninstallRegistration;
   assert.equal(manifest.currentState.existingInstallation.status, "unsupported");
+  assert.ok(
+    ["interactive_user", "restricted_process", "unknown"].includes(
+      manifest.currentState.executionContextRole
+    )
+  );
+  assert.equal(
+    registration.executionContextRole,
+    manifest.currentState.executionContextRole
+  );
+  assert.deepEqual(
+    new Set(registration.scopes.map(({ role }) => role)),
+    new Set([
+      "collector_current_user",
+      "local_machine_64",
+      "local_machine_32",
+      "loaded_user_profiles"
+    ])
+  );
+  if (registration.executionContextRole !== "interactive_user") {
+    assert.ok(["partial", "unsupported"].includes(registration.status));
+    assert.equal(registration.conclusion, "unknown");
+  }
   assert.deepEqual(validateCleanInstallEvidence(manifest), { ok: true, errors: [] });
 });

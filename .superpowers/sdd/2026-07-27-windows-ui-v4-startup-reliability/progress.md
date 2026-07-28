@@ -48,3 +48,4 @@ Task 13: packaged-start harness GREEN (focused 21/21; real desktop five-field JS
 Task 13: implemented and verified (awaiting independent review)
 Task 13: independent review returned 2 Important and 2 Minor findings
 Task 13: review findings fixed with TDD, persistent evidence, and release provenance (awaiting independent re-review)
+Task 13: fix round 2 implemented and verified (focused 30/30; full 608/608; check:product and verify:release passed; awaiting scoped re-review, not complete)

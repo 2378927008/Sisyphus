@@ -4,7 +4,11 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCleanInstallEvidence } from "./clean-install-evidence-core.mjs";
+import {
+  buildUninstallRegistrationEvidence,
+  redactEvidenceValue,
+  validateCleanInstallEvidence
+} from "./clean-install-evidence-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -21,28 +25,22 @@ function readArgument(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-function replaceInsensitive(value, search, replacement) {
-  if (!search) {
-    return value;
-  }
-  const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return value.replace(new RegExp(escaped, "gi"), replacement);
-}
-
 function normalizeMachineValue(value, existingInstallRoot) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  let normalized = value;
-  normalized = replaceInsensitive(normalized, existingInstallRoot, "<existing-install-root>");
-  normalized = replaceInsensitive(normalized, projectRoot, "<project-root>");
-  normalized = replaceInsensitive(normalized, process.env.APPDATA, "%APPDATA%");
-  normalized = replaceInsensitive(normalized, process.env.USERPROFILE, "%USERPROFILE%");
-  normalized = normalized.replaceAll("\\", "/");
-  if (/[a-z]:\//i.test(normalized)) {
-    return "<redacted-machine-path>";
-  }
-  return normalized;
+  const normalized = redactEvidenceValue(value, {
+    replacements: [
+      {
+        value: existingInstallRoot,
+        replacement: "<existing-install-root>"
+      },
+      {
+        value: projectRoot,
+        replacement: "<project-root>"
+      }
+    ]
+  });
+  return typeof normalized === "string"
+    ? normalized.replaceAll("\\", "/")
+    : normalized;
 }
 
 async function sha256File(filePath) {
@@ -78,7 +76,11 @@ function runPowerShell(script, environment = {}) {
     }
   );
   if (result.status !== 0) {
-    throw new Error((result.stderr || result.stdout || "PowerShell query failed").trim());
+    const detail = normalizeMachineValue(
+      (result.stderr || result.stdout || "PowerShell query failed").trim(),
+      ""
+    );
+    throw new Error(`PowerShell query failed: ${detail}`);
   }
   return JSON.parse(result.stdout.trim());
 }
@@ -131,7 +133,10 @@ async function collectShortcut(existingInstallRoot) {
   } catch (error) {
     return {
       status: "unsupported",
-      reason: error instanceof Error ? error.message : String(error)
+      reason: normalizeMachineValue(
+        error instanceof Error ? error.message : String(error),
+        existingInstallRoot
+      )
     };
   }
 }
@@ -139,60 +144,163 @@ async function collectShortcut(existingInstallRoot) {
 function collectUninstallRegistration(existingInstallRoot) {
   try {
     const snapshot = runPowerShell(`
-      $scopes = @(
-        [pscustomobject]@{ role = 'current_user'; path = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' },
-        [pscustomobject]@{ role = 'local_machine_64'; path = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' },
-        [pscustomobject]@{ role = 'local_machine_32'; path = 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' },
-        [pscustomobject]@{ role = 'loaded_users'; path = 'Registry::HKEY_USERS\\*\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' }
+      function Get-ExecutionContextRole {
+        try {
+          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+          if ([string]$identity.Name -match '(?i)(codexsandbox|sandbox)') {
+            return 'restricted_process'
+          }
+          try {
+            $currentSid = [string]$identity.User.Value
+            $explorers = @(
+              Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop
+            )
+            foreach ($explorer in $explorers) {
+              $owner = Invoke-CimMethod -InputObject $explorer -MethodName GetOwnerSid -ErrorAction Stop
+              if ([string]$owner.Sid -eq $currentSid) {
+                return 'interactive_user'
+              }
+            }
+          } catch {
+            return 'unknown'
+          }
+        } catch {
+          return 'unknown'
+        }
+        return 'unknown'
+      }
+
+      function Convert-LocalFlowEntry {
+        param($Entry)
+        $existingRoot = [string]$env:LOCAL_FLOW_EVIDENCE_EXISTING_ROOT
+        $installLocation = [string]$Entry.InstallLocation
+        $uninstallString = [string]$Entry.UninstallString
+        $installLocationRole = if (-not $installLocation) {
+          'none'
+        } elseif ($existingRoot -and $installLocation.IndexOf(
+          $existingRoot,
+          [System.StringComparison]::OrdinalIgnoreCase
+        ) -ge 0) {
+          'existing_install_root'
+        } else {
+          'redacted_other_location'
+        }
+        $uninstallTargetRole = if (-not $uninstallString) {
+          'none'
+        } elseif ($existingRoot -and $uninstallString.IndexOf(
+          $existingRoot,
+          [System.StringComparison]::OrdinalIgnoreCase
+        ) -ge 0) {
+          'existing_install_uninstaller'
+        } else {
+          'redacted_other_target'
+        }
+        [pscustomobject]@{
+          displayName = [string]$Entry.DisplayName
+          displayVersion = [string]$Entry.DisplayVersion
+          installLocationRole = $installLocationRole
+          uninstallTargetRole = $uninstallTargetRole
+        }
+      }
+
+      function Get-LocalFlowEntriesAtBase {
+        param([string]$BasePath)
+        $matches = @()
+        if (-not (Test-Path -LiteralPath $BasePath -ErrorAction Stop)) {
+          return $matches
+        }
+        $children = @(Get-ChildItem -LiteralPath $BasePath -ErrorAction Stop)
+        foreach ($child in $children) {
+          $entry = Get-ItemProperty -LiteralPath $child.PSPath -ErrorAction Stop
+          if (
+            [string]$entry.DisplayName -like '*Local Flow*' -or
+            [string]$entry.UninstallString -like '*Local Flow*'
+          ) {
+            $matches += Convert-LocalFlowEntry -Entry $entry
+          }
+        }
+        return $matches
+      }
+
+      function Get-LoadedUserEntries {
+        $matches = @()
+        $profiles = @(
+          Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction Stop |
+            Where-Object { [string]$_.PSChildName -notmatch '_Classes$' }
+        )
+        foreach ($profile in $profiles) {
+          $basePath = "$($profile.PSPath)\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+          $matches += @(Get-LocalFlowEntriesAtBase -BasePath $basePath)
+        }
+        return $matches
+      }
+
+      $scopeDefinitions = @(
+        [pscustomobject]@{
+          role = 'collector_current_user'
+          path = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+        },
+        [pscustomobject]@{
+          role = 'local_machine_64'
+          path = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+        },
+        [pscustomobject]@{
+          role = 'local_machine_32'
+          path = 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+        },
+        [pscustomobject]@{
+          role = 'loaded_user_profiles'
+          path = $null
+        }
       )
       $scopeResults = @()
-      $matches = @()
-      foreach ($scope in $scopes) {
-        $entries = @(
-          Get-ItemProperty -Path $scope.path -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.DisplayName -like '*Local Flow*' -or
-              $_.UninstallString -like '*Local Flow*'
-            }
-        )
-        $scopeResults += [pscustomobject]@{
-          role = $scope.role
-          status = 'observed'
-          matchingEntryCount = $entries.Count
-        }
-        foreach ($entry in $entries) {
-          $matches += [pscustomobject]@{
+      foreach ($scope in $scopeDefinitions) {
+        try {
+          $entries = if ($scope.role -eq 'loaded_user_profiles') {
+            @(Get-LoadedUserEntries)
+          } else {
+            @(Get-LocalFlowEntriesAtBase -BasePath $scope.path)
+          }
+          $scopeResults += [pscustomobject]@{
             role = $scope.role
-            displayName = [string]$entry.DisplayName
-            displayVersion = [string]$entry.DisplayVersion
-            installLocation = [string]$entry.InstallLocation
-            uninstallString = [string]$entry.UninstallString
+            access = 'success'
+            matchingEntries = @($entries)
+          }
+        } catch {
+          $scopeResults += [pscustomobject]@{
+            role = $scope.role
+            access = 'failed'
+            reason = 'registry_scope_query_failed'
+            matchingEntries = @()
           }
         }
       }
       [pscustomobject]@{
-        scopes = @($scopeResults)
-        matchingEntries = @($matches)
+        executionContextRole = Get-ExecutionContextRole
+        scopeResults = @($scopeResults)
       } | ConvertTo-Json -Depth 5 -Compress
-    `);
-    const matchingEntries = (snapshot.matchingEntries || []).map((entry) => ({
-      role: entry.role,
-      displayName: entry.displayName,
-      displayVersion: entry.displayVersion,
-      installLocation: normalizeMachineValue(entry.installLocation, existingInstallRoot),
-      uninstallString: normalizeMachineValue(entry.uninstallString, existingInstallRoot)
-    }));
-    return {
-      status: "observed",
-      scopes: snapshot.scopes,
-      matchingEntries,
-      conclusion: matchingEntries.length === 0 ? "absent" : "present"
-    };
-  } catch (error) {
-    return {
-      status: "unsupported",
-      reason: error instanceof Error ? error.message : String(error)
-    };
+    `, {
+      LOCAL_FLOW_EVIDENCE_EXISTING_ROOT: existingInstallRoot
+    });
+    return buildUninstallRegistrationEvidence({
+      executionContextRole: snapshot.executionContextRole,
+      scopeResults: snapshot.scopeResults
+    });
+  } catch {
+    return buildUninstallRegistrationEvidence({
+      executionContextRole: "unknown",
+      scopeResults: [
+        "collector_current_user",
+        "local_machine_64",
+        "local_machine_32",
+        "loaded_user_profiles"
+      ].map((role) => ({
+        role,
+        access: "unknown",
+        reason: "registry collection did not complete",
+        matchingEntries: []
+      }))
+    });
   }
 }
 
@@ -234,7 +342,10 @@ function collectScopedProcesses(existingInstallRoot) {
   } catch (error) {
     return {
       status: "unsupported",
-      reason: error instanceof Error ? error.message : String(error)
+      reason: normalizeMachineValue(
+        error instanceof Error ? error.message : String(error),
+        existingInstallRoot
+      )
     };
   }
 }
@@ -318,6 +429,25 @@ async function createManifest(existingInstallRoot) {
     }
   }
 
+  const existingInstallation = await collectExistingInstallation(
+    existingInstallRoot,
+    unpackedExecutable
+  );
+  const startMenuShortcut = await collectShortcut(existingInstallRoot);
+  const uninstallRegistration = collectUninstallRegistration(existingInstallRoot);
+  const scopedProcesses = collectScopedProcesses(existingInstallRoot);
+  const temporaryTestArtifacts = await collectTemporaryTestArtifacts();
+  const currentStateStatus = [
+    existingInstallation,
+    startMenuShortcut,
+    { status: "observed" },
+    uninstallRegistration,
+    scopedProcesses,
+    temporaryTestArtifacts
+  ].every(({ status }) => status === "observed")
+    ? "observed"
+    : "partial";
+
   return {
     schemaVersion: 1,
     evidenceKind: "local-flow-windows-clean-install",
@@ -325,8 +455,9 @@ async function createManifest(existingInstallRoot) {
     readinessScope: "read-only-current-state-and-manual-clean-install-plan",
     source: {
       collector: "scripts/clean-install-evidence.mjs",
-      command: "npm.cmd run collect:clean-install-evidence",
-      existingInstallInput: "LOCAL_FLOW_EXISTING_INSTALL_ROOT=<existing-install-root>"
+      collectionMode: "repository_persistent_read_only_snapshot",
+      existingInstallInputRole: "normalized_existing_install_root",
+      registrySnapshotDisposition: "per_scope_access_and_context_recorded"
     },
     safety: {
       existingInstallMutation: "prohibited",
@@ -347,20 +478,18 @@ async function createManifest(existingInstallRoot) {
       unpackedExecutable
     },
     currentState: {
-      status: "observed",
-      existingInstallation: await collectExistingInstallation(
-        existingInstallRoot,
-        unpackedExecutable
-      ),
-      startMenuShortcut: await collectShortcut(existingInstallRoot),
+      status: currentStateStatus,
+      executionContextRole: uninstallRegistration.executionContextRole,
+      existingInstallation,
+      startMenuShortcut,
       desktopShortcut: {
         status: "observed",
         path: "%USERPROFILE%/Desktop/Local Flow.lnk",
         exists: desktopShortcutExists
       },
-      uninstallRegistration: collectUninstallRegistration(existingInstallRoot),
-      scopedProcesses: collectScopedProcesses(existingInstallRoot),
-      temporaryTestArtifacts: await collectTemporaryTestArtifacts()
+      uninstallRegistration,
+      scopedProcesses,
+      temporaryTestArtifacts
     },
     cleanInstallTrial: {
       status: "not_run",
@@ -409,29 +538,75 @@ async function createManifest(existingInstallRoot) {
   };
 }
 
+const outputPath = path.resolve(readArgument("--output") || defaultOutput);
+const existingInstallRoot =
+  readArgument("--existing-install-root") ||
+  process.env.LOCAL_FLOW_EXISTING_INSTALL_ROOT ||
+  "";
+
 try {
-  const outputPath = path.resolve(readArgument("--output") || defaultOutput);
-  const existingInstallRoot =
-    readArgument("--existing-install-root") ||
-    process.env.LOCAL_FLOW_EXISTING_INSTALL_ROOT ||
-    "";
-  const manifest = await createManifest(existingInstallRoot);
+  const collectedManifest = await createManifest(existingInstallRoot);
+  const manifest = redactEvidenceValue(collectedManifest, {
+    replacements: [
+      {
+        value: existingInstallRoot,
+        replacement: "<existing-install-root>"
+      },
+      {
+        value: projectRoot,
+        replacement: "<project-root>"
+      }
+    ]
+  });
   const validation = validateCleanInstallEvidence(manifest);
   if (!validation.ok) {
     throw new Error(`evidence manifest validation failed: ${validation.errors.join("; ")}`);
   }
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  process.stdout.write(`${JSON.stringify({
-    ok: true,
-    output: normalizeMachineValue(outputPath, existingInstallRoot),
-    readinessScope: manifest.readinessScope,
-    cleanInstallTrial: manifest.cleanInstallTrial.status
-  }, null, 2)}\n`);
+  const successOutput = redactEvidenceValue(
+    {
+      ok: true,
+      output: normalizeMachineValue(outputPath, existingInstallRoot),
+      readinessScope: manifest.readinessScope,
+      cleanInstallTrial: manifest.cleanInstallTrial.status
+    },
+    {
+      replacements: [
+        {
+          value: existingInstallRoot,
+          replacement: "<existing-install-root>"
+        },
+        {
+          value: projectRoot,
+          replacement: "<project-root>"
+        }
+      ]
+    }
+  );
+  process.stdout.write(`${JSON.stringify(successOutput, null, 2)}\n`);
 } catch (error) {
-  process.stderr.write(`${JSON.stringify({
-    ok: false,
-    message: error instanceof Error ? error.message : String(error)
-  }, null, 2)}\n`);
+  const failureOutput = redactEvidenceValue(
+    {
+      ok: false,
+      message: normalizeMachineValue(
+        error instanceof Error ? error.message : String(error),
+        existingInstallRoot
+      )
+    },
+    {
+      replacements: [
+        {
+          value: existingInstallRoot,
+          replacement: "<existing-install-root>"
+        },
+        {
+          value: projectRoot,
+          replacement: "<project-root>"
+        }
+      ]
+    }
+  );
+  process.stderr.write(`${JSON.stringify(failureOutput, null, 2)}\n`);
   process.exitCode = 1;
 }
