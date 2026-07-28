@@ -85,7 +85,7 @@ function createPassedEvidence() {
         },
         uninstallRegistration: {
           status: "observed",
-          displayName: "Local Flow",
+          displayName: "Local Flow 0.1.0",
           displayVersion: "0.1.0",
           installLocationRole: "isolated_install_root",
           uninstallTargetRole: "isolated_install_uninstaller"
@@ -236,14 +236,21 @@ test("uninstall registration can prove the isolated root from its command", () =
 test("uninstall registration must match the packaged product identity", () => {
   assert.equal(
     registrationMatchesReleaseIdentity(
-      { displayName: "Local Flow", displayVersion: "0.1.0" },
+      { displayName: "Local Flow 0.1.0", displayVersion: "0.1.0" },
       { productName: "Local Flow", version: "0.1.0" }
     ),
     true
   );
   assert.equal(
     registrationMatchesReleaseIdentity(
-      { displayName: "Local Flow", displayVersion: "9.9.9" },
+      { displayName: "Local Flow 0.1.0", displayVersion: "9.9.9" },
+      { productName: "Local Flow", version: "0.1.0" }
+    ),
+    false
+  );
+  assert.equal(
+    registrationMatchesReleaseIdentity(
+      { displayName: "Local Flow", displayVersion: "0.1.0" },
       { productName: "Local Flow", version: "0.1.0" }
     ),
     false
@@ -300,4 +307,5 @@ test("isolated install smoke guards the clean runner profile and temporary insta
   assert.match(source, /finally/);
   assert.doesNotMatch(source, /E:\\\\local flow/i);
   assert.doesNotMatch(source, /USERPROFILE:\s*profileRoot/);
+  assert.doesNotMatch(source, /TEMP:\s*temporary|TMP:\s*temporary/);
 });

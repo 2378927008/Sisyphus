@@ -110,10 +110,13 @@ export function registrationMatchesReleaseIdentity(
   registration,
   { productName, version } = {}
 ) {
+  const expectedDisplayName = `${String(productName || "")} ${String(
+    version || ""
+  )}`.trim();
   return Boolean(
     String(productName || "") &&
       String(version || "") &&
-      String(registration?.displayName || "") === String(productName) &&
+      String(registration?.displayName || "") === expectedDisplayName &&
       String(registration?.displayVersion || "") === String(version)
   );
 }
@@ -282,7 +285,7 @@ export function validateIsolatedInstallEvidence(manifest) {
   );
   addError(
     errors,
-    registration?.displayName === "Local Flow",
+    registration?.displayName === `Local Flow ${release?.version}`,
     "lifecycle.installation.uninstallRegistration.displayName is invalid"
   );
   addError(

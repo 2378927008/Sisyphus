@@ -576,12 +576,7 @@ async function runSmoke() {
   const programs = knownFolders.programs;
   const startMenuShortcut = path.join(programs, `${productName}.lnk`);
   const desktopShortcut = path.join(desktop, `${productName}.lnk`);
-  const temporary = path.join(runRoot, "temp");
-  const isolatedEnvironment = {
-    ...process.env,
-    TEMP: temporary,
-    TMP: temporary
-  };
+  const isolatedEnvironment = process.env;
   const protectedRoot = process.env.LOCAL_FLOW_PROTECTED_INSTALL_ROOT || "";
   let shellBackup = null;
   let shellFoldersRestored = false;
@@ -597,8 +592,7 @@ async function runSmoke() {
     await Promise.all(
       [
         installRoot,
-        userDataRoot,
-        temporary
+        userDataRoot
       ].map((directory) => mkdir(directory, { recursive: true }))
     );
 
@@ -952,8 +946,8 @@ async function runSmoke() {
           },
           uninstallRegistration: {
             status: "observed",
-            displayName: productName,
-            displayVersion: pkg.version,
+            displayName: registration.displayName,
+            displayVersion: registration.displayVersion,
             installLocationRole: "isolated_install_root",
             uninstallTargetRole: "isolated_install_uninstaller"
           },
