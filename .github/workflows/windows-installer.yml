@@ -65,8 +65,19 @@ jobs:
             exit $buildExitCode
           }
 
+      - name: Collect current release evidence
+        run: npm run collect:clean-install-evidence
+
+      - name: Verify built release artifacts
+        run: npm run verify:release
+
       - name: Check isolated install lifecycle
         run: npm run check:installed
+
+      - name: Recheck bundled llama runtime after install lifecycle
+        run: |
+          node scripts/check-llama-runtime.mjs vendor/llm/bin/llama-cli.exe
+          node scripts/check-llama-runtime.mjs dist/win-unpacked/resources/vendor/llm/bin/llama-cli.exe
 
       - name: Run test suite
         run: npm test
@@ -83,9 +94,6 @@ jobs:
       - name: Check product readiness
         run: npm run check:product
 
-      - name: Verify release artifacts
-        run: npm run verify:release
-
       - name: Upload build diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -96,6 +104,7 @@ jobs:
           path: |
             .tmp/dist-win.log
             dist/builder-debug.yml
+            docs/release/evidence/windows-clean-install-v4.json
             docs/release/evidence/windows-isolated-install-v4.json
 
       - name: Upload installer artifact

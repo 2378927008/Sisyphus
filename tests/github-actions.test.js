@@ -67,7 +67,16 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /npm run check:app/);
   assert.match(workflow, /npm run check:visual/);
   assert.match(workflow, /npm run dist:win/);
+  assert.match(workflow, /npm run collect:clean-install-evidence/);
   assert.match(workflow, /npm run check:installed/);
+  assert.match(
+    workflow,
+    /node scripts\/check-llama-runtime\.mjs vendor\/llm\/bin\/llama-cli\.exe/
+  );
+  assert.match(
+    workflow,
+    /node scripts\/check-llama-runtime\.mjs dist\/win-unpacked\/resources\/vendor\/llm\/bin\/llama-cli\.exe/
+  );
   assert.match(workflow, /npm run check:packaged/);
   assert.match(workflow, /npm run check:product/);
   assert.match(workflow, /Tee-Object -FilePath \.tmp\/dist-win\.log/);
@@ -81,11 +90,27 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
     workflow,
     /docs\/release\/evidence\/windows-isolated-install-v4\.json/
   );
+  assert.match(
+    workflow,
+    /docs\/release\/evidence\/windows-clean-install-v4\.json/
+  );
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|sk-proj|APPLE_ID|APP_STORE_CONNECT/i);
 
   const buildIndex = workflow.indexOf("npm run dist:win");
+  const collectIndex = workflow.indexOf("npm run collect:clean-install-evidence");
+  const releaseIndex = workflow.indexOf("npm run verify:release");
   const installedIndex = workflow.indexOf("npm run check:installed");
+  const sourceRuntimeIndex = workflow.indexOf(
+    "node scripts/check-llama-runtime.mjs vendor/llm/bin/llama-cli.exe"
+  );
+  const packagedRuntimeIndex = workflow.indexOf(
+    "node scripts/check-llama-runtime.mjs dist/win-unpacked/resources/vendor/llm/bin/llama-cli.exe"
+  );
   const testIndex = workflow.indexOf("npm test");
-  assert.ok(buildIndex >= 0 && buildIndex < installedIndex);
-  assert.ok(installedIndex < testIndex);
+  assert.ok(buildIndex >= 0 && buildIndex < collectIndex);
+  assert.ok(collectIndex < releaseIndex);
+  assert.ok(releaseIndex < installedIndex);
+  assert.ok(installedIndex < sourceRuntimeIndex);
+  assert.ok(sourceRuntimeIndex < packagedRuntimeIndex);
+  assert.ok(packagedRuntimeIndex < testIndex);
 });
