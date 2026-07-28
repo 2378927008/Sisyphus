@@ -1,6 +1,6 @@
 # Task 13 Report: Packaged Startup And Windows Installer
 
-Status: Fix Round 3 implemented and verified (awaiting scoped re-review; Task
+Status: Fix Round 4 implemented and verified (awaiting scoped re-review; Task
 13 not complete)
 
 ## Scope
@@ -482,3 +482,77 @@ The committed evidence manifest remains valid and deliberately unchanged with
 `cleanInstallTrial.status = "not_run"`. A real isolated install/uninstall,
 microphone-to-Notepad insertion, and the other documented desktop/device
 trials remain manual-only. No such trial is claimed by this round.
+
+## Fix Round 4 (2026-07-28)
+
+Status: implemented and verified with TDD; awaiting scoped re-review. Task 13
+is not complete.
+
+This round is limited to the residual Important finding in
+`task-13-re-review-round-3.md`. It changes only explicit command-key privacy
+grammar, focused privacy tests, and Task 13 records. The collector registry
+identity, passed-proof schema, UI, iPhone, model, API, installer, uninstaller,
+and release workflow are unchanged. No installer or uninstaller was run, and
+the existing installation root was not accessed.
+
+### RED
+
+```text
+node --test tests/clean-install-evidence-privacy.test.js
+38 tests: 24 passed, 14 failed
+```
+
+The two new parent tests contained 18 validation/redaction subtests. The
+`git status` and `whoami /user` null, empty, and non-empty cases produced 12
+expected failing subtests because their nested dynamic keys were accepted and
+preserved. Node also counted the two failed parent tests. All six
+`LocalFlow.exe record` subtests remained GREEN, as did the benign ASCII
+key/value control.
+
+### GREEN
+
+```text
+node --test tests/clean-install-evidence-privacy.test.js
+38 passed, 0 failed
+```
+
+`hasExplicitCommandGrammar()` now adds anchored grammar for bare `git status`
+and `whoami /user` commands alongside the existing executable-extension
+grammar. The recursive privacy walk remains unchanged and no global prose scan
+was introduced.
+
+Validation and redaction now symmetrically cover each of `git status`,
+`whoami /user`, and `LocalFlow.exe record` as a nested dynamic key whose value
+is null, empty, or non-empty. The exact sentence
+`The node runtime is available for evidence collection.` remains valid and
+unchanged as both a value and a dynamic key. Existing legal placeholders,
+Chinese explanations, and relative paths remain covered by the focused suite.
+
+### Verification
+
+```text
+node --test tests/clean-install-evidence.test.js tests/clean-install-evidence-privacy.test.js tests/clean-install-registry-evidence.test.js tests/task-13-review-fixes.test.js
+57 passed, 0 failed
+
+node --check scripts/clean-install-evidence-core.mjs
+exit 0
+
+node --check scripts/clean-install-evidence.mjs
+exit 0
+
+npm.cmd test
+639 passed, 0 failed, 0 cancelled, 0 skipped
+
+npm.cmd run check:product
+exit 0; ok=true; automatedArtifactReadiness=true
+
+npm.cmd run verify:release
+exit 0; ok=true; version=0.1.0; artifactSkewMs=46844
+
+git diff --check
+exit 0
+```
+
+The committed evidence manifest remains unchanged and valid with
+`cleanInstallTrial.status = "not_run"`. No real desktop or device trial was run
+or claimed.

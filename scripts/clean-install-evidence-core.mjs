@@ -138,8 +138,13 @@ function isCommandField(key) {
 }
 
 function hasExplicitCommandGrammar(value) {
-  return /^(?:"[^"\r\n]+\.(?:exe|cmd|bat|ps1)"|[^\s"'`]+\.(?:exe|cmd|bat|ps1))\s+\S+(?:\s+[^\r\n]+)*$/i.test(
-    value.trim()
+  const trimmed = value.trim();
+  return (
+    /^(?:"[^"\r\n]+\.(?:exe|cmd|bat|ps1)"|[^\s"'`]+\.(?:exe|cmd|bat|ps1))\s+\S+(?:\s+[^\r\n]+)*$/i.test(
+      trimmed
+    ) ||
+    /^git\s+status(?:\s+[^\r\n]+)*$/i.test(trimmed) ||
+    /^whoami\s+\/user(?:\s+[^\r\n]+)*$/i.test(trimmed)
   );
 }
 

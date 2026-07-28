@@ -169,19 +169,94 @@ test("command-bearing fields and explicit command keys are rejected and redacted
   );
 });
 
+test("nested dynamic command keys are rejected for null, empty, and non-empty values", async (t) => {
+  const commands = [
+    "git status",
+    "whoami /user",
+    "LocalFlow.exe record"
+  ];
+  const values = [
+    ["null", null],
+    ["empty", ""],
+    ["non-empty", "captured value"]
+  ];
+
+  for (const command of commands) {
+    for (const [valueLabel, value] of values) {
+      await t.test(`${command} with ${valueLabel} value`, async () => {
+        const manifest = await loadEvidenceFixture();
+        manifest.source.dynamicCommandKeyProbe = {
+          nested: {
+            [command]: value
+          }
+        };
+
+        const validation = evidenceCore.validateCleanInstallEvidence(manifest);
+
+        assert.equal(validation.ok, false);
+        assert.ok(
+          validation.errors.includes(
+            "manifest.source.dynamicCommandKeyProbe.nested key must not contain command line"
+          )
+        );
+      });
+    }
+  }
+});
+
+test("nested dynamic command keys are redacted for null, empty, and non-empty values", async (t) => {
+  const commands = [
+    "git status",
+    "whoami /user",
+    "LocalFlow.exe record"
+  ];
+  const values = [
+    ["null", null],
+    ["empty", ""],
+    ["non-empty", "captured value"]
+  ];
+
+  for (const command of commands) {
+    for (const [valueLabel, value] of values) {
+      await t.test(`${command} with ${valueLabel} value`, async () => {
+        const manifest = await loadEvidenceFixture();
+        manifest.source.dynamicCommandKeyProbe = {
+          nested: {
+            [command]: value
+          }
+        };
+
+        const redacted = evidenceCore.redactEvidenceValue(manifest);
+
+        assert.deepEqual(redacted.source.dynamicCommandKeyProbe.nested, {
+          "<redacted-command-line>": value
+        });
+        assert.deepEqual(
+          evidenceCore.validateCleanInstallEvidence(redacted),
+          { ok: true, errors: [] }
+        );
+      });
+    }
+  }
+});
+
 test("benign ASCII evidence explanations are preserved outside command fields", async () => {
   const manifest = await loadEvidenceFixture();
   const explanation = "The node runtime is available for evidence collection.";
   manifest.source.reason = explanation;
+  manifest.source.explanationKeyProbe = {
+    [explanation]: "kept"
+  };
 
   assert.deepEqual(
     evidenceCore.validateCleanInstallEvidence(manifest),
     { ok: true, errors: [] }
   );
-  assert.equal(
-    evidenceCore.redactEvidenceValue(explanation),
-    explanation
-  );
+  const redacted = evidenceCore.redactEvidenceValue(manifest);
+  assert.equal(redacted.source.reason, explanation);
+  assert.deepEqual(redacted.source.explanationKeyProbe, {
+    [explanation]: "kept"
+  });
 });
 
 test("Chinese explanations and allowed relative paths remain valid and unchanged", async () => {
