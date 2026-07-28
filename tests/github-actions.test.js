@@ -56,11 +56,13 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /actions\/setup-node@v4/);
   assert.match(workflow, /node-version:\s*22/);
   assert.match(workflow, /npm ci/);
+  assert.match(workflow, /setup-whisper\.ps1 -Model base -NodeExe node/);
   assert.match(workflow, /setup-llm\.ps1 -RuntimeOnly/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run check:app/);
   assert.match(workflow, /npm run check:visual/);
   assert.match(workflow, /npm run dist:win/);
+  assert.match(workflow, /npm run check:installed/);
   assert.match(workflow, /npm run check:packaged/);
   assert.match(workflow, /npm run check:product/);
   assert.match(workflow, /Tee-Object -FilePath \.tmp\/dist-win\.log/);
@@ -70,5 +72,15 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Local Flow Setup 0\.1\.0\.exe/);
   assert.match(workflow, /dist\/local-flow-release-build\.json/);
+  assert.match(
+    workflow,
+    /docs\/release\/evidence\/windows-isolated-install-v4\.json/
+  );
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|sk-proj|APPLE_ID|APP_STORE_CONNECT/i);
+
+  const buildIndex = workflow.indexOf("npm run dist:win");
+  const installedIndex = workflow.indexOf("npm run check:installed");
+  const testIndex = workflow.indexOf("npm test");
+  assert.ok(buildIndex >= 0 && buildIndex < installedIndex);
+  assert.ok(installedIndex < testIndex);
 });

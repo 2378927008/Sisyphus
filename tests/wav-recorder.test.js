@@ -64,9 +64,60 @@ test("normal stop returns a bounded WAV and closes resources exactly once", asyn
   assert.equal(harness.pendingTimerCount, 0);
 });
 
+test("dispose while microphone permission is pending releases the late stream", async () => {
+  const { WavRecorder } = await loadWavRecorder();
+  let resolveStream;
+  let trackStops = 0;
+  let audioContextCreations = 0;
+  const pendingStream = new Promise((resolve) => {
+    resolveStream = resolve;
+  });
+  const recorder = new WavRecorder({
+    mediaDevices: {
+      getUserMedia: () => pendingStream
+    },
+    AudioContextClass: class {
+      constructor() {
+        audioContextCreations += 1;
+      }
+    },
+    AudioWorkletNodeClass: class {}
+  });
+
+  const startPromise = recorder.start();
+  const disposePromise = recorder.dispose();
+  resolveStream({
+    getTracks: () => [{
+      stop() {
+        trackStops += 1;
+      }
+    }]
+  });
+
+  await assert.rejects(startPromise, /recording_cancelled/);
+  await disposePromise;
+  assert.equal(trackStops, 1);
+  assert.equal(audioContextCreations, 0);
+});
+
+test("browser timer functions are called with the global receiver", async () => {
+  const { WavRecorder } = await loadWavRecorder();
+  const harness = createRecorderHarness(WavRecorder, {
+    maxDurationMs: 1000,
+    maxSampleBytes: 1024,
+    requireGlobalTimerReceiver: true
+  });
+
+  await harness.recorder.start();
+  await harness.recorder.stop();
+
+  assert.equal(harness.pendingTimerCount, 0);
+});
+
 function createRecorderHarness(WavRecorder, {
   maxDurationMs,
-  maxSampleBytes
+  maxSampleBytes,
+  requireGlobalTimerReceiver = false
 }) {
   let trackStops = 0;
   let sourceDisconnects = 0;
@@ -138,12 +189,18 @@ function createRecorderHarness(WavRecorder, {
     maxDurationMs,
     maxSampleBytes,
     setTimeoutImpl(callback, delay) {
+      if (requireGlobalTimerReceiver) {
+        assert.equal(this, globalThis);
+      }
       const id = nextTimerId;
       nextTimerId += 1;
       timers.set(id, { callback, delay });
       return id;
     },
     clearTimeoutImpl(id) {
+      if (requireGlobalTimerReceiver) {
+        assert.equal(this, globalThis);
+      }
       timers.delete(id);
     },
     onLimit(reason) {

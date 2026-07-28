@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
+import { toRendererSettings } from "../src/main/product-ui-results.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -241,7 +242,7 @@ function assertSmokeIpcCoverage() {
 }
 
 function wireIpc() {
-  registerSmokeIpcHandler("settings:get", () => settings);
+  registerSmokeIpcHandler("settings:get", () => toRendererSettings(settings));
   registerSmokeIpcHandler("data:recovery-status", () => []);
   registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(structuredClone(next));
@@ -257,7 +258,7 @@ function wireIpc() {
       throw new Error(settingsSaveError);
     }
     settings = mergeSettings(next, settings);
-    return settings;
+    return toRendererSettings(settings);
   });
   registerSmokeIpcHandler("history:list", async () => {
     historyListCalls += 1;
@@ -400,7 +401,7 @@ app.whenReady().then(async () => {
     getAllowedUrl: () => pathToFileURL(htmlPath).href
   });
 
-  window.webContents.on("console-message", (_event, details) => {
+  window.webContents.on("console-message", (details) => {
     rendererMessages.push({
       level: details.level,
       message: details.message,

@@ -916,3 +916,37 @@ export function validateCleanInstallEvidence(manifest, options = {}) {
     errors
   };
 }
+
+export function validateEvidenceMatchesRelease(manifest, release) {
+  const errors = [];
+  const evidenceArtifacts = manifest?.releaseArtifacts;
+  const currentArtifacts = release?.artifacts;
+
+  addError(
+    errors,
+    typeof release?.version === "string" &&
+      evidenceArtifacts?.version === release.version,
+    "releaseArtifacts.version does not match the current release"
+  );
+
+  for (const artifactName of [
+    "installer",
+    "blockmap",
+    "unpackedExecutable"
+  ]) {
+    const evidenceArtifact = evidenceArtifacts?.[artifactName];
+    const currentArtifact = currentArtifacts?.[artifactName];
+    for (const field of ["path", "bytes", "sha256"]) {
+      addError(
+        errors,
+        evidenceArtifact?.[field] === currentArtifact?.[field],
+        `releaseArtifacts.${artifactName}.${field} does not match the current release`
+      );
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors
+  };
+}

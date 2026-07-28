@@ -15,6 +15,7 @@
     "package:win": "electron-builder --win --dir",
     "dist:win": "node scripts/build-windows-installer.mjs",
     "check:packaged": "node scripts/packaged-start-smoke.mjs",
+    "check:installed": "node scripts/isolated-install-smoke.mjs",
     "check:product": "node scripts/product-readiness-report.mjs",
     "collect:clean-install-evidence": "node scripts/clean-install-evidence.mjs",
     "verify:release": "node scripts/verify-release-build.mjs"
@@ -62,6 +63,7 @@
       "icon": "assets/local-flow-icon.ico"
     },
     "nsis": {
+      "guid": "33001341-0074-5f74-938e-5bee46edbd77",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

@@ -17,7 +17,12 @@ test("package exposes Windows packaging scripts and electron-builder dependency"
   assert.equal(pkg.scripts["package:win"], "electron-builder --win --dir");
   assert.equal(pkg.scripts["dist:win"], "node scripts/build-windows-installer.mjs");
   assert.equal(pkg.scripts["check:packaged"], "node scripts/packaged-start-smoke.mjs");
+  assert.equal(pkg.scripts["check:installed"], "node scripts/isolated-install-smoke.mjs");
   assert.equal(pkg.scripts["check:product"], "node scripts/product-readiness-report.mjs");
+  assert.equal(
+    pkg.build.nsis.guid,
+    "33001341-0074-5f74-938e-5bee46edbd77"
+  );
   assert.ok(pkg.devDependencies["electron-builder"]);
   assert.equal(pkg.dependencies["uiohook-napi"], "^1.5.5");
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { handleStartupFailure } from "../src/main/startup-failure.js";
 
 test("startup failures show fixed localized product copy and always quit", async () => {
@@ -29,4 +30,27 @@ test("startup failures show fixed localized product copy and always quit", async
     );
     assert.equal(quitCalls, 1);
   }
+});
+
+test("primary startup funnels synchronous permission setup and later failures into one final catch", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const permissionStart = mainSource.indexOf("configureMediaPermissions(");
+  const runtimeStart = mainSource.indexOf("runtimeRoot =", permissionStart);
+  const readyStart = mainSource.indexOf("app.whenReady().then(async () => {");
+  const shutdownStart = mainSource.indexOf('app.on("will-quit"', readyStart);
+
+  assert.notEqual(permissionStart, -1);
+  assert.notEqual(runtimeStart, -1);
+  assert.notEqual(readyStart, -1);
+  assert.notEqual(shutdownStart, -1);
+  assert.doesNotMatch(
+    mainSource.slice(permissionStart, runtimeStart),
+    /\.catch\s*\(/,
+    "synchronous permission configuration must not be treated as a promise"
+  );
+  assert.match(
+    mainSource.slice(readyStart, shutdownStart),
+    /\}\)\.catch\(\(\) => handleStartupFailure\(\{[\s\S]*?language: lastSettings\?\.interfaceLanguage[\s\S]*?\}\)\);/,
+    "the entire ready chain must converge on the localized startup failure handler"
+  );
 });

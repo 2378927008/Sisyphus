@@ -44,18 +44,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare bundled Whisper runtime and model
+        shell: pwsh
+        run: .\scripts\setup-whisper.ps1 -Model base -NodeExe node
+
       - name: Prepare bundled llama.cpp runtime
         shell: pwsh
         run: .\scripts\setup-llm.ps1 -RuntimeOnly -NodeExe node
-
-      - name: Run test suite
-        run: npm test
-
-      - name: Run application smoke
-        run: npm run check:app
-
-      - name: Run visual smoke
-        run: npm run check:visual
 
       - name: Build Windows installer
         shell: pwsh
@@ -66,6 +61,18 @@ jobs:
           if ($buildExitCode -ne 0) {
             exit $buildExitCode
           }
+
+      - name: Check isolated install lifecycle
+        run: npm run check:installed
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Run application smoke
+        run: npm run check:app
+
+      - name: Run visual smoke
+        run: npm run check:visual
 
       - name: Check packaged startup
         run: npm run check:packaged
@@ -86,6 +93,7 @@ jobs:
           path: |
             .tmp/dist-win.log
             dist/builder-debug.yml
+            docs/release/evidence/windows-isolated-install-v4.json
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

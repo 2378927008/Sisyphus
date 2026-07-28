@@ -7,6 +7,7 @@ import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { buildHudWindowOptions } from "../src/main/hud-window.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
+import { toRendererSettings } from "../src/main/product-ui-results.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 import {
   appSmokeFixtureSettings,
@@ -250,7 +251,7 @@ function createWindow(viewport, preload = null) {
 }
 
 function observeRendererConsole(window, source) {
-  window.webContents.on("console-message", (_event, details) => {
+  window.webContents.on("console-message", (details) => {
     rendererMessages.push({
       source,
       level: details.level,
@@ -270,12 +271,12 @@ function wireIpc() {
     registered.add(channel);
   };
 
-  register("settings:get", () => structuredClone(settings));
-  register("data:recovery-status", () => []);
+  register("settings:get", () => structuredClone(toRendererSettings(settings)));
   register("settings:save", (_event, patch) => {
     settings = mergeSettings(patch, settings);
-    return structuredClone(settings);
+    return structuredClone(toRendererSettings(settings));
   });
+  register("data:recovery-status", () => []);
   register("history:list", () => structuredClone(historyFixtures));
   register("history:update", (_event, payload = {}) => {
     const fixture = historyFixtures.find((entry) => entry.id === payload.id);

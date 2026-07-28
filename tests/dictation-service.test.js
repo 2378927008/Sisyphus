@@ -243,6 +243,28 @@ test("processWav stores and reports stable reason codes instead of raw processin
   );
 });
 
+test("processWav rejects provider text that only looks like a stable reason code", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      pasteAfterTranscribe: false,
+      outputLanguage: "auto"
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => {
+      throw new Error("provider_response");
+    },
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.status, "partial");
+  assert.equal(entry.processingError, "text_processing_failed");
+  assert.equal(history[0].processingError, "text_processing_failed");
+});
+
 test("processWav stores only a stable paste failure reason", async () => {
   const history = [];
   const service = new DictationService({
@@ -254,6 +276,27 @@ test("processWav stores only a stable paste failure reason", async () => {
     polish: async (text) => text,
     paste: async () => {
       throw new Error("stderr spawn C:\\private\\paste.exe ENOENT exit code 1");
+    },
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.pasteStatus, "failed");
+  assert.equal(entry.pasteError, "paste_failed");
+});
+
+test("processWav rejects paste provider text that only looks like a stable reason code", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async (text) => text,
+    paste: async () => {
+      throw new Error("provider_response");
     },
     notifyStatus: () => {}
   });

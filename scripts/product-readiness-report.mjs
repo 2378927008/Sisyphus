@@ -1,12 +1,26 @@
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCleanInstallEvidence } from "./clean-install-evidence-core.mjs";
+import {
+  validateCleanInstallEvidence,
+  validateEvidenceMatchesRelease
+} from "./clean-install-evidence-core.mjs";
+import { validateIsolatedInstallEvidence } from "./isolated-install-evidence-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
-function buildReleaseRequirements(pkg) {
+function combineValidations(...validations) {
+  const errors = validations.flatMap((validation) => validation.errors || []);
+  return {
+    ok: errors.length === 0,
+    errors
+  };
+}
+
+function buildReleaseRequirements(pkg, currentRelease) {
   const outputDir = pkg.build?.directories?.output || "dist";
   const productName = pkg.build?.productName || "Local Flow";
   const installerName = `${productName} Setup ${pkg.version}.exe`;
@@ -134,7 +148,21 @@ function buildReleaseRequirements(pkg) {
       path: "docs/release/evidence/windows-clean-install-v4.json",
       minBytes: 1024,
       area: "windows-clean-install-evidence",
-      jsonValidator: validateCleanInstallEvidence
+      jsonValidator: (manifest) =>
+        combineValidations(
+          validateCleanInstallEvidence(manifest),
+          validateEvidenceMatchesRelease(manifest, currentRelease)
+        )
+    },
+    {
+      path: "docs/release/evidence/windows-isolated-install-v4.json",
+      minBytes: 1024,
+      area: "windows-isolated-install-evidence",
+      jsonValidator: (manifest) =>
+        combineValidations(
+          validateIsolatedInstallEvidence(manifest),
+          validateEvidenceMatchesRelease(manifest, currentRelease)
+        )
     }
   ];
 }
@@ -166,11 +194,6 @@ const manualValidationRequired = [
     command: "Manual installed-app trial"
   },
   {
-    area: "windows-isolated-clean-install-uninstall",
-    reason: "A complete isolated installer and uninstaller trial with retained before/after evidence has not been run.",
-    command: "Manual isolated-install trial; never target the existing user installation"
-  },
-  {
     area: "iphone-xcode-device-build",
     reason: "This Windows workstation cannot run Xcode, sign the iPhone app, or verify the keyboard extension on a device.",
     command: "xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build"
@@ -179,6 +202,44 @@ const manualValidationRequired = [
 
 function toFsPath(relativePath) {
   return path.join(projectRoot, ...relativePath.split("/"));
+}
+
+async function sha256File(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function releaseArtifact(relativePath) {
+  const fullPath = toFsPath(relativePath);
+  const fileStat = await stat(fullPath);
+  return {
+    status: "observed",
+    path: relativePath,
+    bytes: fileStat.size,
+    sha256: await sha256File(fullPath)
+  };
+}
+
+async function currentReleaseSnapshot(pkg) {
+  const outputDir = pkg.build?.directories?.output || "dist";
+  const productName = pkg.build?.productName || "Local Flow";
+  return {
+    version: pkg.version,
+    artifacts: {
+      installer: await releaseArtifact(
+        `${outputDir}/${productName} Setup ${pkg.version}.exe`
+      ),
+      blockmap: await releaseArtifact(
+        `${outputDir}/${productName} Setup ${pkg.version}.exe.blockmap`
+      ),
+      unpackedExecutable: await releaseArtifact(
+        `${outputDir}/win-unpacked/${productName}.exe`
+      )
+    }
+  };
 }
 
 async function fileCheck(requirement) {
@@ -227,7 +288,8 @@ function print(payload) {
 
 try {
   const pkg = JSON.parse(await readFile(toFsPath("package.json"), "utf8"));
-  const requiredFiles = buildReleaseRequirements(pkg);
+  const currentRelease = await currentReleaseSnapshot(pkg);
+  const requiredFiles = buildReleaseRequirements(pkg, currentRelease);
   const checks = [];
   for (const requirement of requiredFiles) {
     checks.push(await fileCheck(requirement));

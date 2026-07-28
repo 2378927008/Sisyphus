@@ -26,10 +26,21 @@ export class WavRecorder {
     this.bufferedSampleBytes = 0;
     this.durationTimer = null;
     this.releasePromise = null;
+    this.startPromise = null;
+    this.releaseRequested = false;
     this.limitReason = "";
   }
 
   async start() {
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    this.startPromise = this.performStart();
+    return this.startPromise;
+  }
+
+  async performStart() {
     if (!this.mediaDevices?.getUserMedia) {
       throw new Error("microphone_unavailable");
     }
@@ -45,10 +56,12 @@ export class WavRecorder {
           noiseSuppression: true
         }
       });
+      this.throwIfReleaseRequested();
       this.audioContext = new this.AudioContextClass();
       this.sampleRate = this.audioContext.sampleRate;
       this.source = this.audioContext.createMediaStreamSource(this.stream);
       await this.audioContext.audioWorklet.addModule(this.workletUrl);
+      this.throwIfReleaseRequested();
       this.processor = new this.AudioWorkletNodeClass(
         this.audioContext,
         "wav-recorder-processor",
@@ -63,13 +76,23 @@ export class WavRecorder {
       };
       this.source.connect(this.processor);
       this.processor.connect(this.audioContext.destination);
-      this.durationTimer = this.setTimeoutImpl(() => {
-        void this.reachLimit("recording_too_long");
-      }, this.maxDurationMs);
+      this.durationTimer = this.setTimeoutImpl.call(
+        globalThis,
+        () => {
+          void this.reachLimit("recording_too_long");
+        },
+        this.maxDurationMs
+      );
       this.durationTimer?.unref?.();
     } catch (error) {
-      await this.dispose();
+      await this.releaseResources();
       throw error;
+    }
+  }
+
+  throwIfReleaseRequested() {
+    if (this.releaseRequested) {
+      throw new Error("recording_cancelled");
     }
   }
 
@@ -78,7 +101,7 @@ export class WavRecorder {
   }
 
   acceptChunk(data) {
-    if (this.releasePromise || this.limitReason) {
+    if (this.releaseRequested || this.releasePromise || this.limitReason) {
       return false;
     }
 
@@ -125,8 +148,10 @@ export class WavRecorder {
   }
 
   async dispose() {
+    this.releaseRequested = true;
     this.chunks = [];
     this.bufferedSampleBytes = 0;
+    await this.startPromise?.catch(() => {});
     await this.releaseResources();
   }
 
@@ -141,7 +166,7 @@ export class WavRecorder {
 
   async performRelease() {
     if (this.durationTimer !== null) {
-      this.clearTimeoutImpl(this.durationTimer);
+      this.clearTimeoutImpl.call(globalThis, this.durationTimer);
       this.durationTimer = null;
     }
 

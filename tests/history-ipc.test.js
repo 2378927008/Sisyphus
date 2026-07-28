@@ -156,6 +156,47 @@ test("history handlers preserve valid action arguments and Task 5 results", asyn
   assert.deepEqual(calls.reprocess, ["history-1"]);
 });
 
+test("history handlers project successful entries before returning them to the renderer", async () => {
+  const unsafeEntry = {
+    id: "history-1",
+    createdAt: "2026-07-28T10:00:00.000Z",
+    updatedAt: "2026-07-28T10:01:00.000Z",
+    transcript: "spoken words",
+    text: "edited text",
+    status: "complete",
+    processingError: "provider_response",
+    providerDiagnostics: "https://private.example/log",
+    modelPath: "C:\\private\\model.bin"
+  };
+  const { handlers, authorizedEvent } = createHarness({
+    updateResult: { ok: true, entry: unsafeEntry },
+    reprocessResult: { ok: true, entry: unsafeEntry }
+  });
+  const expected = {
+    ok: true,
+    entry: {
+      id: "history-1",
+      createdAt: "2026-07-28T10:00:00.000Z",
+      updatedAt: "2026-07-28T10:01:00.000Z",
+      transcript: "spoken words",
+      text: "edited text",
+      status: "complete"
+    }
+  };
+
+  assert.deepEqual(
+    await handlers.get("history:update")(
+      authorizedEvent,
+      { id: "history-1", text: "edited text" }
+    ),
+    expected
+  );
+  assert.deepEqual(
+    await handlers.get("history:reprocess")(authorizedEvent, "history-1"),
+    expected
+  );
+});
+
 function createIpcEvent(sender, url) {
   const senderFrame = { url };
   senderFrame.top = senderFrame;

@@ -14,7 +14,7 @@ Local-first Windows voice dictation app inspired by Typeless and Wispr Flow. It 
 - WAV encoding in the renderer.
 - Local `whisper.cpp` command integration for speech-to-text.
 - Interface language, speech recognition language, and output language settings.
-- UI v2 dictation workspace with advanced settings moved into a drawer.
+- Windows V4 dictation hub with history and personalization pages; advanced settings stay in a drawer.
 - Free-first text output path: automatic output keeps the spoken language locally; selected target-language output can use MyMemory Free.
 - Built-in local language model setup path for Qwen3-4B-GGUF through llama.cpp.
 - Optional Ollama local model cleanup.
@@ -25,8 +25,7 @@ Local-first Windows voice dictation app inspired by Typeless and Wispr Flow. It 
 ## Requirements
 
 - Node.js and npm for source/development runs.
-- A built `whisper.cpp` executable, usually `whisper-cli.exe`.
-- A Whisper model file, for example `ggml-base.bin` or `ggml-small.bin`.
+- Source runs need the verified `whisper.cpp` runtime and model under `vendor/whisper`; the Windows installer includes them.
 - Optional: internet access for MyMemory Free when a target output language is selected.
 - Optional: Ollama or the built-in Qwen3 local model as advanced fallbacks for text cleanup.
 
@@ -84,9 +83,9 @@ npm.cmd run package:win
 
 Local Flow 是语音输入软件，不是默认翻译软件。输出语言为 `自动（同语音）` 时，你说中文就输出中文，你说英文就输出英文。只有主动选择某个目标输出语言时，才会尝试把结果转换成目标语言。
 
-录音前必须配置 Whisper 语音模型。如果首页的 `开始录音` 按钮不可用，先点击 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。Qwen3 是可选的本地文本模型，不是录音必需项；默认试用可以先不安装 Qwen。
+Windows 安装包已经包含经过校验的 Whisper 运行时和基础模型，正常安装后可以直接录音。如果首页提示 Whisper 未就绪，点击 `安装 Whisper` 完成自动恢复；仍未恢复时，退出 Local Flow 后重新打开，或重新安装当前版本。Qwen3 是可选的本地文本模型，不是录音必需项；默认试用可以先不安装 Qwen。
 
-Windows 安装包已内置经过校验的 llama.cpp 运行时，因此安装 Qwen 时通常只需下载约 2.5 GB 的模型文件，不再查询 GitHub 发布信息。若 Whisper 或 Qwen 模型下载失败，打开 `设置` > `模型下载源`，填入可直连的主下载地址或备用镜像地址后重试；多个备用地址可用分号或换行分隔。
+Windows 安装包也内置经过校验的 llama.cpp 运行时，因此安装 Qwen 时通常只需下载约 2.5 GB 的模型文件。普通用户只需要使用界面中的安装和重试按钮；公司镜像或离线缓存由部署人员通过下文的环境变量配置，不在产品界面中暴露路径和下载地址。
 
 ## Startup And Tray Behavior
 
@@ -125,9 +124,11 @@ Local Flow 是语音输入软件，不是默认翻译软件。你说中文就输
 
 如果 `开始录音` 按钮不可用，通常先处理 Whisper 语音模型：
 
-1. 点击首页的 `安装 Whisper`，或在设置抽屉里填写 `whisper.cpp 可执行文件` 和 `Whisper 模型文件`。
+1. 点击首页的 `安装 Whisper`，等待应用自动安装并校验运行时和模型。
 2. 点击 `检查麦克风`，确认 Windows 已允许桌面应用访问麦克风。
 3. 点击 `刷新安装状态`，再回到首页录音。
+
+如果仍未就绪，退出 Local Flow 后重新打开，或重新安装当前版本。V4 会自动管理 Whisper 文件，普通用户不需要选择可执行文件、模型路径或下载地址。
 
 Qwen3 是可选的本地文本模型，不是录音必需项。默认试用可以先不安装 Qwen；如果 Qwen 安装卡住，可以点 `取消安装`，继续使用 Whisper + MyMemory Free/本地清理路径。
 
@@ -160,11 +161,10 @@ In the app settings:
 - `界面语言`: controls app UI text. Default is `简体中文`.
 - `语音识别语言`: controls the language passed to Whisper. Default is `自动`.
 - `输出语言`: controls final displayed/saved/pasted text. Default is `自动（同语音）`.
-- `whisper.cpp 可执行文件`: full path to `whisper-cli.exe`.
-- `Whisper 模型文件`: full path to a `.bin` model file.
 - `文本模型提供方`: defaults to `MyMemory Free`. With `输出语言=自动`, the app keeps the spoken language and uses local cleanup. When a target output language is selected, MyMemory Free is used for target-language output.
 - `Ollama` / `内置 Qwen3`: optional advanced fallbacks. If you use Ollama, set a model such as `qwen3:4b`.
-- `模型下载源`: optional direct-download URLs for Whisper, llama.cpp, and Qwen. Leave blank for the official defaults; use it only when GitHub or Hugging Face downloads fail.
+
+V4 automatically discovers and manages the bundled Whisper runtime and model. Runtime paths and download-source controls are intentionally not exposed in the normal product UI.
 
 You can download the Windows x64 whisper.cpp build and a multilingual model into `vendor/whisper`:
 
@@ -172,9 +172,9 @@ You can download the Windows x64 whisper.cpp build and a multilingual model into
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-whisper.ps1 -Model base
 ```
 
-After it finishes, click `刷新安装状态` or copy the printed executable and model paths into the app settings and click `检查本地 Whisper`.
+After it finishes, restart Local Flow or click `刷新安装状态`.
 
-If GitHub or Hugging Face is too slow in your network, configure `设置` > `模型下载源` before clicking `安装 Whisper`, or pass direct-download mirrors to the script:
+Deployment administrators can pass direct-download mirrors to the setup script when GitHub or Hugging Face is too slow. Normal users do not need these variables:
 
 ```powershell
 $env:LOCAL_FLOW_WHISPER_RUNTIME_URL='https://your-mirror.example/whisper-bin-x64.zip'
@@ -203,7 +203,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\scripts\setup-llm.ps1
 
 The Windows installer bundles the verified llama.cpp `b9049` CPU runtime. Source checkouts download that pinned runtime only when it is missing. The setup script downloads the Qwen model from a pinned Hugging Face revision, tries the reachable mirror before the main site, and verifies both archives with SHA-256. The app detects installed files on next start or after `刷新安装状态`.
 
-If GitHub or Hugging Face is too slow in your network, configure `设置` > `模型下载源` before clicking `安装 Qwen`, or point the installer at your own direct-download mirrors before running the script. These URLs should serve the same llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
+Deployment administrators can point the Qwen setup script at direct-download mirrors. These URLs must serve the same verified llama.cpp Windows zip or `Qwen3-4B-Q4_K_M.gguf` file:
 
 ```powershell
 $env:LOCAL_FLOW_LLAMA_RUNTIME_URL='https://your-mirror.example/llama-bin-win-cpu-x64.zip'

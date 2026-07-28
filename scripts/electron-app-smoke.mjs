@@ -9,7 +9,10 @@ import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
 import { collectDetectedModelPaths } from "../src/main/model-setup-ipc.js";
-import { toModelSetupUiStatus } from "../src/main/product-ui-results.js";
+import {
+  toModelSetupUiStatus,
+  toRendererSettings
+} from "../src/main/product-ui-results.js";
 import { createSystemInputController } from "../src/main/system-input-controller.js";
 import {
   appSmokeFixtureSettings,
@@ -229,7 +232,7 @@ let successfulSetupCancels = 0;
 const setupStartResolvers = new Map();
 
 function wireIpc() {
-  registerSmokeIpcHandler("settings:get", () => settings);
+  registerSmokeIpcHandler("settings:get", () => toRendererSettings(settings));
   registerSmokeIpcHandler("data:recovery-status", () => []);
   registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(next);
@@ -260,7 +263,7 @@ function wireIpc() {
         }
       }
       settings = mergeSettings(next, settings);
-      return settings;
+      return toRendererSettings(settings);
     } finally {
       activeSettingsSaveCalls -= 1;
     }
@@ -339,7 +342,7 @@ function wireIpc() {
           status: "complete",
           output: [`${type} setup completed`],
           error: "",
-          assets: missingSetupStatus.assets
+          assets: setupRefreshResult.assets
         };
         setupCompletionResults.push({ type, status: completion.status });
         if (completion.status === "complete") {
@@ -372,10 +375,11 @@ function wireIpc() {
     });
   });
   registerSmokeIpcHandler("dictation:status-latest", () => null);
-  registerSmokeIpcHandler("dictation:wav", () => {
+  registerSmokeIpcHandler("dictation:wav", (_event, payload) => {
     if (dictationWavError) throw new Error(dictationWavError);
     settingsAtDictation = { ...settings };
     smokeSystemInputController?.handleSystemStatus({
+      operationId: payload.operationId,
       phase: dictationResult.status === "failed" ? "warning" : "done"
     });
     return dictationResult;
@@ -396,6 +400,7 @@ function wireIpc() {
   wireHudIpc({
     ipcMain,
     getHudWindow: () => smokeHudWindow,
+    getApprovedUrl: () => pathToFileURL(hudHtmlPath).href,
     hudActions
   });
 }
@@ -475,7 +480,7 @@ app.whenReady().then(async () => {
   });
   smokeHudWindow = hudWindow;
 
-  window.webContents.on("console-message", (_event, details) => {
+  window.webContents.on("console-message", (details) => {
     rendererMessages.push({
       level: details.level,
       message: details.message,
@@ -497,7 +502,7 @@ app.whenReady().then(async () => {
       sourceId: ""
     });
   });
-  hudWindow.webContents.on("console-message", (_event, details) => {
+  hudWindow.webContents.on("console-message", (details) => {
     hudMessages.push({
       level: details.level,
       message: details.message,
@@ -612,11 +617,17 @@ app.whenReady().then(async () => {
     await hudWindow.webContents.executeJavaScript("document.querySelector('#hudStop').click()");
     await waitForHudActionCount("stop", stopsBeforeClick + 1, 5000);
 
-    smokeSystemInputController.handleSystemStatus({ phase: "polishing" });
+    smokeSystemInputController.handleSystemStatus({
+      operationId: stopOperationId,
+      phase: "polishing"
+    });
     if (globalShortcut.isRegistered("Escape")) {
       throw new Error("Escape should be released while polishing.");
     }
-    smokeSystemInputController.handleSystemStatus({ phase: "idle" });
+    smokeSystemInputController.handleSystemStatus({
+      operationId: stopOperationId,
+      phase: "idle"
+    });
 
     await smokeSystemInputController.start();
     if (!globalShortcut.isRegistered("Escape")) {
@@ -649,6 +660,7 @@ app.whenReady().then(async () => {
     await hudWindow.webContents.executeJavaScript("document.querySelector('#hudOpenMain').click()");
     await waitForHudAction("open", 5000);
 
+    smokeStage = "initial-renderer-state";
     const initialState = await waitForState(
       window,
       (state) => (
@@ -672,10 +684,12 @@ app.whenReady().then(async () => {
         state.hasShortcutRecorder &&
         state.hasLocalModelStatus &&
         state.hasSetupChecklist &&
-        state.setupChecklistText.includes("Whisper") &&
+        state.setupChecklistText.includes("本地语音识别已就绪") &&
+        state.setupOutputText === "" &&
         state.llmSetupTitle === "MyMemory Free（云端）" &&
         state.llmSetupStatusText.includes("自动输出会保持说话语言") &&
         state.hasInstallWhisperButton &&
+        state.installWhisperHidden &&
         state.hasInstallLlmButton &&
         state.installLlmHidden &&
         state.hasRefreshSetupButton &&
@@ -697,6 +711,7 @@ app.whenReady().then(async () => {
         state.voiceCommandPhase === "idle" &&
         state.settingsDrawerInert &&
         state.hasCheckTextProviderButton &&
+        state.statusText === "就绪。快捷键：Ctrl + Alt + Space" &&
         state.providerStatusText.includes("Local whisper.cpp") &&
         state.providerStatusText.includes("MyMemory Free")
       ),
@@ -762,13 +777,15 @@ app.whenReady().then(async () => {
         document.querySelector('#refreshSetupStatus').click();
       })()
     `);
+    smokeStage = "missing-whisper-recovery";
     const missingWhisperRecoveryState = await waitForState(
       window,
       (state) => (
         state.recordButtonDisabled &&
         state.visibleRecordRecoveryCount === 1 &&
         state.recordRecoveryActionText.includes("Whisper") &&
-        state.whisperDiagnosticsText.includes("Whisper runtime and model are missing.") &&
+        Boolean(state.whisperDiagnosticsText.trim()) &&
+        !state.whisperDiagnosticsText.includes("runtime and model are missing") &&
         state.headerHealthText === state.footerHealthText &&
         state.headerHealthText.includes("Whisper") &&
         !state.footerHealthReady &&
@@ -779,6 +796,7 @@ app.whenReady().then(async () => {
     );
     assertNoDiagnosticLeak(missingWhisperRecoveryState.headerHealthText, "Missing Whisper header health");
     assertNoDiagnosticLeak(missingWhisperRecoveryState.footerHealthText, "Missing Whisper footer health");
+    assertNoDiagnosticLeak(missingWhisperRecoveryState.whisperDiagnosticsText, "Missing Whisper diagnostics");
     const recoveryWhisperStarts = setupIpcCalls.start.filter((type) => type === "whisper").length;
     await window.webContents.executeJavaScript("document.querySelector('#recordRecoveryAction').click()");
     await waitForState(
@@ -1101,16 +1119,18 @@ app.whenReady().then(async () => {
       ),
       5000
     );
+    smokeStage = "text-provider-safe-diagnostics";
     await window.webContents.executeJavaScript("document.querySelector('#checkTextProvider').click()");
-    await waitForState(
+    const safeTextDiagnosticsState = await waitForState(
       window,
       (state) => (
         state.statusText === "文本输出服务已就绪。" &&
-        state.textDiagnosticsText.includes("MyMemory Free") &&
-        state.textDiagnosticsText.includes("Text provider diagnostics stubbed.")
+        Boolean(state.textDiagnosticsText.trim()) &&
+        !state.textDiagnosticsText.includes("Text provider diagnostics stubbed.")
       ),
       5000
     );
+    assertNoDiagnosticLeak(safeTextDiagnosticsState.textDiagnosticsText, "Text provider diagnostics");
     await window.webContents.executeJavaScript("document.querySelector('#refreshSetupStatus').click()");
     await waitForState(window, () => setupIpcCalls.refresh >= 1, 5000);
     await window.webContents.executeJavaScript(`
@@ -1279,12 +1299,13 @@ app.whenReady().then(async () => {
       window,
       (state) => (
         state.statusText === "Qwen 安装失败，请检查设置后重试。" &&
-        state.setupOutputText.includes("Downloading Qwen runtime...") &&
-        state.setupOutputText.includes("Primary Hugging Face download failed. Trying mirror...") &&
-        !state.setupOutputText.includes("C:\\partial")
+        Boolean(state.setupOutputText.trim()) &&
+        !state.setupOutputText.includes("Downloading Qwen runtime...") &&
+        !state.setupOutputText.includes("Primary Hugging Face download failed. Trying mirror...")
       ),
       5000
     );
+    assertNoDiagnosticLeak(failedSetupResultState.setupOutputText, "Failed setup output");
     if (setupIpcCalls.refresh !== failedSetupRefreshCalls) {
       throw new Error("Failed setup should not call persistent setup refresh.");
     }
@@ -1305,8 +1326,6 @@ app.whenReady().then(async () => {
         }
       }
     };
-    deferNextFullSettingsSave = true;
-    deferProcessingLanguageSaves = true;
     const detectedPathSaveIndex = settingsSaveCalls.length;
     await window.webContents.executeJavaScript("document.querySelector('#installWhisper').click()");
     await waitForState(window, () => setupIpcCalls.start.includes("whisper"), 5000);
@@ -1323,13 +1342,17 @@ app.whenReady().then(async () => {
     setupStartResolvers.get("whisper")?.();
     await waitForState(
       window,
-      () => (
-        deferredFullSettingsSaveReached &&
-        settingsSaveCalls.length === detectedPathSaveIndex + 1 &&
-        activeSettingsSaveCalls === 1
+      (state) => (
+        state.statusText === "Whisper 安装完成。" &&
+        activeSettingsSaveCalls === 0 &&
+        settings.whisperCliPath === setupRefreshResult.assets.whisper.whisperCliPath &&
+        settings.whisperModelPath === setupRefreshResult.assets.whisper.whisperModelPath
       ),
       5000
     );
+    if (settingsSaveCalls.length !== detectedPathSaveIndex) {
+      throw new Error("Renderer should not receive or persist detected model paths.");
+    }
     await window.webContents.executeJavaScript(`
       (() => {
         const outputLanguage = document.querySelector('#outputLanguage');
@@ -1337,30 +1360,13 @@ app.whenReady().then(async () => {
         outputLanguage.dispatchEvent(new Event('change', { bubbles: true }));
       })()
     `);
-    releaseDeferredFullSettingsSave?.();
-    await waitForState(
-      window,
-      () => (
-        settingsSaveCalls.length === detectedPathSaveIndex + 2 &&
-        activeSettingsSaveCalls === 1 &&
-        deferredSettingsSaveResolvers.length === 1
-      ),
-      5000
-    );
-    const detectedPathSaveReturnState = await readRendererState(window);
-    if (detectedPathSaveReturnState.outputLanguage !== "fr") {
-      throw new Error(
-        `Detected path save overwrote a newer language with ${detectedPathSaveReturnState.outputLanguage}.`
-      );
-    }
-    deferredSettingsSaveResolvers.shift()?.();
-    deferProcessingLanguageSaves = false;
     await waitForState(
       window,
       (state) => (
-        state.statusText === "Whisper 安装完成。" &&
+        settingsSaveCalls.length === detectedPathSaveIndex + 1 &&
         activeSettingsSaveCalls === 0 &&
-        settings.outputLanguage === "fr"
+        settings.outputLanguage === "fr" &&
+        state.outputLanguage === "fr"
       ),
       5000
     );
@@ -1857,6 +1863,15 @@ app.whenReady().then(async () => {
           return Promise.resolve();
         };
         const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        const pendingTrack = {
+          readyState: 'live',
+          stop() {
+            this.readyState = 'ended';
+          }
+        };
+        const pendingStream = {
+          getTracks: () => [pendingTrack]
+        };
         let releasePendingGetUserMedia;
         const pendingGetUserMedia = new Promise((resolve) => {
           releasePendingGetUserMedia = resolve;
@@ -1872,12 +1887,11 @@ app.whenReady().then(async () => {
         };
         Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
           configurable: true,
-          value: async (...args) => {
-            const stream = await originalGetUserMedia(...args);
-            window.__pendingOldStream = stream;
+          value: async () => {
+            window.__pendingOldStream = pendingStream;
             window.__pendingGetUserMediaReady = true;
             await pendingGetUserMedia;
-            return stream;
+            return pendingStream;
           }
         });
       })()
@@ -2154,7 +2168,9 @@ async function waitForState(window, predicate, timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for renderer state. Last state: ${JSON.stringify(lastState)}`);
+  throw new Error(
+    `Timed out waiting for renderer state matching ${predicate.toString()}. Last state: ${JSON.stringify(lastState)}`
+  );
 }
 
 async function waitForHudState(window, predicate, timeoutMs) {
@@ -2327,6 +2343,7 @@ function readRendererState(window) {
       voiceCommandPhase: document.querySelector('#commandStrip')?.dataset.phase || '',
       hasCheckTextProviderButton: Boolean(document.querySelector('#checkTextProvider')),
       installWhisperDisabled: Boolean(document.querySelector('#installWhisper')?.disabled),
+      installWhisperHidden: Boolean(document.querySelector('#installWhisper')?.hidden),
       installLlmDisabled: Boolean(document.querySelector('#installLlm')?.disabled),
       installLlmHidden: Boolean(document.querySelector('#installLlm')?.hidden),
       refreshSetupDisabled: Boolean(document.querySelector('#refreshSetupStatus')?.disabled),

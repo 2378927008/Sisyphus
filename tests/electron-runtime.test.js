@@ -238,8 +238,15 @@ test("renderer records audio with AudioWorklet instead of ScriptProcessorNode", 
 test("app smoke test uses the current Electron console-message event shape", async () => {
   const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
 
-  assert.match(smokeSource, /webContents\.on\("console-message", \(_event, details\)/);
-  assert.doesNotMatch(smokeSource, /console-message", \(_event, level, message, line, sourceId\)/);
+  assert.match(smokeSource, /webContents\.on\("console-message", \(details\)/);
+  assert.doesNotMatch(smokeSource, /console-message", \(_event,/);
+});
+
+test("app smoke completes dictation with the renderer-owned operation id", async () => {
+  const smokeSource = await readFile(new URL("../scripts/electron-app-smoke.mjs", import.meta.url), "utf8");
+
+  assert.match(smokeSource, /registerSmokeIpcHandler\("dictation:wav", \(_event, payload\) => \{/);
+  assert.match(smokeSource, /handleSystemStatus\(\{\s*operationId: payload\.operationId,/);
 });
 
 test("app smoke rejects every focus containment warning instead of only new warnings", async () => {
@@ -722,6 +729,37 @@ test("main process stores and serves latest dictation status", async () => {
   assert.match(mainSource, /mainRendererIpc\.handle\("dictation:status-latest", \(\) => lastDictationStatus \|\| null\)/);
 });
 
+test("main process projects settings and lifecycle status before renderer IPC", async () => {
+  const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const sendStatusMatch = mainSource.match(/function sendStatus\(payload\) \{(?<body>[\s\S]*?)\n\}/);
+  const sendSystemInputStatusMatch = mainSource.match(
+    /function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction showHud/
+  );
+  const reportSystemErrorMatch = mainSource.match(
+    /function reportSystemError\(error, reason\) \{(?<body>[\s\S]*?)\n\}/
+  );
+
+  assert.match(
+    mainSource,
+    /toRendererSettings,[\s\S]*toRendererStatusPayload[\s\S]*from "\.\/product-ui-results\.js"/
+  );
+  assert.match(
+    mainSource,
+    /mainRendererIpc\.handle\("settings:get", async \(\) => \(\s*toRendererSettings\(await settingsStore\.getSettings\(\)\)\s*\)\)/
+  );
+  assert.match(
+    mainSource,
+    /return toRendererSettings\(await saveSettingsWithSystemEffects\(settings\)\)/
+  );
+  assert.ok(sendStatusMatch);
+  assert.match(sendStatusMatch.groups.body, /toRendererStatusPayload\(/);
+  assert.ok(sendSystemInputStatusMatch);
+  assert.match(sendSystemInputStatusMatch.groups.body, /toRendererStatusPayload\(state\)/);
+  assert.doesNotMatch(sendSystemInputStatusMatch.groups.body, /"system-input:status", state\)/);
+  assert.ok(reportSystemErrorMatch);
+  assert.doesNotMatch(reportSystemErrorMatch.groups.body, /getErrorMessage|error\.message|message:/);
+});
+
 test("main process uses a real tray icon helper with empty image fallback", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const createTrayMatch = mainSource.match(/function createTray\(\) \{(?<body>[\s\S]*?)\r?\n\}\r?\n\r?\nfunction refreshTrayMenu/);
@@ -991,7 +1029,7 @@ test("main process hides HUD when system input returns idle", async () => {
   const sendStatusMatch = mainSource.match(/function sendSystemInputStatus\(state\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
-  assert.match(sendStatusMatch.groups.body, /if \(state\?\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
+  assert.match(sendStatusMatch.groups.body, /if \(lastSystemInputState\.phase === "idle"\) \{\s*hideHud\(\);\s*return;\s*\}/);
   assert.match(mainSource, /function hideHud\(\) \{/);
 });
 
@@ -1003,20 +1041,21 @@ test("main process sends HUD system input status with interface language", async
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
   const body = sendStatusMatch.groups.body;
-  const normalizedStateIndex = body.indexOf("lastSystemInputState = state && typeof state === \"object\" ? state : { phase: \"idle\" }");
+  const normalizedStateIndex = body.indexOf("lastSystemInputState = toRendererStatusPayload(state)");
   const hudStateIndex = body.indexOf("const hudState = {");
   const hudSendIndex = body.indexOf("sendWindowMessage(hudWindow, \"system-input:status\", hudState)");
 
   assert.notEqual(normalizedStateIndex, -1, "system input state should be normalized first");
   assert.notEqual(hudStateIndex, -1, "HUD status should be built from a dedicated payload");
   assert.ok(hudStateIndex > normalizedStateIndex, "HUD status should use the normalized latest system input state");
-  assert.match(body, /sendWindowMessage\(mainWindow, "system-input:status", state\)/);
+  assert.match(body, /sendWindowMessage\(mainWindow, "system-input:status", lastSystemInputState\)/);
   assert.match(
     body,
     /const hudState = \{\s*\.\.\.lastSystemInputState,\s*language: lastSettings\?\.interfaceLanguage \|\| "zh-Hans"\s*\}/
   );
   assert.notEqual(hudSendIndex, -1, "HUD should receive the language-aware status payload");
   assert.ok(hudSendIndex > hudStateIndex, "HUD status should be sent after the payload is created");
+  assert.doesNotMatch(body, /sendWindowMessage\(mainWindow, "system-input:status", state\)/);
   assert.doesNotMatch(body, /sendWindowMessage\(hudWindow, "system-input:status", state\)/);
 });
 
@@ -1028,15 +1067,13 @@ test("main process shows terminal HUD states without owning terminal auto-idle",
 
   assert.ok(sendStatusMatch, "sendSystemInputStatus should be defined");
   assert.match(mainSource, /const terminalSystemInputPhases = new Set\(\["done", "warning", "error"\]\)/);
-  assert.match(sendStatusMatch.groups.body, /if \(terminalSystemInputPhases\.has\(state\?\.phase\)\) \{\s*showHud\(\);\s*return;\s*\}/);
+  assert.match(sendStatusMatch.groups.body, /if \(terminalSystemInputPhases\.has\(lastSystemInputState\.phase\)\) \{\s*showHud\(\);\s*return;\s*\}/);
   assert.doesNotMatch(mainSource, /scheduleTerminalAutoIdle/);
   assert.doesNotMatch(mainSource, /clearTerminalAutoIdle/);
   assert.doesNotMatch(mainSource, /terminalAutoIdleTimeout/);
   assert.doesNotMatch(mainSource, /terminalAutoIdleMs/);
-  assert.match(mainSource, /slice\(0, maxRendererStatusTextLength\)/);
-  assert.match(mainSource, /const maxRendererStatusTextLength = 240/);
-  assert.match(mainSource, /"starting"/);
-  assert.match(mainSource, /"stopping"/);
+  assert.match(mainSource, /toRendererStatusPayload/);
+  assert.doesNotMatch(sendStatusMatch.groups.body, /\bmessage\b/);
 });
 
 test("renderer reports main-owned operation ids after start and before stop processing", async () => {

@@ -52,6 +52,26 @@ function Format-DownloadSource {
   }
 }
 
+function Test-FileSha256 {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedSha256
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $false
+  }
+
+  try {
+    $actualSha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    return $actualSha256 -eq $ExpectedSha256.ToLowerInvariant()
+  } catch {
+    return $false
+  }
+}
+
 function Download-WithFallback {
   param(
     [Parameter(Mandatory = $true)]
@@ -61,15 +81,30 @@ function Download-WithFallback {
     [Parameter(Mandatory = $true)]
     [string]$FailureCode,
     [Parameter(Mandatory = $true)]
-    [string]$FailureMessage
+    [string]$FailureMessage,
+    [string]$ExpectedSha256 = "",
+    [string]$HashFailureCode = "",
+    [string]$HashFailureMessage = ""
   )
 
-  $validUrls = @($Urls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $validUrls = @($Urls | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+  $hashMismatchObserved = $false
   for ($index = 0; $index -lt $validUrls.Count; $index += 1) {
     $url = $validUrls[$index]
     Write-Host "Downloading from $(Format-DownloadSource -Url $url)..."
     $downloadResult = Invoke-NodeProcess -Executable $NodeExe -Arguments @($downloadScript, $url, $DestinationPath)
-    if ($downloadResult.ExitCode -eq 0) {
+    $downloadSucceeded = $downloadResult.ExitCode -eq 0
+
+    if ($downloadSucceeded -and -not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+      $downloadSucceeded = Test-FileSha256 -Path $DestinationPath -ExpectedSha256 $ExpectedSha256
+      if (-not $downloadSucceeded) {
+        $hashMismatchObserved = $true
+        Write-Host "Downloaded file failed SHA-256 verification."
+        Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
+      }
+    }
+
+    if ($downloadSucceeded) {
       return
     }
 
@@ -79,6 +114,9 @@ function Download-WithFallback {
     }
   }
 
+  if ($hashMismatchObserved -and -not [string]::IsNullOrWhiteSpace($HashFailureCode)) {
+    Fail-Setup -Code $HashFailureCode -Message $HashFailureMessage
+  }
   Fail-Setup -Code $FailureCode -Message $FailureMessage
 }
 
@@ -90,89 +128,138 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 $binDir = Join-Path $InstallDir "bin"
 $modelDir = Join-Path $InstallDir "models"
 $downloadDir = Join-Path $InstallDir "downloads"
-$releaseApi = "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest"
-$modelFile = "ggml-$Model.bin"
-$modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$modelFile"
-$modelMirrorUrl = "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/$modelFile"
-$modelPath = Join-Path $modelDir $modelFile
 $downloadScript = Join-Path $repoRoot "scripts\download-file.mjs"
+$manifestPath = Join-Path $repoRoot "scripts\whisper-runtime-manifest.json"
 
 New-Item -ItemType Directory -Force -Path $binDir, $modelDir, $downloadDir | Out-Null
 
-Write-Host "Fetching latest whisper.cpp release metadata..."
-$releaseResult = Invoke-NodeProcess `
-  -Executable $NodeExe `
-  -Arguments @("-e", "const r=await fetch(process.argv[1],{headers:{'user-agent':'local-flow-dictation'}}); if(!r.ok) throw new Error('HTTP '+r.status); console.log(await r.text());", $releaseApi) `
-  -HideStdout
-if ($releaseResult.ExitCode -ne 0) {
-  Fail-Setup -Code "whisper_release_metadata" -Message "Failed to fetch whisper.cpp release metadata."
-}
-$releaseJson = $releaseResult.Stdout
 try {
-  $release = $releaseJson | ConvertFrom-Json
-} catch {
-  Fail-Setup -Code "whisper_release_metadata" -Message "Failed to parse whisper.cpp release metadata."
-}
-$asset = $release.assets | Where-Object { $_.name -eq "whisper-bin-x64.zip" } | Select-Object -First 1
-if (-not $asset) {
-  Fail-Setup -Code "whisper_release_asset_missing" -Message "Could not find whisper-bin-x64.zip in latest whisper.cpp release."
-}
-
-$zipPath = Join-Path $downloadDir $asset.name
-if (-not (Test-Path -LiteralPath $zipPath)) {
-  Write-Host "Downloading $($asset.name)..."
-  $runtimeOverrideUrls = @(Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_RUNTIME_URL"))
-  $runtimeUrls = @()
-  if ($runtimeOverrideUrls.Count -gt 0) {
-    $runtimeUrls += $runtimeOverrideUrls
-  } else {
-    $runtimeUrls += $asset.browser_download_url
+  $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
+  $runtimeFile = [string]$manifest.fileName
+  $runtimeSha256 = [string]$manifest.sha256
+  $runtimeCliSha256 = [string]$manifest.cliSha256
+  $manifestRuntimeUrls = @($manifest.urls)
+  $modelManifest = $manifest.models.$Model
+  $modelFile = [string]$modelManifest.fileName
+  $modelSha256 = [string]$modelManifest.sha256
+  $manifestModelUrls = @($modelManifest.urls)
+  if (
+    [string]::IsNullOrWhiteSpace($runtimeFile) -or
+    $runtimeSha256 -notmatch "^[a-fA-F0-9]{64}$" -or
+    $runtimeCliSha256 -notmatch "^[a-fA-F0-9]{64}$" -or
+    $manifestRuntimeUrls.Count -eq 0 -or
+    [string]::IsNullOrWhiteSpace($modelFile) -or
+    $modelSha256 -notmatch "^[a-fA-F0-9]{64}$" -or
+    $manifestModelUrls.Count -lt 2
+  ) {
+    throw "Whisper manifest is incomplete."
   }
-  $runtimeUrls += Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS")
-  Download-WithFallback `
-    -Urls $runtimeUrls `
-    -DestinationPath $zipPath `
-    -FailureCode "whisper_runtime_download" `
-    -FailureMessage "Failed to download $($asset.name)."
-} else {
-  Write-Host "Using existing $zipPath"
-}
-
-Write-Host "Extracting whisper.cpp binaries..."
-try {
-  Expand-Archive -LiteralPath $zipPath -DestinationPath $binDir -Force
 } catch {
-  Fail-Setup -Code "whisper_extract_failed" -Message "Failed to extract whisper.cpp binaries."
+  Fail-Setup -Code "whisper_runtime_manifest" -Message "The bundled Whisper runtime manifest is missing or invalid."
 }
 
-$cli = Get-ChildItem -Path $binDir -Filter "whisper-cli.exe" -Recurse | Select-Object -First 1
-if (-not $cli) {
-  Fail-Setup -Code "whisper_runtime_missing" -Message "whisper-cli.exe was not found after extracting the runtime archive."
+$modelPath = Join-Path $modelDir $modelFile
+$cliPath = Join-Path $binDir "Release\whisper-cli.exe"
+$runtimeReady = Test-FileSha256 -Path $cliPath -ExpectedSha256 $runtimeCliSha256
+
+if ($runtimeReady) {
+  Write-Host "Using bundled verified Whisper runtime."
+} else {
+  $zipPath = Join-Path $downloadDir $runtimeFile
+  if ((Test-Path -LiteralPath $zipPath) -and -not (Test-FileSha256 -Path $zipPath -ExpectedSha256 $runtimeSha256)) {
+    Write-Host "Cached Whisper runtime failed SHA-256 verification. Downloading it again."
+    try {
+      Remove-Item -LiteralPath $zipPath -Force -ErrorAction Stop
+    } catch {
+      Fail-Setup -Code "whisper_runtime_locked" -Message "The cached Whisper runtime is in use. Close Local Flow and retry."
+    }
+  }
+
+  if (-not (Test-Path -LiteralPath $zipPath)) {
+    Write-Host "Downloading pinned whisper.cpp runtime $($manifest.version)..."
+    $runtimeOverrideUrls = @(Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_RUNTIME_URL"))
+    $runtimeUrls = @()
+    if ($runtimeOverrideUrls.Count -gt 0) {
+      $runtimeUrls += $runtimeOverrideUrls
+    } else {
+      $runtimeUrls += $manifestRuntimeUrls
+    }
+    $runtimeUrls += Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS")
+    Download-WithFallback `
+      -Urls $runtimeUrls `
+      -DestinationPath $zipPath `
+      -FailureCode "whisper_runtime_download" `
+      -FailureMessage "Failed to download the verified whisper.cpp runtime." `
+      -ExpectedSha256 $runtimeSha256 `
+      -HashFailureCode "whisper_runtime_hash" `
+      -HashFailureMessage "The downloaded whisper.cpp runtime failed SHA-256 verification."
+  } else {
+    Write-Host "Using verified cached $zipPath"
+  }
+
+  try {
+    if (Test-Path -LiteralPath $binDir) {
+      Remove-Item -LiteralPath $binDir -Recurse -Force -ErrorAction Stop
+    }
+    New-Item -ItemType Directory -Force -Path $binDir -ErrorAction Stop | Out-Null
+  } catch {
+    Fail-Setup -Code "whisper_runtime_locked" -Message "The existing Whisper runtime is in use. Close Local Flow and retry."
+  }
+
+  Write-Host "Extracting whisper.cpp binaries..."
+  try {
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $binDir -Force
+  } catch {
+    Fail-Setup -Code "whisper_extract_failed" -Message "Failed to extract whisper.cpp binaries."
+  }
+
+  $cli = Get-ChildItem -Path $binDir -Filter "whisper-cli.exe" -Recurse | Select-Object -First 1
+  if (-not $cli) {
+    Fail-Setup -Code "whisper_runtime_missing" -Message "whisper-cli.exe was not found after extracting the runtime archive."
+  }
+  if (-not (Test-FileSha256 -Path $cli.FullName -ExpectedSha256 $runtimeCliSha256)) {
+    Fail-Setup -Code "whisper_cli_hash" -Message "whisper-cli.exe did not match the verified runtime."
+  }
+  $cliPath = $cli.FullName
+}
+
+if ((Test-Path -LiteralPath $modelPath) -and -not (Test-FileSha256 -Path $modelPath -ExpectedSha256 $modelSha256)) {
+  Write-Host "Existing Whisper model failed SHA-256 verification. Downloading it again."
+  try {
+    Remove-Item -LiteralPath $modelPath -Force -ErrorAction Stop
+  } catch {
+    Fail-Setup -Code "whisper_model_locked" -Message "The existing Whisper model is in use. Close Local Flow and retry."
+  }
 }
 
 if (-not (Test-Path -LiteralPath $modelPath)) {
-  Write-Host "Downloading $modelFile..."
+  Write-Host "Downloading verified $modelFile..."
   $modelOverrideUrls = @(Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_MODEL_URL"))
   $modelUrls = @()
   if ($modelOverrideUrls.Count -gt 0) {
     $modelUrls += $modelOverrideUrls
   } else {
-    $modelUrls += $modelUrl
-    $modelUrls += $modelMirrorUrl
+    $modelUrls += $manifestModelUrls
   }
   $modelUrls += Get-EnvUrls -Names @("LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS")
   Download-WithFallback `
     -Urls $modelUrls `
     -DestinationPath $modelPath `
     -FailureCode "whisper_model_download" `
-    -FailureMessage "Failed to download $modelFile from primary and mirror URLs."
+    -FailureMessage "Failed to download the verified $modelFile." `
+    -ExpectedSha256 $modelSha256 `
+    -HashFailureCode "whisper_model_hash" `
+    -HashFailureMessage "The downloaded Whisper model failed SHA-256 verification."
 } else {
-  Write-Host "Using existing $modelPath"
+  Write-Host "Using bundled verified $modelPath"
+}
+
+if (-not (Test-FileSha256 -Path $modelPath -ExpectedSha256 $modelSha256)) {
+  Fail-Setup -Code "whisper_model_hash" -Message "The Whisper model did not match the verified manifest."
 }
 
 Write-Host ""
 Write-Host "Whisper setup complete."
-Write-Host "Executable: $($cli.FullName)"
-Write-Host "Model:      $modelPath"
-Write-Host ""
-Write-Host "Paste these paths into Local Flow Dictation settings, then click Check local Whisper."
+Write-Host "Runtime: $cliPath"
+Write-Host "Model:   $modelPath"
+Write-Host "License: MIT"

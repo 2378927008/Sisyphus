@@ -47,6 +47,10 @@ import { getValidatedWavBuffer } from "./ipc-contracts.js";
 import { handleStartupFailure } from "./startup-failure.js";
 import {
   toLocalModelUiStatus,
+  toRendererDictationResult,
+  toRendererHistoryList,
+  toRendererSettings,
+  toRendererStatusPayload,
   toTextDiagnosticResult,
   toWhisperDiagnosticResult
 } from "./product-ui-results.js";
@@ -56,20 +60,7 @@ const mainRendererPath = path.join(__dirname, "../renderer/index.html");
 const hudRendererPath = getHudHtmlPath(__dirname);
 const approvedMainRendererUrl = pathToFileURL(mainRendererPath).href;
 const approvedHudRendererUrl = pathToFileURL(hudRendererPath).href;
-const rendererRecordingPhases = new Set([
-  "idle",
-  "starting",
-  "recording",
-  "stopping",
-  "transcribing",
-  "polishing",
-  "pasting",
-  "done",
-  "error",
-  "warning"
-]);
 const terminalSystemInputPhases = new Set(["done", "warning", "error"]);
-const maxRendererStatusTextLength = 240;
 
 applyElectronRuntimeSwitches(app);
 
@@ -224,9 +215,10 @@ function sendRecordingStopCommand(command) {
 }
 
 function sendStatus(payload) {
-  const status = activeDictationOperationId === null
+  const sourceStatus = activeDictationOperationId === null
     ? payload
     : { ...payload, operationId: activeDictationOperationId };
+  const status = toRendererStatusPayload(sourceStatus);
   lastDictationStatus = status;
   if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", status);
@@ -235,11 +227,12 @@ function sendStatus(payload) {
 }
 
 function sendTransientStatus(payload) {
-  if (systemInputController && !systemInputController.handleAuxiliaryStatus(payload)) {
+  const status = toRendererStatusPayload(payload);
+  if (systemInputController && !systemInputController.handleAuxiliaryStatus(status)) {
     return false;
   }
   if (isUsableWindow(mainWindow)) {
-    mainWindow.webContents.send("dictation:status", payload);
+    mainWindow.webContents.send("dictation:status", status);
   }
   return true;
 }
@@ -274,27 +267,27 @@ function isPasteableDictationEntry(entry) {
 }
 
 function sendSystemInputStatus(state) {
-  lastSystemInputState = state && typeof state === "object" ? state : { phase: "idle" };
+  lastSystemInputState = toRendererStatusPayload(state);
   const hudState = {
     ...lastSystemInputState,
     language: lastSettings?.interfaceLanguage || "zh-Hans"
   };
   refreshTrayMenu();
   hudActions?.syncPhase(lastSystemInputState.phase);
-  sendWindowMessage(mainWindow, "system-input:status", state);
+  sendWindowMessage(mainWindow, "system-input:status", lastSystemInputState);
   sendWindowMessage(hudWindow, "system-input:status", hudState);
 
-  if (state?.phase === "idle") {
+  if (lastSystemInputState.phase === "idle") {
     hideHud();
     return;
   }
 
-  if (terminalSystemInputPhases.has(state?.phase)) {
+  if (terminalSystemInputPhases.has(lastSystemInputState.phase)) {
     showHud();
     return;
   }
 
-  if (isActiveSystemInputPhase(state?.phase)) {
+  if (isActiveSystemInputPhase(lastSystemInputState.phase)) {
     showHud();
   }
 }
@@ -324,20 +317,7 @@ function isActiveSystemInputPhase(phase) {
 }
 
 function sanitizeRecordingStatusPayload(payload = {}) {
-  const source = payload && typeof payload === "object" ? payload : {};
-  const phase = rendererRecordingPhases.has(source.phase) ? source.phase : "idle";
-  return {
-    operationId: Number.isSafeInteger(source.operationId) && source.operationId > 0
-      ? source.operationId
-      : null,
-    phase,
-    message: sanitizeRendererStatusText(source.message),
-    reason: sanitizeRendererStatusText(source.reason)
-  };
-}
-
-function sanitizeRendererStatusText(value) {
-  return typeof value === "string" ? value.slice(0, maxRendererStatusTextLength) : "";
+  return toRendererStatusPayload(payload);
 }
 
 function updateSettingsFromTray(settingsPatch) {
@@ -347,7 +327,6 @@ function updateSettingsFromTray(settingsPatch) {
 function reportSystemError(error, reason) {
   sendStatus({
     phase: "error",
-    message: getErrorMessage(error),
     reason
   });
 }
@@ -387,11 +366,16 @@ function wireIpc() {
     }
   });
   mainRendererIpc.handle("dictation:status-latest", () => lastDictationStatus || null);
-  mainRendererIpc.handle("settings:get", () => settingsStore.getSettings());
+  mainRendererIpc.handle("settings:get", async () => (
+    toRendererSettings(await settingsStore.getSettings())
+  ));
   mainRendererIpc.handle("settings:save", async (_event, settings) => {
-    return saveSettingsWithSystemEffects(settings);
+    return toRendererSettings(await saveSettingsWithSystemEffects(settings));
   });
-  mainRendererIpc.handle("history:list", () => settingsStore.getHistory());
+  mainRendererIpc.handle(
+    "history:list",
+    async () => toRendererHistoryList(await settingsStore.getHistory())
+  );
   mainRendererIpc.handle(
     "data:recovery-status",
     () => settingsStore.getRecoveryState?.() || []
@@ -432,7 +416,7 @@ function wireIpc() {
       if (isPasteableDictationEntry(entry)) {
         lastDictationEntry = entry;
       }
-      return entry;
+      return toRendererDictationResult(entry);
     } finally {
       if (activeDictationOperationId === operationId) {
         activeDictationOperationId = null;
@@ -450,11 +434,7 @@ if (ownsSingleInstance) {
   configureMediaPermissions(session.defaultSession, {
     getAllowedWebContents: () => mainWindow?.webContents || null,
     getAllowedUrl: () => approvedMainRendererUrl
-  }).catch(() => handleStartupFailure({
-    app,
-    dialog,
-    language: lastSettings?.interfaceLanguage
-  }));
+  });
   runtimeRoot = getRuntimeRoot({ app });
   vendorRoot = getVendorRoot(runtimeRoot);
   appRoot = getAppRoot({ app });
@@ -545,7 +525,11 @@ if (ownsSingleInstance) {
     reportSystemError(startupSettingsError, "startup_settings_failed");
   }
   await registerHotkey(lastSettings);
-  });
+  }).catch(() => handleStartupFailure({
+    app,
+    dialog,
+    language: lastSettings?.interfaceLanguage
+  }));
 
   app.on("will-quit", () => {
     disposeHudDisplayChanges?.();

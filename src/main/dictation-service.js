@@ -58,9 +58,9 @@ export class DictationService {
       try {
         await this.paste(entry.text, { clipboard: this.clipboard });
         entry.pasteStatus = "complete";
-      } catch (error) {
+      } catch {
         entry.pasteStatus = "failed";
-        entry.pasteError = getStableReason(error, "paste_failed");
+        entry.pasteError = "paste_failed";
         await this.settingsStore.addHistory(entry, settings.historyLimit);
         this.notifyStatus({
           phase: "warning",
@@ -113,12 +113,12 @@ export class DictationService {
         assertTextProviderCanProcess(effectiveProviders);
       }
       text = await this.polish(transcript, effectiveSettings);
-    } catch (error) {
+    } catch {
       status = isTargetOutputLanguage(effectiveSettings.outputLanguage) ? "failed" : "partial";
       if (status === "failed") {
         text = "";
       }
-      processingError = getStableReason(error, "text_processing_failed");
+      processingError = "text_processing_failed";
     }
 
     return {
@@ -150,16 +150,6 @@ function getFinalReason(status) {
   if (status === "failed") return "target_output_failed";
   if (status === "partial") return "raw_transcript_saved";
   return "";
-}
-
-function getStableReason(error, fallback) {
-  for (const candidate of [error?.code, error?.message, error]) {
-    const reason = typeof candidate === "string" ? candidate.trim() : "";
-    if (/^[a-z][a-z0-9_]{2,63}$/.test(reason)) {
-      return reason;
-    }
-  }
-  return fallback;
 }
 
 function assertTextProviderCanProcess(providers = {}) {

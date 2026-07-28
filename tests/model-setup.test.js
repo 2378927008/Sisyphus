@@ -197,13 +197,15 @@ test("setup scripts emit structured failure markers", () => {
   const llmScript = readFileSync(path.join(process.cwd(), "scripts", "setup-llm.ps1"), "utf8");
 
   for (const reason of [
-    "whisper_release_metadata",
-    "whisper_release_asset_missing",
+    "whisper_runtime_manifest",
+    "whisper_cli_hash",
+    "whisper_model_hash",
     "whisper_extract_failed",
     "whisper_runtime_missing",
   ]) {
     assert.match(whisperScript, new RegExp(`Fail-Setup -Code "${reason}"`));
   }
+  assert.match(whisperScript, /-HashFailureCode "whisper_runtime_hash"/);
   assert.match(whisperScript, /-FailureCode "whisper_runtime_download"/);
   assert.match(whisperScript, /-FailureCode "whisper_model_download"/);
 
@@ -373,8 +375,42 @@ test("setup-whisper supports deployment supplied fallback download URLs", () => 
   assert.match(whisperScript, /LOCAL_FLOW_WHISPER_RUNTIME_MIRROR_URLS/);
   assert.match(whisperScript, /LOCAL_FLOW_WHISPER_MODEL_URL/);
   assert.match(whisperScript, /LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS/);
-  assert.match(whisperScript, /\$asset\.browser_download_url/);
-  assert.match(whisperScript, /\$modelMirrorUrl/);
+  assert.match(whisperScript, /\$manifestRuntimeUrls/);
+  assert.match(whisperScript, /\$manifestModelUrls/);
+});
+
+test("setup-whisper uses pinned verified runtime and model manifests", () => {
+  const whisperScript = readFileSync(path.join(process.cwd(), "scripts", "setup-whisper.ps1"), "utf8");
+  const manifestPath = path.join(process.cwd(), "scripts", "whisper-runtime-manifest.json");
+
+  assert.equal(existsSync(manifestPath), true);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const baseModel = manifest.models?.base;
+
+  assert.match(manifest.version, /^v\d+\.\d+\.\d+$/);
+  assert.equal(manifest.fileName, "whisper-bin-x64.zip");
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  assert.match(manifest.cliSha256, /^[a-f0-9]{64}$/);
+  assert.ok(manifest.urls.some((url) => url.startsWith(
+    `https://github.com/ggml-org/whisper.cpp/releases/download/${manifest.version}/`
+  )));
+  assert.match(manifest.modelRevision, /^[a-f0-9]{40}$/);
+  assert.equal(baseModel.fileName, "ggml-base.bin");
+  assert.match(baseModel.sha256, /^[a-f0-9]{64}$/);
+  assert.ok(baseModel.urls.every((url) => url.includes(manifest.modelRevision)));
+  assert.match(whisperScript, /whisper-runtime-manifest\.json/);
+  assert.match(whisperScript, /Get-FileHash/);
+  assert.match(whisperScript, /whisper_runtime_hash/);
+  assert.match(whisperScript, /whisper_cli_hash/);
+  assert.match(whisperScript, /whisper_model_hash/);
+  assert.doesNotMatch(
+    whisperScript,
+    /api\.github\.com\/repos\/ggml-org\/whisper\.cpp\/releases\/latest/
+  );
+  assert.doesNotMatch(
+    whisperScript,
+    /huggingface\.co\/ggerganov\/whisper\.cpp\/resolve\/main/
+  );
 });
 
 test("buildSetupDownloadEnv maps saved download source settings to setup environment", () => {

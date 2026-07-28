@@ -42,6 +42,10 @@ function buildReleaseRequirements(pkg) {
       minBytes: 256
     },
     {
+      path: `${outputDir}/win-unpacked/resources/app/scripts/whisper-runtime-manifest.json`,
+      minBytes: 512
+    },
+    {
       path: `${outputDir}/win-unpacked/resources/vendor/whisper/bin/Release/whisper-cli.exe`,
       minBytes: 100_000
     },
@@ -145,7 +149,7 @@ function assertIgnored(relativePath) {
   return relativePath;
 }
 
-function assertManifestShape(llamaManifest, qwenManifest) {
+function assertManifestShape(llamaManifest, qwenManifest, whisperManifest) {
   if (
     !/^b\d+$/.test(llamaManifest.version || "") ||
     !/^[a-f0-9]{64}$/.test(llamaManifest.cliSha256 || "")
@@ -159,6 +163,17 @@ function assertManifestShape(llamaManifest, qwenManifest) {
     !/^[a-f0-9]{64}$/.test(qwenManifest.sha256 || "")
   ) {
     throw new Error("bundled optional Qwen manifest is invalid");
+  }
+  if (
+    !/^v\d+\.\d+\.\d+$/.test(whisperManifest.version || "") ||
+    whisperManifest.fileName !== "whisper-bin-x64.zip" ||
+    !/^[a-f0-9]{64}$/.test(whisperManifest.sha256 || "") ||
+    !/^[a-f0-9]{64}$/.test(whisperManifest.cliSha256 || "") ||
+    !/^[a-f0-9]{40}$/.test(whisperManifest.modelRevision || "") ||
+    whisperManifest.models?.base?.fileName !== "ggml-base.bin" ||
+    !/^[a-f0-9]{64}$/.test(whisperManifest.models?.base?.sha256 || "")
+  ) {
+    throw new Error("bundled Whisper runtime manifest is invalid");
   }
 }
 
@@ -210,6 +225,8 @@ try {
     `${unpackedRoot}/resources/app/scripts/llama-runtime-manifest.json`;
   const qwenManifestPath =
     `${unpackedRoot}/resources/app/scripts/qwen-model-manifest.json`;
+  const whisperManifestPath =
+    `${unpackedRoot}/resources/app/scripts/whisper-runtime-manifest.json`;
   const llamaCliPath =
     `${unpackedRoot}/resources/vendor/llm/bin/llama-cli.exe`;
   const whisperCliPath =
@@ -219,6 +236,7 @@ try {
   const [
     llamaManifest,
     qwenManifest,
+    whisperManifest,
     buildRecord,
     installerArtifact,
     blockmapArtifact,
@@ -226,12 +244,13 @@ try {
   ] = await Promise.all([
     readJson(llamaManifestPath),
     readJson(qwenManifestPath),
+    readJson(whisperManifestPath),
     readJson(buildRecordPath),
     artifactMetadata(installerPath),
     artifactMetadata(blockmapPath),
     artifactMetadata(unpackedExecutablePath)
   ]);
-  assertManifestShape(llamaManifest, qwenManifest);
+  assertManifestShape(llamaManifest, qwenManifest, whisperManifest);
 
   const releaseProvenance = validateReleaseBuildProvenance({
     packageVersion: pkg.version,
@@ -264,6 +283,17 @@ try {
   const actualLlamaCliSha256 = await sha256(llamaCliPath);
   if (actualLlamaCliSha256 !== llamaManifest.cliSha256.toLowerCase()) {
     throw new Error("packaged llama.cpp runtime does not match its manifest");
+  }
+  const actualWhisperCliSha256 = await sha256(whisperCliPath);
+  if (actualWhisperCliSha256 !== whisperManifest.cliSha256.toLowerCase()) {
+    throw new Error("packaged Whisper runtime does not match its manifest");
+  }
+  const actualWhisperModelSha256 = await sha256(whisperModelPath);
+  if (
+    actualWhisperModelSha256 !==
+    whisperManifest.models.base.sha256.toLowerCase()
+  ) {
+    throw new Error("packaged Whisper model does not match its manifest");
   }
 
   const [llamaRuntime, whisperRuntime] = await Promise.all([
@@ -299,6 +329,8 @@ try {
     files,
     manifests: {
       llamaRuntime: llamaManifest.version,
+      whisperRuntime: whisperManifest.version,
+      whisperModelRevision: whisperManifest.modelRevision,
       qwenModel: qwenManifest.modelId
     },
     runtimeChecks: {

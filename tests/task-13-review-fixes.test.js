@@ -24,9 +24,14 @@ test("product readiness labels its automated scope and lists every manual releas
     "windows-microphone-to-notepad",
     "windows-escape-cancel-no-history",
     "windows-tray-balloon",
-    "windows-isolated-clean-install-uninstall",
     "iphone-xcode-device-build"
   ]));
+  assert.equal(
+    payload.checks.find(
+      ({ area }) => area === "windows-isolated-install-evidence"
+    )?.ok,
+    true
+  );
 });
 
 test("trial guide provides an honest uninstall fallback when Windows has no app entry", async () => {

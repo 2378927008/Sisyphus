@@ -257,6 +257,7 @@ async function init() {
   setViewPhase("idle");
   renderEditorState();
   activatePrimaryView("home");
+  await refreshProviderStatus();
   setReadyStatus();
   recordButton.addEventListener("click", toggleRecording);
   recordRecoveryAction.addEventListener("click", applyRecordRecoveryAction);
@@ -341,7 +342,6 @@ async function init() {
   await renderHistory();
   syncResponsiveWorkspace();
   await renderLocalModelStatus();
-  await refreshProviderStatus();
   await refreshSetupStatusView({ updateStatus: false });
   await renderDataRecoveryStatus();
 }
@@ -814,8 +814,8 @@ async function runModelSetup(type) {
     setStatus(t("setup.startFailed"));
   } finally {
     stopPolling();
-    activeSetupType = "";
     setSetupBusy(false);
+    activeSetupType = "";
   }
 }
 
@@ -875,10 +875,26 @@ function mergeSetupResult(status, type, result) {
 function renderSetupChecklist() {
   if (!currentSetupStatus || !setupChecklist) return;
 
-  const whisperReady = Boolean(currentSetupStatus.assets?.whisper?.ready);
+  const providerWhisperReady = Boolean(
+    currentProviderStatus?.asr?.provider === "localWhisper" &&
+    currentProviderStatus.asr.ready
+  );
+  const whisperReady = Boolean(
+    currentSetupStatus.assets?.whisper?.ready ||
+    providerWhisperReady
+  );
   const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
-  const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
-  const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
+  const reportedWhisperStatus =
+    currentSetupStatus.setups?.whisper?.status || "idle";
+  const selectedTextProvider =
+    currentSettings?.llmProvider || form.llmProvider?.value || "mymemory";
+  const whisperStatus =
+    whisperReady && reportedWhisperStatus === "failed"
+      ? "idle"
+      : reportedWhisperStatus;
+  const llmStatus = selectedTextProvider === "embedded"
+    ? currentSetupStatus.setups?.llm?.status || "idle"
+    : "idle";
   const whisperSetup = currentSetupStatus.setups?.whisper || {};
   const llmSetup = currentSetupStatus.setups?.llm || {};
   const textSetupState = getTextSetupState(llmReady, llmStatus, llmSetup);
@@ -933,8 +949,10 @@ function getActiveSetupStatus(whisperStatus, llmStatus) {
   if (whisperStatus === "running") return currentSetupStatus.setups?.whisper;
   if (llmStatus === "running") return currentSetupStatus.setups?.llm;
   if (activeSetupType) return currentSetupStatus.setups?.[activeSetupType] || null;
-  return [currentSetupStatus.setups?.llm, currentSetupStatus.setups?.whisper]
-    .find((setup) => setup && setup.status !== "idle") || null;
+  return [
+    { status: llmStatus, setup: currentSetupStatus.setups?.llm },
+    { status: whisperStatus, setup: currentSetupStatus.setups?.whisper }
+  ].find(({ status, setup }) => setup && status !== "idle")?.setup || null;
 }
 
 function renderSetupOutput(setup) {

@@ -15,8 +15,16 @@ test("README contains readable Chinese first-run guidance", async () => {
   assert.match(readme, /安装后首次启动/);
   assert.match(readme, /Local Flow 是语音输入软件，不是默认翻译软件/);
   assert.match(readme, /输出语言.*自动.*同语音/);
+  assert.match(readme, /点击.*安装 Whisper/);
+  assert.match(readme, /重新安装当前版本/);
   assert.match(readme, /LOCAL_FLOW_LLAMA_RUNTIME_URL/);
   assert.match(readme, /LOCAL_FLOW_QWEN_MODEL_MIRROR_URLS/);
+  assert.doesNotMatch(
+    readme,
+    /设置抽屉里填写 `whisper\.cpp 可执行文件` 和 `Whisper 模型文件`/
+  );
+  assert.doesNotMatch(readme, /设置` > `模型下载源/);
+  assert.doesNotMatch(readme, /copy the printed executable and model paths into the app settings/i);
   assert.doesNotMatch(readme, /涓|鍦|璇|鐨|妯|榛/);
 });
 
@@ -54,12 +62,15 @@ test("release verifier checks installer executable and icon config", async () =>
   assert.match(script, /`\$\{outputDir\}\/win-unpacked\/\$\{productName\}\.exe`/);
   assert.match(script, /resources\/app\/scripts\/llama-runtime-manifest\.json/);
   assert.match(script, /resources\/app\/scripts\/qwen-model-manifest\.json/);
+  assert.match(script, /resources\/app\/scripts\/whisper-runtime-manifest\.json/);
   assert.match(script, /resources\/vendor\/whisper\/bin\/Release\/whisper-cli\.exe/);
   assert.match(script, /resources\/vendor\/whisper\/models\/ggml-base\.bin/);
   assert.match(script, /resources\/vendor\/llm\/bin\/llama-cli\.exe/);
   assert.doesNotMatch(script, /resources\/vendor\/llm\/models\/Qwen3-4B-Q4_K_M\.gguf/);
   assert.match(script, /assets\/local-flow-icon\.ico/);
   assert.match(script, /git check-ignore/);
+  assert.match(script, /packaged Whisper runtime does not match its manifest/);
+  assert.match(script, /packaged Whisper model does not match its manifest/);
 });
 
 test("product readiness reports the approved Windows V4 design evidence", () => {
@@ -78,6 +89,18 @@ test("product readiness reports the approved Windows V4 design evidence", () => 
     checksByPath.get("docs/design/local-flow-windows-ui-v4-fusion.png")?.ok,
     true
   );
+});
+
+test("product readiness binds clean-install evidence to current release artifacts", async () => {
+  const script = await readFile(
+    new URL("../scripts/product-readiness-report.mjs", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(script, /validateEvidenceMatchesRelease/);
+  assert.match(script, /validateIsolatedInstallEvidence/);
+  assert.match(script, /windows-isolated-install-v4\.json/);
+  assert.match(script, /sha256File/);
 });
 
 test("Chinese product trial guide covers the complete Windows V4 trial", async () => {

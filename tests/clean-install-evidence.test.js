@@ -5,7 +5,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCleanInstallEvidence } from "../scripts/clean-install-evidence-core.mjs";
+import {
+  validateCleanInstallEvidence,
+  validateEvidenceMatchesRelease
+} from "../scripts/clean-install-evidence-core.mjs";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
@@ -167,6 +170,42 @@ function createTruthfulManifest() {
     }
   };
 }
+
+function releaseSnapshotFromManifest(manifest) {
+  return {
+    version: manifest.releaseArtifacts.version,
+    artifacts: {
+      installer: { ...manifest.releaseArtifacts.installer },
+      blockmap: { ...manifest.releaseArtifacts.blockmap },
+      unpackedExecutable: { ...manifest.releaseArtifacts.unpackedExecutable }
+    }
+  };
+}
+
+test("clean-install evidence must describe the current release artifacts exactly", () => {
+  const manifest = createTruthfulManifest();
+
+  assert.deepEqual(
+    validateEvidenceMatchesRelease(
+      manifest,
+      releaseSnapshotFromManifest(manifest)
+    ),
+    { ok: true, errors: [] }
+  );
+});
+
+test("clean-install evidence rejects stale artifact size and hash values", () => {
+  const manifest = createTruthfulManifest();
+  const release = releaseSnapshotFromManifest(manifest);
+  release.artifacts.installer.bytes += 1;
+  release.artifacts.blockmap.sha256 = "f".repeat(64);
+
+  const result = validateEvidenceMatchesRelease(manifest, release);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("installer.bytes")));
+  assert.ok(result.errors.some((error) => error.includes("blockmap.sha256")));
+});
 
 test("clean-install evidence schema accepts a truthful read-only manifest", () => {
   const result = validateCleanInstallEvidence(createTruthfulManifest());
@@ -389,21 +428,20 @@ test("passed evidence requires zero isolated processes after the trial", () => {
   assert.ok(result.errors.some((error) => error.includes("must be zero")));
 });
 
-test("committed clean-install evidence is valid, normalized, and explicitly not run", async () => {
+test("committed clean-install evidence is valid, normalized, non-mutating, and explicitly not run", async () => {
   const manifest = JSON.parse(await readFile(
     new URL("../docs/release/evidence/windows-clean-install-v4.json", import.meta.url),
     "utf8"
   ));
   const serialized = JSON.stringify(manifest);
-  const registration = manifest.currentState.uninstallRegistration;
 
   assert.deepEqual(validateCleanInstallEvidence(manifest), { ok: true, errors: [] });
   assert.doesNotMatch(serialized, /S-1-5-21-/);
   assert.doesNotMatch(serialized, /C:\\\\Users\\\\/i);
   assert.doesNotMatch(serialized, /E:\\\\/i);
-  assert.equal(registration.status, "unsupported");
-  assert.equal(registration.executionContextRole, "unknown");
-  assert.equal(registration.conclusion, "unknown");
+  assert.equal(manifest.safety.existingInstallMutation, "prohibited");
+  assert.equal(manifest.safety.installerRun, false);
+  assert.equal(manifest.safety.uninstallerRun, false);
   assert.equal(manifest.cleanInstallTrial.status, "not_run");
   assert.equal(manifest.cleanInstallTrial.productTextInsertion.status, "manual_required");
 });

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "evidenceKind": "local-flow-windows-clean-install",
-  "generatedAt": "2026-07-28T05:05:09.170Z",
+  "generatedAt": "2026-07-28T12:21:13.180Z",
   "readinessScope": "read-only-current-state-and-manual-clean-install-plan",
   "source": {
     "collector": "scripts/clean-install-evidence.mjs",
     "collectionMode": "repository_persistent_read_only_snapshot",
     "existingInstallInputRole": "normalized_existing_install_root",
-    "registrySnapshotDisposition": "legacy_scope_access_confirmation_not_retained"
+    "registrySnapshotDisposition": "per_scope_access_and_context_recorded"
   },
   "safety": {
     "existingInstallMutation": "prohibited",
@@ -20,14 +20,14 @@
     "installer": {
       "status": "observed",
       "path": "dist/Local Flow Setup 0.1.0.exe",
-      "sha256": "14f7ba0cb98e273dc60f3b67858ae98b53eb7d1b6e7f769924c18d198db325e7",
-      "bytes": 244136924
+      "sha256": "9932832d3bbb7a58a90992287101f3e4e96ba9278c89ae44935b9374d80285bb",
+      "bytes": 244165479
     },
     "blockmap": {
       "status": "observed",
       "path": "dist/Local Flow Setup 0.1.0.exe.blockmap",
-      "sha256": "d6435434dfaf401f6d1fb8b2bae9cb88266f42ea03ef024143df49fbd3556157",
-      "bytes": 255888
+      "sha256": "978f262960ad0f6d402cea2f19a1bbb2f232c9853dc52d99610c1724c6b8f6bc",
+      "bytes": 255850
     },
     "unpackedExecutable": {
       "status": "observed",
@@ -38,31 +38,17 @@
   },
   "currentState": {
     "status": "partial",
-    "executionContextRole": "unknown",
+    "executionContextRole": "restricted_process",
     "existingInstallation": {
-      "status": "observed",
-      "role": "existing_user_install",
-      "root": "<existing-install-root>",
-      "executable": {
-        "status": "observed",
-        "path": "<existing-install-root>/Local Flow.exe",
-        "sha256": "05a18fce49f1e9eb2686f4103090a31e648fc9e17ff57124f3e63c801b799b04",
-        "bytes": 210485248
-      },
-      "uninstaller": {
-        "status": "observed",
-        "path": "<existing-install-root>/Uninstall Local Flow.exe",
-        "sha256": "91daf21af55e1ca70887285038184b408ab3ea4ada6576a2a1f40b1367ee35a0",
-        "bytes": 530237
-      },
-      "executableMatchesRelease": true
+      "status": "unsupported",
+      "reason": "LOCAL_FLOW_EXISTING_INSTALL_ROOT was not provided"
     },
     "startMenuShortcut": {
       "status": "observed",
       "path": "%APPDATA%/Microsoft/Windows/Start Menu/Programs/Local Flow.lnk",
       "exists": true,
-      "target": "<existing-install-root>/Local Flow.exe",
-      "workingDirectory": "<existing-install-root>",
+      "target": "<redacted-machine-path>",
+      "workingDirectory": "<redacted-machine-path>",
       "sha256": "48045b3078c0607524328e760847b4d909e960897ec8bb9a1616c7446bf744a6"
     },
     "desktopShortcut": {
@@ -71,45 +57,40 @@
       "exists": false
     },
     "uninstallRegistration": {
-      "status": "unsupported",
-      "executionContextRole": "unknown",
+      "status": "partial",
+      "executionContextRole": "restricted_process",
       "scopes": [
         {
           "role": "collector_current_user",
           "status": "unsupported",
-          "collectionContextRole": "unknown",
-          "reason": "legacy snapshot did not retain per-scope access confirmation"
+          "collectionContextRole": "restricted_process",
+          "reason": "scope does not represent the interactive user"
         },
         {
           "role": "local_machine_64",
-          "status": "unsupported",
-          "collectionContextRole": "unknown",
-          "reason": "legacy snapshot did not retain per-scope access confirmation"
+          "status": "observed",
+          "collectionContextRole": "restricted_process",
+          "matchingEntryCount": 0
         },
         {
           "role": "local_machine_32",
-          "status": "unsupported",
-          "collectionContextRole": "unknown",
-          "reason": "legacy snapshot did not retain per-scope access confirmation"
+          "status": "observed",
+          "collectionContextRole": "restricted_process",
+          "matchingEntryCount": 0
         },
         {
           "role": "loaded_user_profiles",
           "status": "unsupported",
-          "collectionContextRole": "unknown",
-          "reason": "legacy snapshot did not retain per-scope access confirmation"
+          "collectionContextRole": "restricted_process",
+          "reason": "registry_scope_query_failed"
         }
       ],
       "matchingEntries": [],
       "conclusion": "unknown"
     },
     "scopedProcesses": {
-      "status": "observed",
-      "processNames": [
-        "Local Flow.exe",
-        "notepad.exe"
-      ],
-      "scope": "exact known Local Flow executable roles plus notepad.exe",
-      "matchingProcessCount": 0
+      "status": "unsupported",
+      "reason": "PowerShell query failed: Get-CimInstance : �ܾ����� \r\n����λ�� ��:5 �ַ�: 11\r\n+           Get-CimInstance Win32_Process -ErrorAction Stop |\r\n+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : PermissionDenied: (root/cimv2:Win32_Process:String) [Get-CimInstance], CimException\r\n    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand"
     },
     "temporaryTestArtifacts": {
       "status": "observed",

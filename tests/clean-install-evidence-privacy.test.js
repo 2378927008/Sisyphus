@@ -75,7 +75,7 @@ test("role placeholders survive colliding sensitive-token names", async () => {
   const manifest = await loadEvidenceFixture();
   manifest.source.normalizedExamples = allowed;
   const options = {
-    sensitiveTokens: ["app", "user", "install"]
+    sensitiveTokens: ["app", "profile", "install"]
   };
 
   assert.deepEqual(

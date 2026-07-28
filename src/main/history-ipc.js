@@ -1,3 +1,5 @@
+import { toRendererHistoryActionResult } from "./product-ui-results.js";
+
 const invalidRequestResult = { ok: false, reason: "invalid_request" };
 const maxHistoryIdLength = 128;
 const maxHistoryTextLength = 100000;
@@ -10,7 +12,9 @@ export function wireHistoryIpc({
     if (!isValidHistoryUpdatePayload(payload)) {
       return invalidRequestResult;
     }
-    return historyActions.updateText(payload.id, payload.text);
+    return toRendererHistoryActionResult(
+      await historyActions.updateText(payload.id, payload.text)
+    );
   });
 
   ipcMain.handle("history:reprocess", async (event, id) => {
@@ -21,7 +25,7 @@ export function wireHistoryIpc({
     ) {
       return invalidRequestResult;
     }
-    return historyActions.reprocess(id);
+    return toRendererHistoryActionResult(await historyActions.reprocess(id));
   });
 }
 
