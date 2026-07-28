@@ -520,7 +520,7 @@ test("required PNG captures re-focus and verify the rendered focus treatment at 
   );
   assert.match(
     visualSource,
-    /function assertCapturedFocusTreatment\(image, focusState, label\)[\s\S]*?image\.toBitmap\(\)/
+    /measureFocusRingCoverage\(\{[\s\S]*?bitmap:\s*image\.toBitmap\(\)/
   );
   assert.match(visualSource, /focusState\.outlineColor\.match/);
   assert.match(visualSource, /focusState\.rect\.(?:left|top|right|bottom)/);
@@ -530,7 +530,7 @@ test("required PNG captures re-focus and verify the rendered focus treatment at 
   );
   assert.match(
     visualSource,
-    /const focusColorTolerance = 36;[\s\S]*?Math\.abs\(channel - expected\[index\]\) <= focusColorTolerance/
+    /colorTolerance:\s*36,[\s\S]*?minimumEdgeCoverage:\s*0\.5/
   );
   assert.match(
     styles,
@@ -543,6 +543,7 @@ test("real HUD collision checks include every independently laid-out visible reg
     new URL("../scripts/electron-visual-smoke.mjs", import.meta.url),
     "utf8"
   );
+  const styles = await readFile(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
   const hudStateSource = visualSource.slice(
     visualSource.indexOf("function readHudVisualState"),
     visualSource.indexOf("async function setViewport")
@@ -563,6 +564,23 @@ test("real HUD collision checks include every independently laid-out visible reg
   assert.match(
     hudStateSource,
     /for \(let index = 0; index < collisionRegions\.length; index \+= 1\)[\s\S]*?collisionRegions\[index\]\.id \+ ' overlaps ' \+ collisionRegions\[other\]\.id/
+  );
+  assert.match(hudStateSource, /visibleRegionIds:\s*collisionRegions\.map\(\(element\) => element\.id\)/);
+  assert.match(
+    visualSource,
+    /const expectedRecordingRegionIds = \[[\s\S]*?"hudTimer"[\s\S]*?"hudCancel"[\s\S]*?"hudStop"[\s\S]*?\]/
+  );
+  assert.match(
+    visualSource,
+    /const expectedWarningRegionIds = \[[\s\S]*?"hudMessage"[\s\S]*?"hudOpenMain"[\s\S]*?\]/
+  );
+  assert.match(
+    visualSource,
+    /phase:\s*"warning"[\s\S]*?state\.phase === "warning"[\s\S]*?state\.openMainVisible[\s\S]*?assertHudVisualState\(warningLayout, expectedWarningRegionIds/
+  );
+  assert.match(
+    styles,
+    /\.hud-actions\s*\{[^}]*display:\s*grid[^}]*\}[\s\S]*?\.hud-recording-actions,\s*\.hud-open-button\s*\{[^}]*grid-area:\s*1\s*\/\s*1/s
   );
 });
 

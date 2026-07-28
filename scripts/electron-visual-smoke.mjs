@@ -12,6 +12,10 @@ import {
   appSmokeFixtureSettings,
   createAppSmokeHistoryFixtures
 } from "./electron-app-smoke-fixtures.mjs";
+import {
+  measureFocusRingCoverage,
+  validateHudVisualState
+} from "./visual-regression-assertions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, "..");
@@ -32,6 +36,20 @@ const expectedArtifacts = [
   "master-detail-list.png",
   "master-detail-editor.png",
   "reference-comparison.png"
+];
+const expectedRecordingRegionIds = [
+  "hudWaveform",
+  "hudTitle",
+  "hudMessage",
+  "hudTimer",
+  "hudCancel",
+  "hudStop"
+];
+const expectedWarningRegionIds = [
+  "hudWaveform",
+  "hudTitle",
+  "hudMessage",
+  "hudOpenMain"
 ];
 const smokeIpcChannels = [
   "settings:get",
@@ -69,6 +87,7 @@ const insertTextCalls = [];
 const rendererMessages = [];
 const visualMeasurements = [];
 const focusCaptures = [];
+const hudStates = [];
 const windows = new Set();
 
 app.setPath("userData", path.join(outputDir, "electron-profile"));
@@ -190,6 +209,7 @@ async function runVisualSmoke() {
       zoomFactor: 2,
       zoomWorkflow: ["search", "select", "edit", "copy", "insert"],
       focusCaptures,
+      hudStates,
       measurements: visualMeasurements
     }, null, 2));
     clearTimeout(timeout);
@@ -446,13 +466,67 @@ async function captureRecordingHud() {
     `),
     (state) => state.phase === "recording" && state.stopVisible && state.title === "正在录音"
   );
-  const hudLayout = await readHudVisualState(hudWindow);
-  assert.deepEqual(hudLayout.clipped, [], "460x72 HUD content must not clip");
-  assert.deepEqual(hudLayout.overlaps, [], "460x72 HUD controls must not overlap");
+  const recordingLayout = await readHudVisualState(hudWindow);
+  assertHudVisualState(recordingLayout, expectedRecordingRegionIds, "recording");
   const image = await captureChecked(hudWindow, "recording HUD");
   assert.equal(image.getSize().width, 460);
   assert.equal(image.getSize().height, 72);
+
+  hudWindow.webContents.send("system-input:status", {
+    phase: "warning",
+    language: "zh-Hans",
+    reason: "paste_failed",
+    updatedAt: new Date().toISOString()
+  });
+  await waitForRenderer(
+    hudWindow,
+    () => hudWindow.webContents.executeJavaScript(`
+      (() => {
+        const root = document.querySelector('#hudRoot');
+        const openMain = document.querySelector('#hudOpenMain');
+        return {
+          phase: root?.dataset.phase || '',
+          openMainVisible: Boolean(
+            openMain &&
+            !openMain.hidden &&
+            openMain.getBoundingClientRect().width > 0 &&
+            openMain.getBoundingClientRect().height > 0
+          ),
+          title: document.querySelector('#hudTitle')?.textContent || ''
+        };
+      })()
+    `),
+    (state) => state.phase === "warning" && state.openMainVisible && state.title === "需要确认"
+  );
+  const warningLayout = await readHudVisualState(hudWindow);
+  assertHudVisualState(warningLayout, expectedWarningRegionIds, "warning");
   return image;
+}
+
+function assertHudVisualState(layout, expectedRegionIds, phase) {
+  const validation = validateHudVisualState(layout, expectedRegionIds);
+  assert.deepEqual(
+    layout.visibleRegionIds,
+    expectedRegionIds,
+    `${phase} 460x72 HUD visible regions`
+  );
+  assert.deepEqual(
+    layout.clipped,
+    [],
+    `${phase} 460x72 HUD content must not clip: ${JSON.stringify(layout.regionMetrics)}`
+  );
+  assert.deepEqual(layout.overlaps, [], `${phase} 460x72 HUD controls must not overlap`);
+  assert.equal(
+    validation.passed,
+    true,
+    `${phase} 460x72 HUD visual state: ${validation.errors.join("; ")}`
+  );
+  hudStates.push({
+    phase,
+    visibleRegionIds: layout.visibleRegionIds,
+    clipped: layout.clipped,
+    overlaps: layout.overlaps
+  });
 }
 
 function readHudVisualState(window) {
@@ -478,6 +552,24 @@ function readHudVisualState(window) {
       const collisionRegions = collisionSelectors
         .map((selector) => document.querySelector(selector))
         .filter(visible);
+      const regionMetrics = collisionRegions.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          id: element.id,
+          rect: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height
+          },
+          clientWidth: element.clientWidth,
+          clientHeight: element.clientHeight,
+          scrollWidth: element.scrollWidth,
+          scrollHeight: element.scrollHeight
+        };
+      });
       const clipped = collisionRegions.flatMap((element) => {
         const rect = element.getBoundingClientRect();
         const outside = (
@@ -507,7 +599,12 @@ function readHudVisualState(window) {
           }
         }
       }
-      return { clipped, overlaps };
+      return {
+        visibleRegionIds: collisionRegions.map((element) => element.id),
+        regionMetrics,
+        clipped,
+        overlaps
+      };
     })()
   `);
 }
@@ -819,13 +916,15 @@ async function captureChecked(
   const image = await window.webContents.capturePage();
   assertCaptureHasContent(image, label);
   if (finalFocusState) {
-    assertCapturedFocusTreatment(image, finalFocusState, focusLabel);
+    const coverage = assertCapturedFocusTreatment(image, finalFocusState, focusLabel);
     focusCaptures.push({
       label: focusLabel,
       selector: focusTarget,
       treatmentSelector: focusTreatment,
       rect: finalFocusState.rect,
-      outlineColor: finalFocusState.outlineColor
+      outlineColor: finalFocusState.outlineColor,
+      minimumEdgeCoverage: coverage.minimumEdgeCoverage,
+      edges: coverage.edges
     });
   }
   return image;
@@ -837,9 +936,7 @@ function assertCapturedFocusTreatment(image, focusState, label) {
   );
   assert.ok(colorMatch, `${label} focus color must be an RGB value`);
   const expected = colorMatch.slice(1, 4).map(Number);
-  const focusColorTolerance = 36;
   const size = image.getSize();
-  const bitmap = image.toBitmap();
   const scaleX = size.width / focusState.viewport.width;
   const scaleY = size.height / focusState.viewport.height;
   const rect = {
@@ -856,33 +953,23 @@ function assertCapturedFocusTreatment(image, focusState, label) {
     4,
     Math.ceil((focusState.outlineWidth + Math.abs(focusState.outlineOffset) + 2) * scaleY)
   );
-  const scan = {
-    left: Math.max(0, rect.left - bandX),
-    top: Math.max(0, rect.top - bandY),
-    right: Math.min(size.width - 1, rect.right + bandX),
-    bottom: Math.min(size.height - 1, rect.bottom + bandY)
-  };
-  let matchingPixels = 0;
-  for (let y = scan.top; y <= scan.bottom; y += 1) {
-    for (let x = scan.left; x <= scan.right; x += 1) {
-      const nearVerticalEdge = Math.abs(x - rect.left) <= bandX || Math.abs(x - rect.right) <= bandX;
-      const nearHorizontalEdge = Math.abs(y - rect.top) <= bandY || Math.abs(y - rect.bottom) <= bandY;
-      if (!nearVerticalEdge && !nearHorizontalEdge) continue;
-      const offset = (y * size.width + x) * 4;
-      const actual = [bitmap[offset + 2], bitmap[offset + 1], bitmap[offset]];
-      if (
-        actual.every(
-          (channel, index) => Math.abs(channel - expected[index]) <= focusColorTolerance
-        )
-      ) {
-        matchingPixels += 1;
-      }
-    }
-  }
-  assert.ok(
-    matchingPixels >= 8,
-    `${label} capture must contain its visible focus treatment; matched ${matchingPixels} pixels`
+  const coverage = measureFocusRingCoverage({
+    bitmap: image.toBitmap(),
+    imageWidth: size.width,
+    imageHeight: size.height,
+    rect,
+    bandX,
+    bandY,
+    expectedColor: expected,
+    colorTolerance: 36,
+    minimumEdgeCoverage: 0.5
+  });
+  assert.equal(
+    coverage.passed,
+    true,
+    `${label} capture must contain proportional focus coverage on all edges: ${JSON.stringify(coverage)}`
   );
+  return coverage;
 }
 
 function assertCaptureHasContent(image, label) {

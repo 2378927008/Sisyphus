@@ -1530,8 +1530,14 @@ body[data-primary-view="snippets"] #commandStrip {
 }
 
 .hud-actions {
+  display: grid;
   width: 160px;
   height: 40px;
+}
+
+.hud-recording-actions,
+.hud-open-button {
+  grid-area: 1 / 1;
 }
 
 .hud-actions [hidden] {
