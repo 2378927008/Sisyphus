@@ -160,8 +160,18 @@ export function validateIsolatedInstallEvidence(manifest) {
   );
   addError(
     errors,
-    safety?.shellFoldersIsolated === true,
-    "shellFoldersIsolated must be true"
+    safety?.knownFolderMode === "clean_runner_profile_observed",
+    "knownFolderMode must be clean_runner_profile_observed"
+  );
+  addError(
+    errors,
+    safety?.knownFoldersObserved === true,
+    "knownFoldersObserved must be true"
+  );
+  addError(
+    errors,
+    safety?.shortcutsAbsentBefore === true,
+    "shortcutsAbsentBefore must be true"
   );
   addError(
     errors,
@@ -230,7 +240,7 @@ export function validateIsolatedInstallEvidence(manifest) {
   );
   addError(
     errors,
-    shortcut?.path?.startsWith("<isolated-test-profile>/"),
+    shortcut?.path?.startsWith("<clean-runner-profile>/"),
     "lifecycle.installation.startMenuShortcut.path is invalid"
   );
   addError(
@@ -242,6 +252,27 @@ export function validateIsolatedInstallEvidence(manifest) {
     errors,
     SHA256_PATTERN.test(shortcut?.sha256 || ""),
     "lifecycle.installation.startMenuShortcut.sha256 must be SHA-256"
+  );
+  const desktopShortcut = installation?.desktopShortcut;
+  addError(
+    errors,
+    desktopShortcut?.status === "observed",
+    "lifecycle.installation.desktopShortcut.status must be observed"
+  );
+  addError(
+    errors,
+    desktopShortcut?.path?.startsWith("<clean-runner-profile>/"),
+    "lifecycle.installation.desktopShortcut.path is invalid"
+  );
+  addError(
+    errors,
+    desktopShortcut?.targetRole === "isolated_install_executable",
+    "lifecycle.installation.desktopShortcut.targetRole is invalid"
+  );
+  addError(
+    errors,
+    SHA256_PATTERN.test(desktopShortcut?.sha256 || ""),
+    "lifecycle.installation.desktopShortcut.sha256 must be SHA-256"
   );
   const registration = installation?.uninstallRegistration;
   addError(

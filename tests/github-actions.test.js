@@ -58,6 +58,10 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /node-version:\s*22/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /setup-whisper\.ps1 -Model base -NodeExe node/);
+  assert.match(
+    workflow,
+    /LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS:\s*https:\/\/www\.telestream\.net\/download-files\/ggml\/ggml-base\.bin/
+  );
   assert.match(workflow, /setup-llm\.ps1 -RuntimeOnly/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run check:app/);

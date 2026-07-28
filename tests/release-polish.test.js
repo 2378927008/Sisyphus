@@ -25,6 +25,7 @@ test("README contains readable Chinese first-run guidance", async () => {
   );
   assert.doesNotMatch(readme, /设置` > `模型下载源/);
   assert.doesNotMatch(readme, /copy the printed executable and model paths into the app settings/i);
+  assert.doesNotMatch(readme, /[a-z]:\\Users\\[^\\\r\n]+\\/i);
   assert.doesNotMatch(readme, /涓|鍦|璇|鐨|妯|榛/);
 });
 

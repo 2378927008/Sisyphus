@@ -47,6 +47,8 @@ jobs:
 
       - name: Prepare bundled Whisper runtime and model
         shell: pwsh
+        env:
+          LOCAL_FLOW_WHISPER_MODEL_MIRROR_URLS: https://www.telestream.net/download-files/ggml/ggml-base.bin
         run: .\scripts\setup-whisper.ps1 -Model base -NodeExe node
 
       - name: Prepare bundled llama.cpp runtime

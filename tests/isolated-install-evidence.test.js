@@ -28,7 +28,9 @@ function createPassedEvidence() {
       currentUserRegistrationCountBefore: 0,
       currentUserInstallKeyExistedBefore: false,
       installRootRole: "project_tmp",
-      shellFoldersIsolated: true,
+      knownFolderMode: "clean_runner_profile_observed",
+      knownFoldersObserved: true,
+      shortcutsAbsentBefore: true,
       shellFoldersRestored: true
     },
     releaseArtifacts: {
@@ -71,9 +73,15 @@ function createPassedEvidence() {
         ),
         startMenuShortcut: {
           status: "observed",
-          path: "<isolated-test-profile>/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Local Flow.lnk",
+          path: "<clean-runner-profile>/Start Menu/Programs/Local Flow.lnk",
           targetRole: "isolated_install_executable",
           sha256: "6".repeat(64)
+        },
+        desktopShortcut: {
+          status: "observed",
+          path: "<clean-runner-profile>/Desktop/Local Flow.lnk",
+          targetRole: "isolated_install_executable",
+          sha256: "7".repeat(64)
         },
         uninstallRegistration: {
           status: "observed",
@@ -171,6 +179,22 @@ test("isolated install evidence rejects pre-existing current-user registration",
   );
 });
 
+test("isolated install evidence rejects overwritten runner shortcuts", () => {
+  const evidence = createPassedEvidence();
+  evidence.safety.shortcutsAbsentBefore = false;
+  delete evidence.lifecycle.installation.desktopShortcut;
+
+  const result = validateIsolatedInstallEvidence(evidence);
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    result.errors.some((error) => error.includes("shortcutsAbsentBefore"))
+  );
+  assert.ok(
+    result.errors.some((error) => error.includes("desktopShortcut.status"))
+  );
+});
+
 test("isolated install root must remain under the project .tmp directory", () => {
   const projectRoot = path.resolve("C:/workspace/local-flow");
 
@@ -226,7 +250,7 @@ test("uninstall registration must match the packaged product identity", () => {
   );
 });
 
-test("isolated install smoke keeps every mutable Windows path inside its temporary profile", async () => {
+test("isolated install smoke guards the clean runner profile and temporary install root", async () => {
   const source = await readFile(
     new URL("../scripts/isolated-install-smoke.mjs", import.meta.url),
     "utf8"
@@ -236,7 +260,8 @@ test("isolated install smoke keeps every mutable Windows path inside its tempora
   assert.match(source, /currentUserRegistrationCountBefore/);
   assert.match(source, /installRegistryGuid/);
   assert.match(source, /existing_install_key_detected/);
-  assert.match(source, /User Shell Folders/);
+  assert.match(source, /queryWindowsKnownFolders/);
+  assert.match(source, /existing_shortcut_detected/);
   assert.match(source, /shellFoldersRestored/);
   assert.match(source, /\["\/S", "\/currentuser"/);
   assert.match(source, /--user-data-dir=/);
@@ -244,6 +269,10 @@ test("isolated install smoke keeps every mutable Windows path inside its tempora
   assert.match(
     source,
     /const startMenuShortcutSha256 = await sha256File\(startMenuShortcut\)/
+  );
+  assert.match(
+    source,
+    /const desktopShortcutSha256 = await sha256File\(desktopShortcut\)/
   );
   assert.match(source, /sha256: startMenuShortcutSha256/);
   assert.match(source, /let smokeStage = "startup"/);
@@ -258,10 +287,13 @@ test("isolated install smoke keeps every mutable Windows path inside its tempora
     /shellFoldersRestored = shellSnapshotsMatch\(\s+shellBackup,\s+await captureShellFolders\(\)/
   );
   assert.match(source, /finally \{[\s\S]+await rmWithRetry\(runRoot\)/);
+  assert.match(source, /preflightSafe && installerAttempted/);
+  assert.match(source, /removeShortcutIfOwned/);
   assert.match(source, /let primaryError = null/);
   assert.match(source, /primaryError = error/);
   assert.match(source, /cwd: projectRoot/);
   assert.doesNotMatch(source, /Get-CimInstance Win32_Process/);
   assert.match(source, /finally/);
   assert.doesNotMatch(source, /E:\\\\local flow/i);
+  assert.doesNotMatch(source, /USERPROFILE:\s*profileRoot/);
 });

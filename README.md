@@ -109,7 +109,7 @@ Open `设置` > `快捷键` to tune the desktop input loop:
 在项目文件夹中打开 PowerShell：
 
 ```powershell
-cd C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github
+# 在仓库根目录打开 PowerShell 后运行：
 .\Start-LocalFlow.cmd
 ```
 

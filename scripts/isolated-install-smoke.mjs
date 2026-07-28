@@ -18,6 +18,7 @@ import {
   validateIsolatedInstallEvidence
 } from "./isolated-install-evidence-core.mjs";
 import { validateEvidenceMatchesRelease } from "./clean-install-evidence-core.mjs";
+import { queryWindowsKnownFolders } from "./windows-known-folders.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -36,10 +37,6 @@ const runRoot = path.join(
 const installRoot = assertSafeIsolatedRoot(
   projectRoot,
   path.join(runRoot, "app")
-);
-const profileRoot = assertSafeIsolatedRoot(
-  projectRoot,
-  path.join(runRoot, "profile")
 );
 const userDataRoot = assertSafeIsolatedRoot(
   projectRoot,
@@ -296,29 +293,6 @@ function shellSnapshotsMatch(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function verifyShellFolderIsolation(paths, isolatedEnvironment) {
-  const result = await runPowerShellJson(`
-    $actual = [ordered]@{
-      appData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
-      localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-      desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
-      programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
-    }
-    [pscustomobject]@{
-      appData = [string]$actual.appData
-      localAppData = [string]$actual.localAppData
-      desktop = [string]$actual.desktop
-      programs = [string]$actual.programs
-    } | ConvertTo-Json -Compress
-  `, isolatedEnvironment);
-  return (
-    pathsEqual(result.appData, paths.appData) &&
-    pathsEqual(result.localAppData, paths.localAppData) &&
-    pathsEqual(result.desktop, paths.desktop) &&
-    pathsEqual(result.programs, paths.programs)
-  );
-}
-
 async function queryLocalFlowRegistrations() {
   const rows = await runPowerShellJson(`
     $ErrorActionPreference = 'Stop'
@@ -455,7 +429,8 @@ async function inspectShortcut(shortcutPath) {
 async function captureProtectedState(
   shellSnapshot,
   protectedRoot,
-  originalShortcutPath,
+  startMenuShortcutPath,
+  desktopShortcutPath,
   installRegistryGuid
 ) {
   const registrations = await queryLocalFlowRegistrations();
@@ -476,11 +451,18 @@ async function captureProtectedState(
       }
     }
   }
-  const originalShortcut = await exists(originalShortcutPath)
+  const startMenuShortcut = await exists(startMenuShortcutPath)
     ? {
         exists: true,
-        bytes: (await stat(originalShortcutPath)).size,
-        sha256: await sha256File(originalShortcutPath)
+        bytes: (await stat(startMenuShortcutPath)).size,
+        sha256: await sha256File(startMenuShortcutPath)
+      }
+    : { exists: false };
+  const desktopShortcut = await exists(desktopShortcutPath)
+    ? {
+        exists: true,
+        bytes: (await stat(desktopShortcutPath)).size,
+        sha256: await sha256File(desktopShortcutPath)
       }
     : { exists: false };
   return {
@@ -488,8 +470,21 @@ async function captureProtectedState(
     registrations,
     installRegistry,
     protectedFiles,
-    originalShortcut
+    startMenuShortcut,
+    desktopShortcut
   };
+}
+
+async function removeShortcutIfOwned(shortcutPath, installedExecutable) {
+  if (!(await exists(shortcutPath))) {
+    return false;
+  }
+  const shortcut = await inspectShortcut(shortcutPath);
+  if (!pathsEqual(shortcut.target, installedExecutable)) {
+    return false;
+  }
+  await rm(shortcutPath, { force: true });
+  return true;
 }
 
 async function releaseArtifacts(pkg) {
@@ -569,50 +564,23 @@ async function runSmoke() {
     installRoot,
     `Uninstall ${productName}.exe`
   );
-  const appData = path.join(profileRoot, "AppData", "Roaming");
-  const localAppData = path.join(profileRoot, "AppData", "Local");
-  const desktop = path.join(profileRoot, "Desktop");
-  const startMenu = path.join(
-    appData,
-    "Microsoft",
-    "Windows",
-    "Start Menu"
-  );
-  const programs = path.join(startMenu, "Programs");
+  smokeStage = "resolve_known_folders";
+  const knownFolders = await queryWindowsKnownFolders();
+  const desktop = knownFolders.desktop;
+  const programs = knownFolders.programs;
   const startMenuShortcut = path.join(programs, `${productName}.lnk`);
   const desktopShortcut = path.join(desktop, `${productName}.lnk`);
-  const temporary = path.join(profileRoot, "Temp");
+  const temporary = path.join(runRoot, "temp");
   const isolatedEnvironment = {
     ...process.env,
-    USERPROFILE: profileRoot,
-    APPDATA: appData,
-    LOCALAPPDATA: localAppData,
     TEMP: temporary,
-    TMP: temporary,
-    HOMEDRIVE: path.parse(profileRoot).root.replace(/[\\/]$/, ""),
-    HOMEPATH: profileRoot.slice(path.parse(profileRoot).root.length - 1)
+    TMP: temporary
   };
-  const shellPaths = {
-    appData,
-    localAppData,
-    desktop,
-    programs,
-    startMenu
-  };
-  const originalAppData = process.env.APPDATA || "";
-  const originalShortcutPath = path.join(
-    originalAppData,
-    "Microsoft",
-    "Windows",
-    "Start Menu",
-    "Programs",
-    `${productName}.lnk`
-  );
   const protectedRoot = process.env.LOCAL_FLOW_PROTECTED_INSTALL_ROOT || "";
   let shellBackup = null;
   let shellFoldersRestored = false;
-  let installed = false;
-  let isolatedRegistrationCreated = false;
+  let preflightSafe = false;
+  let installerAttempted = false;
   let launchedProcess = null;
   let primaryError = null;
 
@@ -624,10 +592,6 @@ async function runSmoke() {
       [
         installRoot,
         userDataRoot,
-        appData,
-        localAppData,
-        desktop,
-        programs,
         temporary
       ].map((directory) => mkdir(directory, { recursive: true }))
     );
@@ -651,6 +615,15 @@ async function runSmoke() {
         "The isolated install check refused to run because this Windows account already has a Local Flow installation."
       );
     }
+    const startMenuShortcutExistedBefore = await exists(startMenuShortcut);
+    const desktopShortcutExistedBefore = await exists(desktopShortcut);
+    if (startMenuShortcutExistedBefore || desktopShortcutExistedBefore) {
+      throw new SmokeError(
+        "existing_shortcut_detected",
+        "The isolated install check refused to replace an existing Local Flow shortcut."
+      );
+    }
+    preflightSafe = true;
 
     smokeStage = "capture_shell_folders";
     shellBackup = await captureShellFolders();
@@ -663,26 +636,16 @@ async function runSmoke() {
     const protectedStateBefore = await captureProtectedState(
       shellBackup,
       protectedRoot,
-      originalShortcutPath,
+      startMenuShortcut,
+      desktopShortcut,
       installRegistryGuid
     );
     const protectedStateSha256 = sha256Value(protectedStateBefore);
     smokeStage = "execution_context";
     const executionContextRole = await queryExecutionContextRole();
 
-    smokeStage = "verify_shell_folder_isolation";
-    const shellFoldersIsolated = await verifyShellFolderIsolation(
-      shellPaths,
-      isolatedEnvironment
-    );
-    if (!shellFoldersIsolated) {
-      throw new SmokeError(
-        "shell_folder_isolation_failed",
-        "Windows shell folders could not be isolated for the install check."
-      );
-    }
-
     smokeStage = "install";
+    installerAttempted = true;
     const installerResult = await runProcess(
       installerPath,
       ["/S", "/currentuser", `/D=${installRoot}`],
@@ -697,8 +660,6 @@ async function runSmoke() {
         "The Windows installer did not complete successfully."
       );
     }
-    installed = true;
-
     smokeStage = "verify_installed_files";
     await waitFor(
       async () =>
@@ -753,7 +714,15 @@ async function runSmoke() {
         "The isolated desktop shortcut was not created."
       );
     }
+    const desktopLink = await inspectShortcut(desktopShortcut);
+    if (!pathsEqual(desktopLink.target, installedExecutable)) {
+      throw new SmokeError(
+        "desktop_shortcut_target_mismatch",
+        "The isolated desktop shortcut points to the wrong application."
+      );
+    }
     const startMenuShortcutSha256 = await sha256File(startMenuShortcut);
+    const desktopShortcutSha256 = await sha256File(desktopShortcut);
 
     smokeStage = "verify_install_registration";
     const registrationsAfterInstall = await queryLocalFlowRegistrations();
@@ -797,7 +766,6 @@ async function runSmoke() {
         "The isolated installer registration points outside the test root."
       );
     }
-    isolatedRegistrationCreated = true;
 
     const userDataArgument = `--user-data-dir=${userDataRoot}`;
     smokeStage = "first_launch";
@@ -899,8 +867,6 @@ async function runSmoke() {
       "uninstall_cleanup_incomplete",
       "The isolated uninstall left application, shortcut, or registration residue."
     );
-    installed = false;
-    isolatedRegistrationCreated = false;
     const matchingProcessCount = launchedProcess?.pid &&
       isProcessAlive(launchedProcess.pid)
       ? 1
@@ -922,7 +888,8 @@ async function runSmoke() {
     const protectedStateAfter = await captureProtectedState(
       await captureShellFolders(),
       protectedRoot,
-      originalShortcutPath,
+      startMenuShortcut,
+      desktopShortcut,
       installRegistryGuid
     );
     const protectedStateAfterSha256 = sha256Value(protectedStateAfter);
@@ -945,7 +912,11 @@ async function runSmoke() {
         currentUserRegistrationCountBefore,
         currentUserInstallKeyExistedBefore,
         installRootRole: "project_tmp",
-        shellFoldersIsolated: true,
+        knownFolderMode: "clean_runner_profile_observed",
+        knownFoldersObserved: true,
+        shortcutsAbsentBefore:
+          !startMenuShortcutExistedBefore &&
+          !desktopShortcutExistedBefore,
         shellFoldersRestored
       },
       releaseArtifacts: release,
@@ -963,9 +934,15 @@ async function runSmoke() {
           uninstaller: uninstallerEvidence,
           startMenuShortcut: {
             status: "observed",
-            path: `<isolated-test-profile>/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/${productName}.lnk`,
+            path: `<clean-runner-profile>/Start Menu/Programs/${productName}.lnk`,
             targetRole: "isolated_install_executable",
             sha256: startMenuShortcutSha256
+          },
+          desktopShortcut: {
+            status: "observed",
+            path: `<clean-runner-profile>/Desktop/${productName}.lnk`,
+            targetRole: "isolated_install_executable",
+            sha256: desktopShortcutSha256
           },
           uninstallRegistration: {
             status: "observed",
@@ -1054,12 +1031,12 @@ async function runSmoke() {
       await terminateProcessTree(launchedProcess.pid);
     }
     let cleanupError = null;
-    try {
-      if (
-        installed &&
-        isolatedRegistrationCreated &&
-        (await exists(uninstallerPath))
-      ) {
+    if (
+      preflightSafe &&
+      installerAttempted &&
+      (await exists(uninstallerPath))
+    ) {
+      try {
         await runProcess(
           uninstallerPath,
           ["/S", "/currentuser"],
@@ -1075,10 +1052,23 @@ async function runSmoke() {
           "cleanup_uninstall_incomplete",
           "The isolated application cleanup did not complete."
         );
+      } catch (error) {
+        cleanupError = error;
       }
-      await removeIsolatedRegistrations(installRegistryGuid);
-    } catch (error) {
-      cleanupError = error;
+    }
+    if (preflightSafe && installerAttempted) {
+      try {
+        await removeIsolatedRegistrations(installRegistryGuid);
+      } catch (error) {
+        cleanupError ||= error;
+      }
+      for (const shortcutPath of [startMenuShortcut, desktopShortcut]) {
+        try {
+          await removeShortcutIfOwned(shortcutPath, installedExecutable);
+        } catch (error) {
+          cleanupError ||= error;
+        }
+      }
     }
     try {
       await rmWithRetry(runRoot);
