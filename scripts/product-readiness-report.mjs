@@ -15,6 +15,17 @@ function buildReleaseRequirements(pkg) {
     { path: `${outputDir}/${installerName}`, minBytes: 1024 * 1024, area: "windows-installer" },
     { path: `${outputDir}/win-unpacked/${appExeName}`, minBytes: 1024 * 1024, area: "windows-unpacked-app" },
     { path: "assets/local-flow-icon.ico", minBytes: 1024, area: "windows-branding" },
+    {
+      path: "docs/superpowers/specs/2026-07-27-windows-ui-v4-startup-reliability-design.md",
+      minBytes: 4096,
+      area: "windows-v4-design-spec",
+      contentIncludes: ["Local Flow Windows UI V4", "local-flow-windows-ui-v4-fusion.png"]
+    },
+    {
+      path: "docs/design/local-flow-windows-ui-v4-fusion.png",
+      minBytes: 100_000,
+      area: "windows-v4-approved-reference"
+    },
     { path: "ios/LocalFlowiOS/README.md", minBytes: 1024, area: "iphone-source-handoff" },
     {
       path: "ios/LocalFlowiOS/project.yml",
@@ -103,7 +114,18 @@ function buildReleaseRequirements(pkg) {
         "Settings > General > Keyboard > Keyboards"
       ]
     },
-    { path: "docs/release/product-trial-guide.md", minBytes: 1024, area: "trial-guide" }
+    {
+      path: "docs/release/product-trial-guide.md",
+      minBytes: 1024,
+      area: "trial-guide",
+      contentIncludes: [
+        "桌面快捷方式",
+        "开始菜单",
+        "自动（同语音）",
+        "不影响本地 Whisper",
+        "卸载"
+      ]
+    }
   ];
 }
 

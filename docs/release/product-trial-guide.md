@@ -1,59 +1,76 @@
-# Local Flow 试用指南
+# Local Flow 中文试用指南
 
-这份指南用于确认当前产品包是否已经达到“可以试用”的状态。它不假设用户有 OpenAI API key；默认路径仍然是本地 Windows 应用加免费语音识别链路。
+Local Flow 是一款 Windows 语音输入软件，不是默认翻译软件。日常使用通过全局快捷键、录音 HUD 和系统托盘完成；主窗口用于查看历史、编辑文本、管理个人词典和快捷短语。默认语音识别使用本地 Whisper，不需要 OpenAI API key。
 
-## Windows 试用路径
+## 安装与启动
 
-1. 安装包位置：`dist\Local Flow Setup 0.1.0.exe`
-2. 双击安装后启动 `Local Flow`。首次录音时，Windows 会弹出麦克风权限；必须允许，否则主按钮会保持不可用或进入权限错误状态。
-3. 默认快捷键：`Ctrl + Alt + Space`。按一次开始录音，再按一次停止并把识别文本输入到当前光标位置。
-4. 输出语言选择为 `Auto` 时，产品目标是保留你实际说话的语言；它不是默认翻译成英文。只有明确选择目标输出语言时，才进入翻译/改写输出链路。
-5. 如果托盘图标可见，可以从托盘打开主窗口、暂停全局快捷键、打开设置或退出应用。
+本地生成的安装包是 `dist\Local Flow Setup 0.1.0.exe`，免安装版本位于 `dist\win-unpacked`。
 
-## GitHub 安装包下载路径
+1. 运行安装包，选择一个明确的非系统目录完成安装。
+2. 安装结束后，可通过桌面快捷方式或开始菜单中的 `Local Flow` 启动。
+3. 正常手动启动会显示主窗口。再次点击桌面快捷方式或开始菜单时，应唤回同一个窗口，不会再启动第二套托盘、快捷键或录音服务。
+4. 首次录音时允许 Windows 麦克风权限。拒绝后可在 Windows 的“隐私和安全性 > 麦克风”中重新允许。
 
-仓库推送后，GitHub Actions 会运行 `Windows Installer Artifact` 工作流。打开仓库的 Actions 页面，选择最新一次 `Windows Installer Artifact` 运行，在页面底部下载 `local-flow-windows-installer` artifact。
+## 日常语音输入
 
-artifact 内包含：
+1. 把光标放到记事本、浏览器或聊天软件的输入位置。
+2. 按 `Ctrl + Alt + Space` 开始听写，再按一次停止录音并转写。
+3. 录音 HUD 会显示当前状态。点击“停止”会继续转写并插入文本；点击“取消”或按 `Escape` 会丢弃本次录音，不新增历史。
+4. 点击主窗口关闭按钮时，Local Flow 会隐藏到托盘并继续提供语音输入。每次运行会话第一次关闭时会出现一次后台运行说明；点击托盘图标可重新打开。
 
-- `Local Flow Setup 0.1.0.exe`
-- `Local Flow Setup 0.1.0.exe.blockmap`
-- `win-unpacked` 免安装启动目录
+## 历史与个性化
 
-Actions artifact 是试用分发通道，不是正式签名发布包。下载后如果 Windows SmartScreen 提示未知发布者，需要选择保留/仍要运行；后续正式发布应补代码签名和 GitHub Release。
+- 在“历史记录”中搜索并选择一条记录，可以直接编辑历史内容；修改会自动保存。
+- “重新整理”会从保存的原始转写重新处理，不会反复改写已经整理过的文本。
+- “个人词典”用于保存产品名、人名和专业术语，后续整理会优先保留这些写法。
+- “快捷短语”使用精确匹配：整段语音与唤起短语一致时才展开，避免在长句内部误触发。
 
-## Windows 本地验证命令
+## 语言行为
 
-在项目根目录运行：
+- 输出语言选择“自动（同语音）”时，Local Flow 自动识别输入语言并保持同一种语言。中文输入仍输出中文，英文输入仍输出英文。
+- 仅在明确选择目标语言时才执行语言转换；未选择目标语言时不会统一输出英文。
+- Qwen 是可选的本地文本整理能力。没有安装 Qwen 时，不影响本地 Whisper 的基础听写、自动语言保持、历史编辑、个人词典和快捷短语。
+- 明确选择目标语言后，如果本地语言模型不可用，应用会给出可恢复提示，不会悄悄输出错误语言。
+
+## 卸载
+
+打开 Windows“设置 > 应用 > 已安装的应用”，找到 `Local Flow` 并选择“卸载”。卸载程序应移除安装目录、桌面快捷方式和开始菜单入口，不应删除安装目录以外的无关用户文件。
+
+## 发布前验证
+
+在项目根目录依次运行：
 
 ```powershell
 npm.cmd test
 npm.cmd run check:app
 npm.cmd run check:microphone
-npm.cmd run dist:win
-npm.cmd run verify:release
+npm.cmd run check:visual
+npm.cmd run package:win
 npm.cmd run check:packaged
+npm.cmd run dist:win
 npm.cmd run check:product
+npm.cmd run verify:release
 ```
 
-这些命令分别覆盖单元/契约测试、Electron 页面启动、麦克风可见性、NSIS 安装包构建、安装包文件完整性、打包后应用隐藏启动烟测，以及产品级交付文件检查。
+`check:packaged` 会验证隐藏启动持续存活、第二次可见启动及时退出、现有窗口被唤回，并确认没有重复的主应用实例。`verify:release` 会检查安装包、免安装程序、Whisper 运行时与基础模型、llama.cpp 运行时，以及 Qwen 可选模型清单；Qwen 模型本体不随安装包分发。
 
-## iPhone 试用路径
+## GitHub 安装包
 
-iPhone 版本当前交付的是原生 Swift/SwiftUI 源码骨架，入口在 `ios\LocalFlowiOS`。它优先使用 Apple Speech 和系统麦克风权限，不要求 OpenAI API key。
+仓库推送后，GitHub Actions 会运行 `Windows Installer Artifact` 工作流。在对应任务的产物区域下载 `local-flow-windows-installer`，其中应包含：
 
-需要在 macOS + Xcode 上完成：
+- `Local Flow Setup 0.1.0.exe`
+- `Local Flow Setup 0.1.0.exe.blockmap`
+- `win-unpacked` 免安装目录
+
+当前安装包尚未进行商业代码签名，Windows 可能显示未知发布者提示。正式公开发布前需要补充代码签名和正式 Release 流程。
+
+## iPhone 当前边界
+
+iPhone 版本仍是原生 Swift/SwiftUI 源码交付，使用 Apple Speech 与系统麦克风权限，不需要 OpenAI API key。Windows 不能运行 Xcode 或 iOS 模拟器，因此最终编译、签名、真机权限和键盘扩展行为需要在 macOS + Xcode 上确认：
 
 ```bash
 cd ios/LocalFlowiOS
 xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
-当前 Windows 机器不能运行 Xcode，也不能启动 iOS Simulator，所以 iPhone 的编译、签名、真机麦克风权限和键盘扩展行为必须在 Mac 上做最终确认。
-
-## 已知边界
-
-- Windows 包已经走 Electron + NSIS 路线，目标是后台常驻、托盘、全局快捷键和靠近输入法的输入体验。
-- iPhone 的自定义键盘扩展受 iOS 沙盒限制，安全输入框、密码框等场景不能替代系统键盘行为。
-- Apple Speech 的 `Auto` 识别在 MVP 中依赖 iOS 当前偏好语音语言；这不是完整的多语种自动识别模型。
-- 如果选择目标输出语言，但本地语言模型或免费翻译服务不可用，产品应提示降级原因，而不是悄悄输出错误语言。
+本次 Windows V4 发布不修改 iPhone 源码。

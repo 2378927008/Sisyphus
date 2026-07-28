@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { buildPackagedAppSpawnOptions } from "../scripts/packaged-start-smoke-core.mjs";
+
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
 test("package exposes Windows packaging scripts and electron-builder dependency", async () => {
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -26,6 +31,104 @@ test("packaged smoke script launches the unpacked Windows app in hidden mode", a
   assert.match(smokeSource, /maxSmokeMs/);
   assert.match(smokeSource, /child\.once\("error"/);
   assert.match(smokeSource, /process\.kill|child\.kill/);
+});
+
+test("packaged app launch allows the second instance to reveal its native window", () => {
+  assert.deepEqual(buildPackagedAppSpawnOptions(projectRoot), {
+    cwd: projectRoot,
+    stdio: "ignore",
+    windowsHide: false
+  });
+});
+
+test("packaged startup summary counts only the isolated top-level app and visible window", () => {
+  const snippet = `
+    import { summarizePackagedStartup } from "./scripts/packaged-start-smoke-core.mjs";
+
+    const exePath = "C:\\\\Apps\\\\Local Flow.exe";
+    const userDataDir = "C:\\\\Temp\\\\local-flow-smoke";
+    const processes = [
+      {
+        ProcessId: 401,
+        ExecutablePath: "C:\\\\Apps\\\\Local Flow.exe",
+        CommandLine: "\\"C:\\\\Apps\\\\Local Flow.exe\\" --user-data-dir=\\"C:\\\\Temp\\\\local-flow-smoke\\" --hidden",
+        MainWindowHandle: 9001,
+        IsWindowVisible: true
+      },
+      {
+        ProcessId: 402,
+        ExecutablePath: "C:\\\\Apps\\\\Local Flow.exe",
+        CommandLine: "\\"C:\\\\Apps\\\\Local Flow.exe\\" --type=renderer --user-data-dir=\\"C:\\\\Temp\\\\local-flow-smoke\\"",
+        MainWindowHandle: 0,
+        IsWindowVisible: false
+      },
+      {
+        ProcessId: 777,
+        ExecutablePath: "C:\\\\Other\\\\Local Flow.exe",
+        CommandLine: "\\"C:\\\\Other\\\\Local Flow.exe\\" --user-data-dir=\\"C:\\\\Temp\\\\local-flow-smoke\\"",
+        MainWindowHandle: 7001,
+        IsWindowVisible: true
+      }
+    ];
+
+    process.stdout.write(JSON.stringify(summarizePackagedStartup({
+      exePath,
+      userDataDir,
+      firstPid: 401,
+      hiddenLaunchStayedAlive: true,
+      secondLaunchExited: true,
+      processes
+    })));
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", snippet], {
+    cwd: projectRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true,
+    hiddenLaunchStayedAlive: true,
+    secondLaunchExited: true,
+    secondLaunchRevealedExistingWindow: true,
+    duplicateMainInstances: 0
+  });
+});
+
+test("packaged startup summary rejects a duplicate isolated top-level app", () => {
+  const snippet = `
+    import { summarizePackagedStartup } from "./scripts/packaged-start-smoke-core.mjs";
+
+    const processes = [501, 502].map((ProcessId) => ({
+      ProcessId,
+      ExecutablePath: "C:\\\\Apps\\\\Local Flow.exe",
+      CommandLine: \`"C:\\\\Apps\\\\Local Flow.exe" --user-data-dir="C:\\\\Temp\\\\local-flow-smoke"\`,
+      MainWindowHandle: ProcessId === 501 ? 9100 : 0,
+      IsWindowVisible: ProcessId === 501
+    }));
+
+    process.stdout.write(JSON.stringify(summarizePackagedStartup({
+      exePath: "C:\\\\Apps\\\\Local Flow.exe",
+      userDataDir: "C:\\\\Temp\\\\local-flow-smoke",
+      firstPid: 501,
+      hiddenLaunchStayedAlive: true,
+      secondLaunchExited: true,
+      processes
+    })));
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", snippet], {
+    cwd: projectRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: false,
+    hiddenLaunchStayedAlive: true,
+    secondLaunchExited: true,
+    secondLaunchRevealedExistingWindow: true,
+    duplicateMainInstances: 1
+  });
 });
 
 test("product readiness script checks Windows release and iPhone handoff artifacts", async () => {
@@ -104,6 +207,7 @@ test("electron-builder configuration targets Local Flow Windows NSIS builds", as
   assert.ok(pkg.build.files.includes("assets/**/*"));
   assert.ok(vendorResource);
   assert.ok(vendorResource.filter.includes("!**/downloads/**"));
+  assert.ok(vendorResource.filter.includes("!llm/models/**"));
 });
 
 test("tray icon asset is packaged and valid SVG", async () => {

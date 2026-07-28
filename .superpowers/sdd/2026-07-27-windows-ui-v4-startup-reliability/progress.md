@@ -42,3 +42,7 @@ Task 12: review fix round 1 implemented and verified (awaiting scoped re-review)
 Task 12: review fix round 2 implemented and verified (awaiting scoped re-review)
 Task 12: complete (commits b06412e..31317d8, final scoped review clean)
 Task 13: in progress
+Task 13: replacement implementer audited inherited changes and preserved prior work
+Task 13: packaged-start harness RED reproduced (GUI process suppressed its own native window)
+Task 13: packaged-start harness GREEN (focused 21/21; real desktop five-field JSON passed)
+Task 13: implemented and verified (awaiting independent review)
