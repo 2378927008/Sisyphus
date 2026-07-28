@@ -110,6 +110,14 @@ test("buildTrayMenuTemplate reflects recording and paused state", () => {
   assert.equal(chineseTemplate[2].label, "恢复全局快捷键");
 });
 
+test("tray dictation action is disabled with an accurate label during non-cancellable work", () => {
+  for (const phase of ["stopping", "transcribing", "polishing", "pasting"]) {
+    const item = buildTrayMenuTemplate({ state: { phase } })[1];
+    assert.equal(item.label, "Dictation in progress", phase);
+    assert.equal(item.enabled, false, phase);
+  }
+});
+
 test("buildTrayMenuTemplate marks startup checkboxes from settings", () => {
   const template = buildTrayMenuTemplate({
     settings: {

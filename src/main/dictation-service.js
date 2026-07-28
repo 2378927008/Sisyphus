@@ -60,11 +60,11 @@ export class DictationService {
         entry.pasteStatus = "complete";
       } catch (error) {
         entry.pasteStatus = "failed";
-        entry.pasteError = getErrorMessage(error);
+        entry.pasteError = getStableReason(error, "paste_failed");
         await this.settingsStore.addHistory(entry, settings.historyLimit);
         this.notifyStatus({
           phase: "warning",
-          reason: error?.code || "paste_failed",
+          reason: entry.pasteError,
           message: "Paste failed. Text saved."
         });
         return entry;
@@ -79,7 +79,7 @@ export class DictationService {
     this.notifyStatus({
       phase: getFinalPhase(entry.status),
       ...(finalReason ? { reason: finalReason } : {}),
-      message: getFinalMessage(entry.status, entry.processingError)
+      message: getFinalMessage(entry.status)
     });
     return entry;
   }
@@ -118,7 +118,7 @@ export class DictationService {
       if (status === "failed") {
         text = "";
       }
-      processingError = getErrorMessage(error);
+      processingError = getStableReason(error, "text_processing_failed");
     }
 
     return {
@@ -140,10 +140,10 @@ function getFinalPhase(status) {
   return "warning";
 }
 
-function getFinalMessage(status, processingError) {
+function getFinalMessage(status) {
   if (status === "complete") return "Dictation complete.";
-  if (status === "failed") return `Target language output failed. ${processingError}`;
-  return `Raw transcript saved. ${processingError}`;
+  if (status === "failed") return "Target language output failed.";
+  return "Raw transcript saved.";
 }
 
 function getFinalReason(status) {
@@ -152,8 +152,14 @@ function getFinalReason(status) {
   return "";
 }
 
-function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+function getStableReason(error, fallback) {
+  for (const candidate of [error?.code, error?.message, error]) {
+    const reason = typeof candidate === "string" ? candidate.trim() : "";
+    if (/^[a-z][a-z0-9_]{2,63}$/.test(reason)) {
+      return reason;
+    }
+  }
+  return fallback;
 }
 
 function assertTextProviderCanProcess(providers = {}) {

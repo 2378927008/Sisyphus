@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, session } from "electron";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { buildHudWindowOptions } from "../src/main/hud-window.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
@@ -54,6 +54,7 @@ const expectedWarningRegionIds = [
 const smokeIpcChannels = [
   "settings:get",
   "settings:save",
+  "data:recovery-status",
   "history:list",
   "history:update",
   "history:reprocess",
@@ -104,10 +105,13 @@ app.whenReady().then(runVisualSmoke);
 async function runVisualSmoke() {
   try {
     await mkdir(outputDir, { recursive: true });
-    configureMediaPermissions(session.defaultSession);
     wireIpc();
 
     const mainWindow = createWindow(visualViewports[0], preloadPath);
+    configureMediaPermissions(session.defaultSession, {
+      getAllowedWebContents: () => mainWindow.webContents,
+      getAllowedUrl: () => pathToFileURL(htmlPath).href
+    });
     observeRendererConsole(mainWindow, "main");
     await mainWindow.loadFile(htmlPath);
     await waitForMainReady(mainWindow);
@@ -267,6 +271,7 @@ function wireIpc() {
   };
 
   register("settings:get", () => structuredClone(settings));
+  register("data:recovery-status", () => []);
   register("settings:save", (_event, patch) => {
     settings = mergeSettings(patch, settings);
     return structuredClone(settings);
@@ -308,18 +313,18 @@ function wireIpc() {
   register("models:setup-status", () => createSetupStatus());
   register("models:setup-refresh", () => createSetupStatus());
   register("models:setup-start", (_event, type) => ({
-    type,
-    status: "complete",
-    output: [],
-    error: "",
-    assets: createSetupStatus().assets
+    assets: createSetupStatus().assets,
+    setups: {
+      ...createSetupStatus().setups,
+      [type]: { type, status: "complete" }
+    }
   }));
   register("models:setup-cancel", (_event, type) => ({
-    type,
-    status: "cancelled",
-    output: [],
-    error: "",
-    assets: createSetupStatus().assets
+    assets: createSetupStatus().assets,
+    setups: {
+      ...createSetupStatus().setups,
+      [type]: { type, status: "failed", failureReason: "setup_cancelled" }
+    }
   }));
   register("dictation:status-latest", () => ({ phase: "idle", message: "" }));
   register("dictation:wav", () => ({
@@ -336,9 +341,7 @@ function createSetupStatus() {
   return {
     assets: {
       whisper: {
-        ready: true,
-        whisperCliPath: settings.whisperCliPath,
-        whisperModelPath: settings.whisperModelPath
+        ready: true
       },
       llm: {
         ready: false,
@@ -347,8 +350,8 @@ function createSetupStatus() {
       }
     },
     setups: {
-      whisper: { type: "whisper", status: "idle", output: [], error: "" },
-      llm: { type: "llm", status: "idle", output: [], error: "" }
+      whisper: { type: "whisper", status: "idle" },
+      llm: { type: "llm", status: "idle" }
     }
   };
 }

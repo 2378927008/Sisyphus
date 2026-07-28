@@ -1,6 +1,6 @@
 import { app, BrowserWindow, session } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 
@@ -15,14 +15,16 @@ const timeout = setTimeout(() => {
 }, 30000);
 
 app.whenReady().then(async () => {
-  configureMediaPermissions(session.defaultSession);
-
   const window = new BrowserWindow({
     show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+  configureMediaPermissions(session.defaultSession, {
+    getAllowedWebContents: () => window.webContents,
+    getAllowedUrl: () => pathToFileURL(htmlPath).href
   });
 
   try {

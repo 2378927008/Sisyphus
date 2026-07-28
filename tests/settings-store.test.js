@@ -837,6 +837,93 @@ test("history replacement writes clean up temporary files when rename fails", as
   assert.deepEqual(removed, [writes[0].filePath]);
 });
 
+test("malformed settings are quarantined before defaults are restored", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-corrupt-settings-"));
+  const settingsPath = path.join(userDataPath, "settings.json");
+  const damagedContent = '{"hotkey":';
+
+  try {
+    await writeFile(settingsPath, damagedContent, "utf8");
+    const store = createSettingsStore(userDataPath);
+
+    const settings = await store.getSettings();
+    const files = await import("node:fs/promises").then(({ readdir }) => readdir(userDataPath));
+    const quarantineName = files.find((name) => name.startsWith("settings.json.corrupt-"));
+
+    assert.equal(settings.hotkey, defaultSettings.hotkey);
+    assert.equal(typeof quarantineName, "string");
+    assert.equal(
+      await readFile(path.join(userDataPath, quarantineName), "utf8"),
+      damagedContent
+    );
+    assert.deepEqual(store.getRecoveryState(), [
+      { area: "settings", reason: "settings_recovered" }
+    ]);
+
+    await store.saveSettings({ outputLanguage: "fr" });
+    assert.equal(JSON.parse(await readFile(settingsPath, "utf8")).outputLanguage, "fr");
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("malformed history is quarantined before an empty history is restored", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "local-flow-corrupt-history-"));
+  const historyPath = path.join(userDataPath, "history.json");
+  const damagedContent = '{"entries":';
+
+  try {
+    await writeFile(historyPath, damagedContent, "utf8");
+    const store = createSettingsStore(userDataPath);
+
+    assert.deepEqual(await store.getHistory(), []);
+    const files = await import("node:fs/promises").then(({ readdir }) => readdir(userDataPath));
+    const quarantineName = files.find((name) => name.startsWith("history.json.corrupt-"));
+
+    assert.equal(typeof quarantineName, "string");
+    assert.equal(
+      await readFile(path.join(userDataPath, quarantineName), "utf8"),
+      damagedContent
+    );
+    assert.deepEqual(store.getRecoveryState(), [
+      { area: "history", reason: "history_recovered" }
+    ]);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("non-missing read failures use safe fallbacks and block writes", async () => {
+  let writeCalls = 0;
+  const readError = new Error("access denied");
+  readError.code = "EACCES";
+  const store = createSettingsStore("C:/virtual-local-flow", defaultSettings, null, {
+    readFile: async () => {
+      throw readError;
+    },
+    stat: async () => {
+      throw readError;
+    },
+    mkdir: async () => {},
+    writeFile: async () => {
+      writeCalls += 1;
+    },
+    rename: async () => {},
+    rm: async () => {},
+    randomUUID: () => "test-id"
+  });
+
+  assert.equal((await store.getSettings()).hotkey, defaultSettings.hotkey);
+  assert.deepEqual(await store.getHistory(), []);
+  assert.deepEqual(store.getRecoveryState(), [
+    { area: "settings", reason: "settings_unavailable" },
+    { area: "history", reason: "history_unavailable" }
+  ]);
+  await assert.rejects(store.saveSettings({ outputLanguage: "fr" }), /settings_storage_unavailable/);
+  await assert.rejects(store.addHistory({ id: "h1", text: "keep" }), /history_storage_unavailable/);
+  assert.equal(writeCalls, 0);
+});
+
 function createFirstWriteBarrierIo() {
   let committedContent = null;
   let readCalls = 0;

@@ -20,3 +20,22 @@ test("describeMicrophoneError explains busy microphone devices", () => {
 
   assert.match(result, /busy/i);
 });
+
+test("describeMicrophoneError never exposes raw runtime diagnostics or developer commands", () => {
+  for (const error of [
+    {
+      name: "SecurityError",
+      message: "spawn C:\\private\\helper.exe ENOENT stderr https://secret.example"
+    },
+    {
+      name: "UnknownError",
+      message: "\\\\server\\share /home/private/mic exit code 7"
+    }
+  ]) {
+    const result = describeMicrophoneError(error);
+    assert.doesNotMatch(
+      result,
+      /npm|[A-Za-z]:[\\/]|\\\\server|\/home\/|https?:|spawn|ENOENT|stderr|exit code/i
+    );
+  }
+});

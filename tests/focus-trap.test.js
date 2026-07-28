@@ -379,24 +379,9 @@ test("settings panels own the required existing fields", async () => {
 
   for (const id of [
     "setupOutput",
-    "embeddedLlmCliPath",
-    "embeddedLlmModelPath",
-    "localModelInstallCommand",
-    "whisperCliPath",
-    "whisperModelPath",
     "microphoneDiagnosticsList",
     "diagnosticsList",
-    "textDiagnosticsList",
-    "whisperRuntimeUrl",
-    "whisperRuntimeMirrorUrls",
-    "whisperModelUrl",
-    "whisperModelMirrorUrls",
-    "llamaRuntimeUrl",
-    "llamaRuntimeMirrorUrls",
-    "qwenModelUrl",
-    "qwenModelMirrorUrls",
-    "ollamaBaseUrl",
-    "ollamaModel"
+    "textDiagnosticsList"
   ]) assert.match(advanced, new RegExp(`id="${id}"`), `Advanced: ${id}`);
 
   for (const privateId of [
@@ -411,6 +396,10 @@ test("settings panels own the required existing fields", async () => {
 
   const main = html.slice(html.indexOf("<main"), html.indexOf("</main>") + 7);
   assert.doesNotMatch(main, /id="(?:setupOutput|embeddedLlmCliPath|whisperCliPath|whisperRuntimeUrl|ollamaBaseUrl)"/);
+  assert.doesNotMatch(
+    html,
+    /id="(?:embeddedLlmCliPath|embeddedLlmModelPath|localModelInstallCommand|whisperCliPath|whisperModelPath|whisperRuntimeUrl|whisperRuntimeMirrorUrls|whisperModelUrl|whisperModelMirrorUrls|llamaRuntimeUrl|llamaRuntimeMirrorUrls|qwenModelUrl|qwenModelMirrorUrls|ollamaBaseUrl)"/
+  );
 });
 
 test("settings drawer keeps one fixed save footer and an independently scrolling body", async () => {

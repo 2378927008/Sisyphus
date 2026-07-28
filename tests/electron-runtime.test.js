@@ -91,6 +91,7 @@ async function getActualPreloadInvokeChannels(preloadSource) {
     "cancelModelSetup",
     "checkTextProvider",
     "checkWhisper",
+    "getDataRecoveryStatus",
     "getLatestStatus",
     "getLocalModelStatus",
     "getModelSetupStatus",
@@ -116,6 +117,7 @@ async function getActualPreloadInvokeChannels(preloadSource) {
   ]);
 
   await exposedApi.getSettings();
+  await exposedApi.getDataRecoveryStatus();
   await exposedApi.saveSettings({ hotkey: "CommandOrControl+Alt+Space" });
   await exposedApi.listHistory();
   await exposedApi.updateHistory("history-smoke", "edited smoke text");
@@ -223,11 +225,13 @@ test("renderer declares a strict content security policy", async () => {
 
 test("renderer records audio with AudioWorklet instead of ScriptProcessorNode", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const recorderSource = await readFile(new URL("../src/renderer/wav-recorder.js", import.meta.url), "utf8");
   const workletSource = await readFile(new URL("../src/renderer/audio-recorder-worklet.js", import.meta.url), "utf8");
 
-  assert.match(appSource, /audioWorklet\.addModule/);
-  assert.match(appSource, /AudioWorkletNode/);
-  assert.doesNotMatch(appSource, /createScriptProcessor/);
+  assert.match(appSource, /import \{ WavRecorder \} from "\.\/wav-recorder\.js"/);
+  assert.match(recorderSource, /audioWorklet\.addModule/);
+  assert.match(recorderSource, /AudioWorkletNodeClass/);
+  assert.doesNotMatch(`${appSource}\n${recorderSource}`, /createScriptProcessor/);
   assert.match(workletSource, /registerProcessor\("wav-recorder-processor"/);
 });
 
@@ -695,10 +699,15 @@ test("main process imports Windows productization modules", async () => {
   assert.match(mainSource, /import \{ createHotkeyManager \} from "\.\/hotkey-manager\.js";/);
   assert.match(mainSource, /import \{ buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip \} from "\.\/tray-menu\.js";/);
   assert.match(mainSource, /import \{ getTrayIconPath \} from "\.\/tray-icon\.js";/);
-  assert.match(
-    mainSource,
-    /import \{\s*bindMainWindowLifecycle,\s*buildMainWindowOptions,\s*revealMainWindow,\s*showMainWindowLoadFailure\s*\} from "\.\/main-window\.js";/
-  );
+  for (const importedName of [
+    "bindMainWindowLifecycle",
+    "bindTrustedWindowNavigation",
+    "buildMainWindowOptions",
+    "revealMainWindow",
+    "showMainWindowLoadFailure"
+  ]) {
+    assert.match(mainSource, new RegExp(`\\b${importedName}\\b`));
+  }
   assert.match(mainSource, /import \{ createNativeInputShortcutFromPackage \} from "\.\/native-input-shortcut\.js";/);
   assert.match(mainSource, /import \{ createShortcutBackend \} from "\.\/shortcut-backend\.js";/);
 });
@@ -709,8 +718,8 @@ test("main process stores and serves latest dictation status", async () => {
 
   assert.match(mainSource, /let lastDictationStatus/);
   assert.ok(sendStatusMatch, "sendStatus should be defined");
-  assert.match(sendStatusMatch.groups.body, /lastDictationStatus\s*=\s*payload/);
-  assert.match(mainSource, /ipcMain\.handle\("dictation:status-latest", \(\) => lastDictationStatus \|\| null\)/);
+  assert.match(sendStatusMatch.groups.body, /lastDictationStatus\s*=\s*status/);
+  assert.match(mainSource, /mainRendererIpc\.handle\("dictation:status-latest", \(\) => lastDictationStatus \|\| null\)/);
 });
 
 test("main process uses a real tray icon helper with empty image fallback", async () => {
@@ -738,7 +747,8 @@ test("main process wires packaged runtime roots into asset detection and setup",
   assert.match(mainSource, /appRoot = getAppRoot\(\{ app \}\)/);
   assert.match(mainSource, /detectWhisperAssets\(runtimeRoot\)/);
   assert.match(mainSource, /detectEmbeddedLlmAssets\(runtimeRoot\)/);
-  assert.match(mainSource, /ipcMain\.handle\("llm:status", \(\) => detectEmbeddedLlmAssets\(runtimeRoot\)\)/);
+  assert.match(mainSource, /mainRendererIpc\.handle\("llm:status"/);
+  assert.match(mainSource, /toLocalModelUiStatus\(await detectEmbeddedLlmAssets\(runtimeRoot\)\)/);
   assert.ok(modelSetupMatch, "createModelSetupService options should be inline and inspectable");
   assert.match(modelSetupMatch.groups.body, /rootPath: runtimeRoot/);
   assert.match(modelSetupMatch.groups.body, /scriptRootPath: appRoot/);
@@ -783,7 +793,9 @@ test("main process wires desktop convenience shortcut callbacks", async () => {
   assert.match(mainSource, /import \{ pasteText \} from "\.\/paste\.js";/);
   assert.match(mainSource, /async function pasteLastDictation\(\)/);
   assert.match(mainSource, /function getLastDictationText\(status\)/);
-  assert.match(mainSource, /await pasteText\(text, \{ clipboard \}\)/);
+  assert.match(mainSource, /createPasteLastAction\(\{/);
+  assert.match(mainSource, /paste:\s*\(text\)\s*=>\s*pasteText\(text, \{ clipboard \}\)/);
+  assert.match(mainSource, /hasActiveOperation:/);
   assert.match(mainSource, /onStart:\s*\(\)\s*=>\s*systemInputController\?\.start\(\)/);
   assert.match(mainSource, /onStop:\s*\(\)\s*=>\s*systemInputController\?\.stop\(\)/);
   assert.match(mainSource, /onPasteLast:\s*\(\)\s*=>\s*pasteLastDictation\(\)/);
@@ -791,7 +803,7 @@ test("main process wires desktop convenience shortcut callbacks", async () => {
 
 test("settings save handler preserves previous startup values if system startup apply fails", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+  const settingsSaveMatch = mainSource.match(/mainRendererIpc\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
 
   assert.ok(settingsSaveMatch, "settings:save handler should be defined inline");
   assert.match(settingsSaveMatch.groups.body, /saveSettingsWithSystemEffects|restoreStartupSettings/);
@@ -802,7 +814,7 @@ test("settings save handler preserves previous startup values if system startup 
 test("main process routes tray and IPC settings writes through one effects transaction", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
   const trayUpdateMatch = mainSource.match(/function updateSettingsFromTray\(settingsPatch\) \{(?<body>[\s\S]*?)\n\}/);
-  const settingsSaveMatch = mainSource.match(/ipcMain\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+  const settingsSaveMatch = mainSource.match(/mainRendererIpc\.handle\("settings:save", async \(_event, settings\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
 
   assert.match(
     mainSource,
@@ -874,10 +886,10 @@ test("main process uses explicit renderer commands for system input start and st
   assert.match(stopRecordingMatch.groups.body, /sendRecordingStopCommand\(command\)/);
   assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:start", command\)/);
   assert.match(mainSource, /sendWindowMessage\(mainWindow, "recording:stop", command\)/);
-  assert.match(mainSource, /ipcMain\.on\("recording:status"/);
+  assert.match(mainSource, /mainRendererIpc\.on\("recording:status"/);
   assert.match(mainSource, /const status = sanitizeRecordingStatusPayload\(payload\)/);
   assert.match(mainSource, /systemInputController\?\.handleRendererStatus\(status\)/);
-  assert.match(mainSource, /ipcMain\.on\("recording:toggle-request"/);
+  assert.match(mainSource, /mainRendererIpc\.on\("recording:toggle-request"/);
 });
 
 test("main process injects renderer reset into the system input controller", async () => {
@@ -898,7 +910,10 @@ test("main process creates HUD with dedicated least-privilege preload", async ()
   const createHudMatch = mainSource.match(/function createHudWindow\(\) \{(?<body>[\s\S]*?)\n\}/);
 
   assert.ok(createHudMatch, "createHudWindow should be defined");
-  assert.match(mainSource, /import \{ buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath \} from "\.\/hud-window\.js";/);
+  assert.match(mainSource, /from "\.\/hud-window\.js";/);
+  assert.match(mainSource, /\bbuildHudWindowOptions\b/);
+  assert.match(mainSource, /\bgetHudHtmlPath\b/);
+  assert.match(mainSource, /\bgetHudPreloadPath\b/);
   assert.match(createHudMatch.groups.body, /preloadPath: getHudPreloadPath\(__dirname\)/);
   assert.doesNotMatch(createHudMatch.groups.body, /\.\.\/preload\.cjs/);
 });
@@ -921,35 +936,31 @@ test("main process can suppress primary window display for hidden startup", asyn
 
 test("main process only accepts recording status from the main renderer", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
-  const recordingStatusMatch = mainSource.match(/ipcMain\.on\("recording:status", \(_event, payload\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
+  const authorizationSource = await readFile(new URL("../src/main/ipc-authorization.js", import.meta.url), "utf8");
+  const recordingStatusMatch = mainSource.match(/mainRendererIpc\.on\("recording:status", \(_event, payload\) => \{(?<body>[\s\S]*?)\n\s*\}\);/);
 
   assert.ok(recordingStatusMatch, "recording status IPC handler should be defined");
-  assert.match(recordingStatusMatch.groups.body, /if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return;\s*\}/);
-  assert.ok(
-    recordingStatusMatch.groups.body.indexOf("_event.sender !== mainWindow?.webContents") <
-      recordingStatusMatch.groups.body.indexOf("sanitizeRecordingStatusPayload(payload)"),
-    "main should reject non-main senders before sanitizing or handling status"
-  );
+  assert.match(mainSource, /createAuthorizedIpcMain\(\{/);
+  assert.match(authorizationSource, /event\.sender === window\.webContents/);
+  assert.match(authorizationSource, /senderFrame === senderFrame\.top/);
+  assert.match(authorizationSource, /senderFrame\.url === approvedUrl/);
+  assert.match(authorizationSource, /event\.sender\.getURL\?\.\(\) === approvedUrl/);
+  assert.match(recordingStatusMatch.groups.body, /sanitizeRecordingStatusPayload\(payload\)/);
 });
 
 test("main process restricts insert text IPC to the main renderer", async () => {
   const mainSource = await readFile(new URL("../src/main/index.js", import.meta.url), "utf8");
+  const authorizationSource = await readFile(new URL("../src/main/ipc-authorization.js", import.meta.url), "utf8");
   const insertHandlerMatch = mainSource.match(
-    /ipcMain\.handle\("dictation:insert-text", async \(_event, text\) => \{(?<body>[\s\S]*?)\n\s*\}\);/
+    /mainRendererIpc\.handle\("dictation:insert-text", async \(_event, text\) => \{(?<body>[\s\S]*?)\n\s*\}\);/
   );
 
   assert.ok(insertHandlerMatch, "insert text IPC handler should be defined");
   const body = insertHandlerMatch.groups.body;
   assert.match(mainSource, /import \{ insertTextIntoPreviousApp \} from "\.\/insert-text\.js";/);
-  const guardMatch = body.match(/if \(_event\.sender !== mainWindow\?\.webContents\) \{\s*return \{\s*ok: false,\s*reason: "unauthorized",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
-
-  assert.match(removeLeadingWhitespaceAndComments(body), /^if \(_event\.sender !== mainWindow\?\.webContents\) \{/);
-  assert.ok(guardMatch, "insert text handler should reject unauthorized senders");
+  assert.match(mainSource, /createAuthorizedIpcMain\(\{/);
+  assert.match(authorizationSource, /return unauthorizedResult/);
   assert.match(body, /try \{\s*return await insertTextIntoPreviousApp\(text, \{ mainWindow, clipboard \}\);\s*\} catch \{\s*return \{\s*ok: false,\s*reason: "paste_failed",\s*message: "Paste failed\. Text copied\."\s*\};\s*\}/);
-  assert.ok(
-    body.search(/\btext\b/) > guardMatch.index + guardMatch[0].length,
-    "main should not use text before the unauthorized sender guard has returned"
-  );
 });
 
 test("main process removes the default application menu after creating the main window", async () => {
@@ -1109,14 +1120,15 @@ test("renderer sends Windows productization fields when settings form saves", as
   assert.match(saveSettingsMatch.groups.body, /startMinimizedToTray:\s*form\.startMinimizedToTray\.checked/);
   assert.match(saveSettingsMatch.groups.body, /shortcutMode:\s*data\.get\("shortcutMode"\)/);
   assert.match(saveSettingsMatch.groups.body, /pasteLastHotkey:\s*data\.get\("pasteLastHotkey"\)/);
-  assert.match(saveSettingsMatch.groups.body, /whisperRuntimeUrl:\s*data\.get\("whisperRuntimeUrl"\)/);
-  assert.match(saveSettingsMatch.groups.body, /whisperModelMirrorUrls:\s*data\.get\("whisperModelMirrorUrls"\)/);
-  assert.match(saveSettingsMatch.groups.body, /llamaRuntimeUrl:\s*data\.get\("llamaRuntimeUrl"\)/);
-  assert.match(saveSettingsMatch.groups.body, /qwenModelMirrorUrls:\s*data\.get\("qwenModelMirrorUrls"\)/);
+  assert.doesNotMatch(
+    saveSettingsMatch.groups.body,
+    /(?:CliPath|ModelPath|RuntimeUrl|MirrorUrls|BaseUrl)/
+  );
 });
 
 test("renderer resets stale recording operations and ignores late completions", async () => {
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
+  const recorderSource = await readFile(new URL("../src/renderer/wav-recorder.js", import.meta.url), "utf8");
   const startRecordingMatch = appSource.match(/async function startRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
   const stopRecordingMatch = appSource.match(/async function stopRecording\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
   const resetMatch = appSource.match(/function resetRecordingLifecycle\(command = \{\}\) \{(?<body>[\s\S]*?)\n\}/);
@@ -1138,5 +1150,5 @@ test("renderer resets stale recording operations and ignores late completions", 
   assert.match(resetMatch.groups.body, /activeRecordingOperationId = null/);
   assert.match(resetMatch.groups.body, /cleanupRecorder\(\)/);
   assert.match(resetMatch.groups.body, /setRecordingLifecyclePhase\("idle"\)/);
-  assert.match(appSource, /dispose\(\) \{/);
+  assert.match(recorderSource, /async dispose\(\) \{/);
 });

@@ -587,6 +587,75 @@ test("system input controller preserves recording start time during recording st
   assert.equal(controller.getState().recordingStartedAt, recordingStartedAt);
 });
 
+test("auxiliary paste and hotkey statuses cannot replace an active recording operation", async () => {
+  const stopCommands = [];
+  const controller = createSystemInputController({
+    startRecording: async () => {},
+    stopRecording: async (command) => stopCommands.push(command)
+  });
+
+  assert.equal(typeof controller.handleAuxiliaryStatus, "function");
+  assert.equal(typeof controller.hasActiveOperation, "function");
+
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({
+    operationId,
+    phase: "recording",
+    message: "Recording"
+  });
+
+  for (const payload of [
+    { phase: "pasting", message: "Pasting last dictation" },
+    { phase: "warning", reason: "hotkey_conflict", message: "Shortcut unavailable" },
+    { phase: "error", reason: "hotkey_failed", message: "Shortcut registration failed" }
+  ]) {
+    assert.equal(controller.handleAuxiliaryStatus(payload), false, payload.phase);
+    assert.equal(controller.getState().phase, "recording", payload.phase);
+    assert.equal(controller.getState().operationId, operationId, payload.phase);
+    assert.equal(controller.hasActiveOperation(), true, payload.phase);
+  }
+
+  await controller.stop();
+
+  assert.deepEqual(stopCommands, [{ operationId }]);
+  assert.equal(controller.getState().phase, "stopping");
+  assert.equal(controller.getState().operationId, operationId);
+});
+
+test("processing statuses require the matching active operation id", async () => {
+  const controller = createSystemInputController({
+    startRecording: async () => {}
+  });
+
+  await controller.start();
+  const operationId = controller.getState().operationId;
+  controller.handleRendererStatus({ operationId, phase: "recording" });
+  controller.handleRendererStatus({ operationId, phase: "transcribing" });
+
+  assert.equal(
+    controller.handleSystemStatus({
+      operationId: operationId + 1,
+      phase: "polishing",
+      message: "stale processing"
+    }),
+    false
+  );
+  assert.equal(controller.getState().phase, "transcribing");
+  assert.equal(controller.getState().operationId, operationId);
+
+  assert.equal(
+    controller.handleSystemStatus({
+      operationId,
+      phase: "polishing",
+      message: "current processing"
+    }),
+    true
+  );
+  assert.equal(controller.getState().phase, "polishing");
+  assert.equal(controller.getState().operationId, operationId);
+});
+
 function createManualTimers() {
   let nextId = 1;
   const timers = new Map();

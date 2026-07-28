@@ -83,8 +83,15 @@ test("rapid phase changes and dispose release only the owned Escape binding", ()
 test("HUD IPC accepts only the active HUD webContents sender", async () => {
   const handlers = new Map();
   const calls = [];
-  const hudContents = { isDestroyed: () => false };
-  const mainContents = { isDestroyed: () => false };
+  const approvedUrl = "file:///C:/app/src/renderer/hud.html";
+  const hudContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
+  const mainContents = {
+    isDestroyed: () => false,
+    getURL: () => "file:///C:/app/src/renderer/index.html"
+  };
   let hudWindow = createWindow(hudContents);
 
   wireHudIpc({
@@ -92,6 +99,7 @@ test("HUD IPC accepts only the active HUD webContents sender", async () => {
       on: (channel, handler) => handlers.set(channel, handler)
     },
     getHudWindow: () => hudWindow,
+    getApprovedUrl: () => approvedUrl,
     hudActions: {
       stop: async () => calls.push("stop"),
       cancel: async () => calls.push("cancel"),
@@ -104,17 +112,18 @@ test("HUD IPC accepts only the active HUD webContents sender", async () => {
     ["hud:cancel", "cancel"],
     ["hud:open-main-window", "open"]
   ]) {
-    handlers.get(channel)({ sender: mainContents });
-    handlers.get(channel)({ sender: hudContents });
+    handlers.get(channel)(createIpcEvent(mainContents, approvedUrl));
+    handlers.get(channel)(createIpcEvent(hudContents, approvedUrl, { isMainFrame: false }));
+    handlers.get(channel)(createIpcEvent(hudContents, approvedUrl));
     assert.equal(calls.at(-1), expected, channel);
   }
 
   assert.deepEqual(calls, ["stop", "cancel", "open"]);
 
   hudWindow = createWindow(hudContents, { destroyed: true });
-  handlers.get("hud:stop")({ sender: hudContents });
+  handlers.get("hud:stop")(createIpcEvent(hudContents, approvedUrl));
   hudWindow = null;
-  handlers.get("hud:cancel")({ sender: hudContents });
+  handlers.get("hud:cancel")(createIpcEvent(hudContents, approvedUrl));
 
   assert.deepEqual(calls, ["stop", "cancel", "open"]);
 });
@@ -157,4 +166,10 @@ function createWindow(webContents, { destroyed = false } = {}) {
     isDestroyed: () => destroyed,
     webContents
   };
+}
+
+function createIpcEvent(sender, url, { isMainFrame = true } = {}) {
+  const frame = { url };
+  frame.top = isMainFrame ? frame : { url };
+  return { sender, senderFrame: frame };
 }

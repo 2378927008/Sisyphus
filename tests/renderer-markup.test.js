@@ -184,16 +184,21 @@ test("settings drawer groups existing controls into four stable sections", async
   assert.match(settingsDrawer, /id="setupOutput"/);
 });
 
-test("raw setup output belongs only to the advanced settings section", async () => {
+test("advanced settings exposes only stable product status and no raw technical output", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const models = getElementMarkup(html, "section", "settingsModels");
   const advanced = getElementMarkup(html, "section", "settingsAdvanced");
 
   assert.doesNotMatch(models, /id="setupOutput"/);
-  assert.match(advanced, /<pre\b[^>]*id="setupOutput"[^>]*>/);
+  assert.match(advanced, /<p\b[^>]*id="setupOutput"[^>]*>/);
+  assert.doesNotMatch(advanced, /<pre\b|<textarea\b/);
+  assert.doesNotMatch(
+    advanced,
+    /(?:CliPath|ModelPath|RuntimeUrl|MirrorUrls|BaseUrl|InstallCommand)|https?:|[A-Za-z]:[\\/]|\\\\|\/home\/|spawn|ENOENT|stderr/i
+  );
 });
 
-test("advanced setup controls stay isolated and history mutations remain narrowly scoped", async () => {
+test("technical configuration stays out of product UI and history mutations remain narrowly scoped", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/renderer/app.js", import.meta.url), "utf8");
   const preloadSource = await readFile(new URL("../src/preload.cjs", import.meta.url), "utf8");
@@ -206,11 +211,21 @@ test("advanced setup controls stay isolated and history mutations remain narrowl
     "whisperCliPath",
     "whisperModelPath",
     "embeddedLlmCliPath",
-    "embeddedLlmModelPath"
+    "embeddedLlmModelPath",
+    "whisperRuntimeUrl",
+    "whisperRuntimeMirrorUrls",
+    "whisperModelUrl",
+    "whisperModelMirrorUrls",
+    "llamaRuntimeUrl",
+    "llamaRuntimeMirrorUrls",
+    "qwenModelUrl",
+    "qwenModelMirrorUrls",
+    "ollamaBaseUrl",
+    "localModelInstallCommand"
   ]) {
-    assert.match(advanced, new RegExp(`name="${field}"`), `${field} should remain in Advanced`);
-    assert.doesNotMatch(mainMarkup, new RegExp(`name="${field}"`), `${field} should not be on the main page`);
+    assert.doesNotMatch(html, new RegExp(`(?:name|id)="${field}"`), field);
   }
+  assert.doesNotMatch(mainMarkup, /https?:|[A-Za-z]:[\\/]|\\\\|\/home\/|spawn|ENOENT|stderr/i);
 
   for (const [name, source] of [
     ["renderer", appSource],
@@ -777,7 +792,7 @@ test("renderer fallback markup uses readable Chinese copy", async () => {
   assert.doesNotMatch(html, mojibakePattern);
 });
 
-test("settings drawer exposes configurable model download sources", async () => {
+test("settings drawer keeps model download sources behind the trusted setup service", async () => {
   const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
   for (const field of [
@@ -790,11 +805,11 @@ test("settings drawer exposes configurable model download sources", async () => 
     "qwenModelUrl",
     "qwenModelMirrorUrls"
   ]) {
-    assert.match(html, new RegExp(`name="${field}"`), field);
+    assert.doesNotMatch(html, new RegExp(`name="${field}"`), field);
   }
 
-  assert.match(html, /data-i18n="section.downloadSources"/);
-  assert.match(html, /data-i18n="hint.downloadSources"/);
+  assert.doesNotMatch(html, /data-i18n="section.downloadSources"/);
+  assert.doesNotMatch(html, /data-i18n="hint.downloadSources"/);
 });
 
 test("HUD fallback markup uses readable Chinese copy", async () => {

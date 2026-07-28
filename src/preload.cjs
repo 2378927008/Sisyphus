@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("localFlow", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
+  getDataRecoveryStatus: () => ipcRenderer.invoke("data:recovery-status"),
   listHistory: () => ipcRenderer.invoke("history:list"),
   updateHistory: (id, text) => ipcRenderer.invoke("history:update", { id, text }),
   reprocessHistory: (id) => ipcRenderer.invoke("history:reprocess", id),
@@ -16,7 +17,10 @@ contextBridge.exposeInMainWorld("localFlow", {
   refreshModelSetupStatus: () => ipcRenderer.invoke("models:setup-refresh"),
   getLatestStatus: () => ipcRenderer.invoke("dictation:status-latest"),
   insertText: (text) => ipcRenderer.invoke("dictation:insert-text", text),
-  processWav: (wavBytes) => ipcRenderer.invoke("dictation:wav", wavBytes),
+  processWav: (wavBytes, operationId) => ipcRenderer.invoke("dictation:wav", {
+    operationId,
+    wavBytes
+  }),
   requestRecordingToggle: () => ipcRenderer.send("recording:toggle-request"),
   onShortcutToggle: (callback) => {
     ipcRenderer.on("recording:toggle", () => callback());

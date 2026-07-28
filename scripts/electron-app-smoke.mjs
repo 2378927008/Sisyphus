@@ -1,13 +1,15 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { createHudActions, wireHudIpc } from "../src/main/hud-actions.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
 import { defaultSettings, mergeSettings } from "../src/main/settings-store.js";
+import { collectDetectedModelPaths } from "../src/main/model-setup-ipc.js";
+import { toModelSetupUiStatus } from "../src/main/product-ui-results.js";
 import { createSystemInputController } from "../src/main/system-input-controller.js";
 import {
   appSmokeFixtureSettings,
@@ -118,6 +120,7 @@ const expectedInterfaceLanguageCodes = ["en", "zh-Hans", "ja", "ko", "zh-Hant", 
 const smokeIpcChannelRegistry = [
   "settings:get",
   "settings:save",
+  "data:recovery-status",
   "history:list",
   "history:update",
   "history:reprocess",
@@ -227,6 +230,7 @@ const setupStartResolvers = new Map();
 
 function wireIpc() {
   registerSmokeIpcHandler("settings:get", () => settings);
+  registerSmokeIpcHandler("data:recovery-status", () => []);
   registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(next);
     activeSettingsSaveCalls += 1;
@@ -317,12 +321,13 @@ function wireIpc() {
     if (setupIpcCalls.status === 1) {
       throw new Error(unsafeDiagnostic);
     }
-    return missingSetupStatus;
+    return toModelSetupUiStatus(missingSetupStatus);
   });
   registerSmokeIpcHandler("models:setup-refresh", () => {
     setupIpcCalls.refresh += 1;
     if (setupRefreshError) throw new Error(setupRefreshError);
-    return setupRefreshResult;
+    settings = mergeSettings(collectDetectedModelPaths(setupRefreshResult.assets), settings);
+    return toModelSetupUiStatus(setupRefreshResult);
   });
   registerSmokeIpcHandler("models:setup-start", (_event, type) => {
     setupIpcCalls.start.push(type);
@@ -337,7 +342,16 @@ function wireIpc() {
           assets: missingSetupStatus.assets
         };
         setupCompletionResults.push({ type, status: completion.status });
-        resolve(completion);
+        if (completion.status === "complete") {
+          settings = mergeSettings(collectDetectedModelPaths(completion.assets), settings);
+        }
+        resolve(toModelSetupUiStatus({
+          assets: completion.assets || {},
+          setups: {
+            ...missingSetupStatus.setups,
+            [type]: completion
+          }
+        }));
       });
     });
   });
@@ -345,13 +359,17 @@ function wireIpc() {
     setupIpcCalls.cancel.push(type);
     if (setupCancelError) throw new Error(setupCancelError);
     successfulSetupCancels += 1;
-    return {
-      type,
-      status: "cancelled",
-      output: [],
-      error: "",
-      assets: missingSetupStatus.assets
-    };
+    return toModelSetupUiStatus({
+      assets: missingSetupStatus.assets,
+      setups: {
+        ...missingSetupStatus.setups,
+        [type]: {
+          type,
+          status: "failed",
+          failureReason: "setup_cancelled"
+        }
+      }
+    });
   });
   registerSmokeIpcHandler("dictation:status-latest", () => null);
   registerSmokeIpcHandler("dictation:wav", () => {
@@ -383,7 +401,6 @@ function wireIpc() {
 }
 
 app.whenReady().then(async () => {
-  configureMediaPermissions(session.defaultSession);
   smokeSystemInputController = createSystemInputController({
     sendToMain: (state) => {
       hudActions?.syncPhase(state.phase);
@@ -432,6 +449,10 @@ app.whenReady().then(async () => {
     }
   });
   smokeMainWindow = window;
+  configureMediaPermissions(session.defaultSession, {
+    getAllowedWebContents: () => smokeMainWindow?.webContents || null,
+    getAllowedUrl: () => pathToFileURL(htmlPath).href
+  });
   const hudWindow = new BrowserWindow({
     show: false,
     width: 460,

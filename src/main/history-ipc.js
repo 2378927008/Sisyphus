@@ -1,17 +1,12 @@
-import { isAuthorizedWindowSender } from "./ipc-authorization.js";
-
-const unauthorizedResult = { ok: false, reason: "unauthorized" };
 const invalidRequestResult = { ok: false, reason: "invalid_request" };
+const maxHistoryIdLength = 128;
+const maxHistoryTextLength = 100000;
 
 export function wireHistoryIpc({
   ipcMain,
-  getMainWindow,
   historyActions
 }) {
   ipcMain.handle("history:update", async (event, payload) => {
-    if (!isAuthorizedWindowSender(event, getMainWindow())) {
-      return unauthorizedResult;
-    }
     if (!isValidHistoryUpdatePayload(payload)) {
       return invalidRequestResult;
     }
@@ -19,10 +14,11 @@ export function wireHistoryIpc({
   });
 
   ipcMain.handle("history:reprocess", async (event, id) => {
-    if (!isAuthorizedWindowSender(event, getMainWindow())) {
-      return unauthorizedResult;
-    }
-    if (typeof id !== "string" || !id.trim()) {
+    if (
+      typeof id !== "string" ||
+      !id.trim() ||
+      id.length > maxHistoryIdLength
+    ) {
       return invalidRequestResult;
     }
     return historyActions.reprocess(id);
@@ -47,7 +43,9 @@ function isValidHistoryUpdatePayload(payload) {
     Object.hasOwn(payload, "id") &&
     typeof payload.id === "string" &&
     payload.id.trim() &&
+    payload.id.length <= maxHistoryIdLength &&
     Object.hasOwn(payload, "text") &&
-    typeof payload.text === "string"
+    typeof payload.text === "string" &&
+    payload.text.length <= maxHistoryTextLength
   );
 }

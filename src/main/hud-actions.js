@@ -70,6 +70,7 @@ export function createHudActions({
 export function wireHudIpc({
   ipcMain,
   getHudWindow = () => null,
+  getApprovedUrl = () => "",
   hudActions
 } = {}) {
   const handlers = {
@@ -80,7 +81,7 @@ export function wireHudIpc({
 
   for (const [channel, action] of Object.entries(handlers)) {
     ipcMain?.on?.(channel, (event) => {
-      if (!isAuthorizedWindowSender(event, getHudWindow())) {
+      if (!isAuthorizedWindowSender(event, getHudWindow(), getApprovedUrl())) {
         return;
       }
 

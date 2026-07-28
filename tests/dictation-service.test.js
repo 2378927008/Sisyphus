@@ -144,7 +144,7 @@ test("processWav saves complete text and warns when paste fails", async () => {
   assert.equal(entry.status, "complete");
   assert.equal(entry.text, "hello world");
   assert.equal(entry.pasteStatus, "failed");
-  assert.match(entry.pasteError, /Paste command exited with code 1/);
+  assert.equal(entry.pasteError, "paste_failed");
   assert.equal(history[0], entry);
   assert.equal(finalEvent.phase, "warning");
   assert.equal(finalEvent.reason, "paste_failed");
@@ -170,7 +170,7 @@ test("processWav preserves raw transcript when text processing fails", async () 
 
   assert.equal(entry.status, "partial");
   assert.equal(entry.text, "hello world");
-  assert.equal(entry.processingError, "Install a language model");
+  assert.equal(entry.processingError, "text_processing_failed");
   assert.equal(history[0].text, "hello world");
 });
 
@@ -197,13 +197,71 @@ test("processWav keeps partial failure reason in final warning status", async ()
   assert.equal(warningEvents.length, 1);
   assert.equal(finalEvent.phase, "warning");
   assert.equal(finalEvent.reason, "raw_transcript_saved");
-  assert.match(finalEvent.message, /Install a language model/);
+  assert.equal(finalEvent.message, "Raw transcript saved.");
   assert.equal(history[0], entry);
   assert.equal(history[0].outputLanguage, "auto");
   assert.equal(history[0].detectedLanguage, "en");
   assert.equal(history[0].providerMode, "local");
   assert.equal(history[0].status, "partial");
-  assert.equal(history[0].processingError, "Install a language model");
+  assert.equal(history[0].processingError, "text_processing_failed");
+});
+
+test("processWav stores and reports stable reason codes instead of raw processing diagnostics", async () => {
+  const history = [];
+  const events = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      pasteAfterTranscribe: false,
+      outputLanguage: "auto"
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async () => {
+      throw new Error(
+        "stderr: spawn C:\\private\\llama-cli.exe ENOENT https://vendor.example exit code 7"
+      );
+    },
+    notifyStatus: (event) => events.push(event)
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+  const visible = JSON.stringify({
+    processingError: entry.processingError,
+    finalStatus: events.at(-1)
+  });
+
+  assert.equal(entry.status, "partial");
+  assert.equal(entry.processingError, "text_processing_failed");
+  assert.deepEqual(events.at(-1), {
+    phase: "warning",
+    reason: "raw_transcript_saved",
+    message: "Raw transcript saved."
+  });
+  assert.doesNotMatch(
+    visible,
+    /[A-Za-z]:[\\/]|https?:|spawn|ENOENT|stderr|exit code/i
+  );
+});
+
+test("processWav stores only a stable paste failure reason", async () => {
+  const history = [];
+  const service = new DictationService({
+    settingsStore: fakeSettingsStore(history, {
+      pasteAfterTranscribe: true
+    }),
+    clipboard: {},
+    transcribe: async () => "hello world",
+    polish: async (text) => text,
+    paste: async () => {
+      throw new Error("stderr spawn C:\\private\\paste.exe ENOENT exit code 1");
+    },
+    notifyStatus: () => {}
+  });
+
+  const entry = await service.processWav(Buffer.from("wav"));
+
+  assert.equal(entry.pasteStatus, "failed");
+  assert.equal(entry.pasteError, "paste_failed");
 });
 
 test("processWav does not expose raw transcript as output when target language processing fails", async () => {
@@ -232,7 +290,7 @@ test("processWav does not expose raw transcript as output when target language p
   assert.equal(entry.text, "");
   assert.equal(entry.transcript, "hello world");
   assert.equal(entry.outputLanguage, "zh-Hans");
-  assert.equal(entry.processingError, "Local language model exited with code 3221225477.");
+  assert.equal(entry.processingError, "text_processing_failed");
   assert.equal(history[0], entry);
   assert.equal(events.at(-1).phase, "error");
   assert.equal(events.at(-1).reason, "target_output_failed");

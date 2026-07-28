@@ -183,11 +183,34 @@ export function createSystemInputController({
   }
 
   function handleSystemStatus(payload = {}) {
+    if (
+      isValidOperationId(activeOperationId) &&
+      payload.operationId !== activeOperationId
+    ) {
+      return false;
+    }
+
     const phase = normalizeRendererPhase(payload.phase);
     setPhase(phase, {
+      ...(isValidOperationId(activeOperationId)
+        ? { operationId: activeOperationId }
+        : {}),
       message: payload.message || "",
       reason: payload.reason || ""
     });
+    return true;
+  }
+
+  function handleAuxiliaryStatus(payload = {}) {
+    if (hasActiveOperation()) {
+      return false;
+    }
+
+    return handleSystemStatus(payload);
+  }
+
+  function hasActiveOperation() {
+    return isValidOperationId(activeOperationId);
   }
 
   function broadcast() {
@@ -265,7 +288,9 @@ export function createSystemInputController({
     cancel,
     toggle,
     handleRendererStatus,
-    handleSystemStatus
+    handleSystemStatus,
+    handleAuxiliaryStatus,
+    hasActiveOperation
   };
 }
 

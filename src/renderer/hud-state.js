@@ -45,7 +45,9 @@ const hudLabels = {
       target_output_failed: "Target language output failed.",
       raw_transcript_saved: "Raw transcript saved.",
       clipboard_unavailable: "Clipboard unavailable. Text saved.",
-      paste_failed: "Paste failed. Text saved."
+      paste_failed: "Paste failed. Text saved.",
+      recording_too_long: "Recording stopped at the five-minute limit.",
+      recording_too_large: "Recording stopped at the audio limit."
     },
     actions: {
       cancel: "Cancel recording",
@@ -86,7 +88,9 @@ const hudLabels = {
       target_output_failed: "目标语言输出失败",
       raw_transcript_saved: "原始转写已保存",
       clipboard_unavailable: "剪贴板不可用，文本已保存",
-      paste_failed: "粘贴失败，文本已保存。"
+      paste_failed: "粘贴失败，文本已保存。",
+      recording_too_long: "录音已达到五分钟上限并停止。",
+      recording_too_large: "录音已达到音频容量上限并停止。"
     },
     actions: {
       cancel: "取消录音",
@@ -127,7 +131,9 @@ const hudLabels = {
       target_output_failed: "出力言語の処理に失敗しました。",
       raw_transcript_saved: "元の文字起こしを保存しました。",
       clipboard_unavailable: "クリップボードを使用できません。テキストを保存しました。",
-      paste_failed: "貼り付けに失敗しました。テキストを保存しました。"
+      paste_failed: "貼り付けに失敗しました。テキストを保存しました。",
+      recording_too_long: "5 分の上限に達したため録音を停止しました。",
+      recording_too_large: "音声容量の上限に達したため録音を停止しました。"
     },
     actions: {
       cancel: "録音をキャンセル",
@@ -168,7 +174,9 @@ const hudLabels = {
       target_output_failed: "대상 언어 출력에 실패했습니다.",
       raw_transcript_saved: "원본 받아쓰기를 저장했습니다.",
       clipboard_unavailable: "클립보드를 사용할 수 없습니다. 텍스트를 저장했습니다.",
-      paste_failed: "붙여넣기에 실패했습니다. 텍스트를 저장했습니다."
+      paste_failed: "붙여넣기에 실패했습니다. 텍스트를 저장했습니다.",
+      recording_too_long: "5분 제한에 도달하여 녹음을 중지했습니다.",
+      recording_too_large: "오디오 용량 제한에 도달하여 녹음을 중지했습니다."
     },
     actions: {
       cancel: "녹음 취소",
@@ -209,7 +217,9 @@ const hudLabels = {
       target_output_failed: "目標語言輸出失敗",
       raw_transcript_saved: "原始轉寫已儲存",
       clipboard_unavailable: "剪貼簿無法使用，文字已儲存",
-      paste_failed: "貼上失敗，文字已儲存"
+      paste_failed: "貼上失敗，文字已儲存",
+      recording_too_long: "錄音已達五分鐘上限並停止。",
+      recording_too_large: "錄音已達音訊容量上限並停止。"
     },
     actions: {
       cancel: "取消錄音",
@@ -250,7 +260,9 @@ const hudLabels = {
       target_output_failed: "Échec de la sortie dans la langue cible.",
       raw_transcript_saved: "La transcription brute a été enregistrée.",
       clipboard_unavailable: "Presse-papiers indisponible. Texte enregistré.",
-      paste_failed: "Échec du collage. Texte enregistré."
+      paste_failed: "Échec du collage. Texte enregistré.",
+      recording_too_long: "L'enregistrement s'est arrêté à la limite de cinq minutes.",
+      recording_too_large: "L'enregistrement s'est arrêté à la limite audio."
     },
     actions: {
       cancel: "Annuler l'enregistrement",
@@ -291,7 +303,9 @@ const hudLabels = {
       target_output_failed: "Не удалось подготовить текст на целевом языке.",
       raw_transcript_saved: "Исходная расшифровка сохранена.",
       clipboard_unavailable: "Буфер обмена недоступен. Текст сохранён.",
-      paste_failed: "Не удалось вставить текст. Текст сохранён."
+      paste_failed: "Не удалось вставить текст. Текст сохранён.",
+      recording_too_long: "Запись остановлена после достижения лимита в пять минут.",
+      recording_too_large: "Запись остановлена после достижения лимита аудиоданных."
     },
     actions: {
       cancel: "Отменить запись",
@@ -332,7 +346,9 @@ const hudLabels = {
       target_output_failed: "Falló la salida en el idioma de destino.",
       raw_transcript_saved: "Se guardó la transcripción original.",
       clipboard_unavailable: "El portapapeles no está disponible. Texto guardado.",
-      paste_failed: "No se pudo pegar. Texto guardado."
+      paste_failed: "No se pudo pegar. Texto guardado.",
+      recording_too_long: "La grabación se detuvo al alcanzar el límite de cinco minutos.",
+      recording_too_large: "La grabación se detuvo al alcanzar el límite de audio."
     },
     actions: {
       cancel: "Cancelar grabación",

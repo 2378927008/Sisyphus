@@ -2,36 +2,181 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { isAuthorizedWindowSender } from "../src/main/ipc-authorization.js";
+import * as ipcAuthorization from "../src/main/ipc-authorization.js";
 
 test("accepts only the current live window webContents", () => {
-  const webContents = { isDestroyed: () => false };
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
   const window = { isDestroyed: () => false, webContents };
+  const event = createIpcEvent(webContents, approvedUrl);
 
-  assert.equal(isAuthorizedWindowSender({ sender: webContents }, window), true);
-  assert.equal(isAuthorizedWindowSender({ sender: {} }, window), false);
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(event, window, approvedUrl),
+    true
+  );
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(
+      createIpcEvent({ getURL: () => approvedUrl }, approvedUrl),
+      window,
+      approvedUrl
+    ),
+    false
+  );
 });
 
 test("rejects destroyed windows and destroyed webContents", () => {
-  const sender = { isDestroyed: () => false };
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const sender = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
+  const event = createIpcEvent(sender, approvedUrl);
 
-  assert.equal(isAuthorizedWindowSender({ sender }, {
+  assert.equal(ipcAuthorization.isAuthorizedWindowSender(event, {
     isDestroyed: () => true,
     webContents: sender
-  }), false);
-  assert.equal(isAuthorizedWindowSender({ sender }, {
+  }, approvedUrl), false);
+  assert.equal(ipcAuthorization.isAuthorizedWindowSender(event, {
     isDestroyed: () => false,
     webContents: { isDestroyed: () => true }
-  }), false);
+  }, approvedUrl), false);
 });
 
 test("rejects malformed IPC events and missing windows", () => {
-  const webContents = { isDestroyed: () => false };
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
   const window = { isDestroyed: () => false, webContents };
 
-  assert.equal(isAuthorizedWindowSender(null, window), false);
-  assert.equal(isAuthorizedWindowSender({}, window), false);
-  assert.equal(isAuthorizedWindowSender({ sender: webContents }, null), false);
+  assert.equal(ipcAuthorization.isAuthorizedWindowSender(null, window, approvedUrl), false);
+  assert.equal(ipcAuthorization.isAuthorizedWindowSender({}, window, approvedUrl), false);
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(
+      createIpcEvent(webContents, approvedUrl),
+      null,
+      approvedUrl
+    ),
+    false
+  );
+});
+
+test("rejects subframes and any URL other than the exact approved app page", () => {
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
+  const window = { isDestroyed: () => false, webContents };
+
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(
+      createIpcEvent(webContents, approvedUrl, { isMainFrame: false }),
+      window,
+      approvedUrl
+    ),
+    false
+  );
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(
+      createIpcEvent(webContents, "file:///C:/app/src/renderer/other.html"),
+      window,
+      approvedUrl
+    ),
+    false
+  );
+  assert.equal(
+    ipcAuthorization.isAuthorizedWindowSender(
+      createIpcEvent({
+        ...webContents,
+        getURL: () => "file:///C:/app/src/renderer/other.html"
+      }, approvedUrl),
+      {
+        ...window,
+        webContents: {
+          ...webContents,
+          getURL: () => "file:///C:/app/src/renderer/other.html"
+        }
+      },
+      approvedUrl
+    ),
+    false
+  );
+});
+
+test("authorized IPC wrapper rejects bad senders and payloads before invoking handlers", async () => {
+  assert.equal(typeof ipcAuthorization.createAuthorizedIpcMain, "function");
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const rawHandlers = new Map();
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
+  const window = { isDestroyed: () => false, webContents };
+  const authorizedIpc = ipcAuthorization.createAuthorizedIpcMain({
+    ipcMain: {
+      handle: (channel, handler) => rawHandlers.set(channel, handler)
+    },
+    getWindow: () => window,
+    getApprovedUrl: () => approvedUrl
+  });
+  let calls = 0;
+  authorizedIpc.handle("dictation:insert-text", async (_event, text) => {
+    calls += 1;
+    return { ok: true, text };
+  });
+  const handler = rawHandlers.get("dictation:insert-text");
+
+  assert.deepEqual(
+    await handler(createIpcEvent({}, approvedUrl), "hello"),
+    { ok: false, reason: "unauthorized" }
+  );
+  assert.deepEqual(
+    await handler(
+      createIpcEvent(webContents, approvedUrl, { isMainFrame: false }),
+      "hello"
+    ),
+    { ok: false, reason: "unauthorized" }
+  );
+  assert.deepEqual(
+    await handler(createIpcEvent(webContents, approvedUrl), "x".repeat(100001)),
+    { ok: false, reason: "invalid_request" }
+  );
+  assert.deepEqual(
+    await handler(createIpcEvent(webContents, approvedUrl), "hello"),
+    { ok: true, text: "hello" }
+  );
+  assert.equal(calls, 1);
+});
+
+test("authorized IPC wrapper converts handler exceptions to a stable result", async () => {
+  assert.equal(typeof ipcAuthorization.createAuthorizedIpcMain, "function");
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const rawHandlers = new Map();
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
+  const authorizedIpc = ipcAuthorization.createAuthorizedIpcMain({
+    ipcMain: {
+      handle: (channel, handler) => rawHandlers.set(channel, handler)
+    },
+    getWindow: () => ({ isDestroyed: () => false, webContents }),
+    getApprovedUrl: () => approvedUrl
+  });
+  authorizedIpc.handle("settings:get", async () => {
+    throw new Error("spawn C:\\private\\helper.exe ENOENT stderr https://secret.example");
+  });
+
+  const result = await rawHandlers.get("settings:get")(
+    createIpcEvent(webContents, approvedUrl)
+  );
+
+  assert.deepEqual(result, { ok: false, reason: "operation_failed" });
 });
 
 test("preload exposes only narrow history mutation contracts", async () => {
@@ -75,3 +220,12 @@ test("preload exposes only narrow history mutation contracts", async () => {
     { channel: "history:reprocess", payload: "history-1" }
   ]);
 });
+
+function createIpcEvent(sender, url, { isMainFrame = true } = {}) {
+  const frame = { url };
+  frame.top = isMainFrame ? frame : { url };
+  return {
+    sender,
+    senderFrame: frame
+  };
+}

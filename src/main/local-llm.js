@@ -75,18 +75,9 @@ export async function checkTextProvider(settings = {}, deps = {}) {
 
   if (provider === "embedded") {
     const modelStatus = getEmbeddedLlmStatus(settings);
-    const ready = modelStatus.ready;
     return {
-      ready,
-      checks: [
-        {
-          label: "Built-in local language model",
-          status: ready ? "pass" : "fail",
-          message: ready
-            ? "llama.cpp executable and model paths are configured."
-            : modelStatus.message
-        }
-      ]
+      ready: modelStatus.ready,
+      reason: modelStatus.ready ? "" : "text_provider_unavailable"
     };
   }
 
@@ -94,27 +85,13 @@ export async function checkTextProvider(settings = {}, deps = {}) {
     const ready = Boolean(settings.ollamaEnabled);
     return {
       ready,
-      checks: [
-        {
-          label: "Ollama",
-          status: ready ? "pass" : "fail",
-          message: ready
-            ? "Ollama is enabled. Dictation will use the configured Ollama URL and model."
-            : "Enable Ollama in settings before using it for text cleanup."
-        }
-      ]
+      reason: ready ? "" : "text_provider_unavailable"
     };
   }
 
   return {
     ready: false,
-    checks: [
-      {
-        label: provider,
-        status: "fail",
-        message: "This text provider is not available in this build."
-      }
-    ]
+    reason: "text_provider_unavailable"
   };
 }
 
@@ -135,24 +112,12 @@ async function checkMyMemoryProvider(settings, deps = {}) {
 
     return {
       ready: true,
-      checks: [
-        {
-          label: "MyMemory Free",
-          status: "pass",
-          message: `Sample target-language request succeeded: ${translated}`
-        }
-      ]
+      reason: ""
     };
-  } catch (error) {
+  } catch {
     return {
       ready: false,
-      checks: [
-        {
-          label: "MyMemory Free",
-          status: "fail",
-          message: error.message
-        }
-      ]
+      reason: "text_provider_unavailable"
     };
   }
 }

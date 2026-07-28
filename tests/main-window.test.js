@@ -106,6 +106,30 @@ test("load failure dialog localizes the same fixed recovery action", async () =>
   assert.equal("detail" in displayedOptions, false);
 });
 
+test("load failure recovery copy is localized for every supported interface language", async () => {
+  const messages = new Set();
+  const buttonSets = new Set();
+
+  for (const language of ["en", "zh-Hans", "ja", "ko", "zh-Hant", "fr", "ru", "es"]) {
+    let options;
+    await mainWindowModule.showMainWindowLoadFailure({
+      app: {},
+      dialog: {
+        async showMessageBox(next) {
+          options = next;
+          return { response: 1 };
+        }
+      },
+      language
+    });
+    messages.add(options.message);
+    buttonSets.add(options.buttons.join("|"));
+  }
+
+  assert.equal(messages.size, 8);
+  assert.equal(buttonSets.size, 8);
+});
+
 test("reveal restores a minimized window before focusing it", () => {
   const harness = createWindowHarness({ minimized: true });
 
@@ -165,6 +189,33 @@ test("only main-frame failures are reported", () => {
   }]);
 });
 
+test("trusted navigation allows only the exact app page and denies every new window", () => {
+  assert.equal(typeof mainWindowModule.bindTrustedWindowNavigation, "function");
+  const harness = createWindowHarness();
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+
+  mainWindowModule.bindTrustedWindowNavigation({
+    window: harness.window,
+    approvedUrl
+  });
+
+  const approvedNavigation = harness.emitContents("will-navigate", approvedUrl);
+  const localNavigation = harness.emitContents(
+    "will-navigate",
+    "file:///C:/app/src/renderer/other.html"
+  );
+  const remoteNavigation = harness.emitContents(
+    "will-redirect",
+    "https://example.com"
+  );
+
+  assert.equal(approvedNavigation.defaultPrevented, false);
+  assert.equal(localNavigation.defaultPrevented, true);
+  assert.equal(remoteNavigation.defaultPrevented, true);
+  assert.deepEqual(harness.openWindow({ url: approvedUrl }), { action: "deny" });
+  assert.deepEqual(harness.openWindow({ url: "https://example.com" }), { action: "deny" });
+});
+
 function createWindowHarness({ minimized = false, destroyed = false } = {}) {
   const windowListeners = new Map();
   const contentsListeners = new Map();
@@ -176,6 +227,9 @@ function createWindowHarness({ minimized = false, destroyed = false } = {}) {
   };
   const webContents = {
     isDestroyed: () => destroyed,
+    setWindowOpenHandler(handler) {
+      contentsListeners.set("window-open", handler);
+    },
     once(eventName, listener) {
       contentsListeners.set(eventName, listener);
     },
@@ -216,7 +270,17 @@ function createWindowHarness({ minimized = false, destroyed = false } = {}) {
       return event;
     },
     emitContents(eventName, ...args) {
-      contentsListeners.get(eventName)?.({}, ...args);
+      const event = {
+        defaultPrevented: false,
+        preventDefault() {
+          this.defaultPrevented = true;
+        }
+      };
+      contentsListeners.get(eventName)?.(event, ...args);
+      return event;
+    },
+    openWindow(details) {
+      return contentsListeners.get("window-open")?.(details);
     }
   };
 }

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createSafeStorageSecretCodec, createSettingsStore } from "./settings-store.js";
 import { createSettingsEffectsTransaction } from "./settings-effects-transaction.js";
 import { DictationService } from "./dictation-service.js";
@@ -17,7 +17,13 @@ import { wireModelSetupIpc } from "./model-setup-ipc.js";
 import { checkTextProvider } from "./local-llm.js";
 import { createSystemInputController } from "./system-input-controller.js";
 import { createHudActions, wireHudIpc } from "./hud-actions.js";
-import { buildHudWindowOptions, getHudHtmlPath, getHudPreloadPath } from "./hud-window.js";
+import {
+  bindHudDisplayChanges,
+  buildHudWindowOptions,
+  getHudHtmlPath,
+  getHudPreloadPath,
+  showHudWindow
+} from "./hud-window.js";
 import { getRuntimeRoot, getVendorRoot, getAppRoot } from "./runtime-root.js";
 import { applyStartupSettings, shouldStartMinimized } from "./startup-settings.js";
 import { createDeferredReveal, registerSingleInstance } from "./single-instance.js";
@@ -25,6 +31,7 @@ import { createHotkeyManager } from "./hotkey-manager.js";
 import { buildTrayMenuTemplate, getBackgroundNotice, getTrayTooltip } from "./tray-menu.js";
 import { getTrayIconPath } from "./tray-icon.js";
 import {
+  bindTrustedWindowNavigation,
   bindMainWindowLifecycle,
   buildMainWindowOptions,
   revealMainWindow,
@@ -34,8 +41,21 @@ import { pasteText } from "./paste.js";
 import { insertTextIntoPreviousApp } from "./insert-text.js";
 import { createNativeInputShortcutFromPackage } from "./native-input-shortcut.js";
 import { createShortcutBackend } from "./shortcut-backend.js";
+import { createPasteLastAction } from "./paste-last-action.js";
+import { createAuthorizedIpcMain } from "./ipc-authorization.js";
+import { getValidatedWavBuffer } from "./ipc-contracts.js";
+import { handleStartupFailure } from "./startup-failure.js";
+import {
+  toLocalModelUiStatus,
+  toTextDiagnosticResult,
+  toWhisperDiagnosticResult
+} from "./product-ui-results.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const mainRendererPath = path.join(__dirname, "../renderer/index.html");
+const hudRendererPath = getHudHtmlPath(__dirname);
+const approvedMainRendererUrl = pathToFileURL(mainRendererPath).href;
+const approvedHudRendererUrl = pathToFileURL(hudRendererPath).href;
 const rendererRecordingPhases = new Set([
   "idle",
   "starting",
@@ -69,9 +89,11 @@ let hotkeyManager;
 let nativeShortcut;
 let lastSettings;
 let saveSettingsWithSystemEffects;
+let disposeHudDisplayChanges;
 let lastSystemInputState = { phase: "idle" };
 let lastDictationStatus;
 let lastDictationEntry;
+let activeDictationOperationId = null;
 const mainWindowReveal = createDeferredReveal(showMainWindow);
 
 function createWindow({ showOnReady = true } = {}) {
@@ -79,6 +101,10 @@ function createWindow({ showOnReady = true } = {}) {
     preloadPath: path.join(__dirname, "../preload.cjs")
   }));
   Menu.setApplicationMenu(null);
+  bindTrustedWindowNavigation({
+    window: mainWindow,
+    approvedUrl: approvedMainRendererUrl
+  });
   bindMainWindowLifecycle({
     window: mainWindow,
     showOnReady,
@@ -92,7 +118,7 @@ function createWindow({ showOnReady = true } = {}) {
       });
     }
   });
-  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+  mainWindow.loadFile(mainRendererPath);
   mainWindowReveal.flush();
 }
 
@@ -102,7 +128,16 @@ function createHudWindow() {
     workArea: screen.getPrimaryDisplay().workArea
   }));
 
-  hudWindow.loadFile(getHudHtmlPath(__dirname));
+  bindTrustedWindowNavigation({
+    window: hudWindow,
+    approvedUrl: approvedHudRendererUrl
+  });
+  disposeHudDisplayChanges?.();
+  disposeHudDisplayChanges = bindHudDisplayChanges({
+    window: hudWindow,
+    screen
+  });
+  hudWindow.loadFile(hudRendererPath);
 }
 
 function createTray() {
@@ -189,49 +224,33 @@ function sendRecordingStopCommand(command) {
 }
 
 function sendStatus(payload) {
-  lastDictationStatus = payload;
+  const status = activeDictationOperationId === null
+    ? payload
+    : { ...payload, operationId: activeDictationOperationId };
+  lastDictationStatus = status;
   if (isUsableWindow(mainWindow)) {
-    mainWindow.webContents.send("dictation:status", payload);
+    mainWindow.webContents.send("dictation:status", status);
   }
-  systemInputController?.handleSystemStatus(payload);
+  systemInputController?.handleSystemStatus(status);
 }
 
 function sendTransientStatus(payload) {
+  if (systemInputController && !systemInputController.handleAuxiliaryStatus(payload)) {
+    return false;
+  }
   if (isUsableWindow(mainWindow)) {
     mainWindow.webContents.send("dictation:status", payload);
   }
-  systemInputController?.handleSystemStatus(payload);
+  return true;
 }
 
 async function pasteLastDictation() {
-  const text = getLastDictationText(lastDictationStatus);
-  if (!text) {
-    sendTransientStatus({
-      phase: "warning",
-      reason: "no_last_dictation",
-      message: "No previous dictation result to paste."
-    });
-    return;
-  }
-
-  sendTransientStatus({
-    phase: "pasting",
-    message: "Pasting last dictation..."
-  });
-
-  try {
-    await pasteText(text, { clipboard });
-    sendTransientStatus({
-      phase: "done",
-      message: "Last dictation pasted."
-    });
-  } catch (error) {
-    sendTransientStatus({
-      phase: "warning",
-      reason: error?.code || "paste_failed",
-      message: "Paste failed. Text copied."
-    });
-  }
+  return createPasteLastAction({
+    hasActiveOperation: () => Boolean(systemInputController?.hasActiveOperation()),
+    getText: () => getLastDictationText(lastDictationStatus),
+    paste: (text) => pasteText(text, { clipboard }),
+    notify: sendTransientStatus
+  })();
 }
 
 function getLastDictationText(status) {
@@ -281,15 +300,7 @@ function sendSystemInputStatus(state) {
 }
 
 function showHud() {
-  if (!isUsableWindow(hudWindow)) {
-    return;
-  }
-
-  if (typeof hudWindow.showInactive === "function") {
-    hudWindow.showInactive();
-  } else {
-    hudWindow.show();
-  }
+  showHudWindow({ window: hudWindow, screen });
 }
 
 function hideHud() {
@@ -349,32 +360,22 @@ function wireIpc() {
   wireHudIpc({
     ipcMain,
     getHudWindow: () => hudWindow,
+    getApprovedUrl: () => approvedHudRendererUrl,
     hudActions
   });
-  ipcMain.on("recording:status", (_event, payload) => {
-    if (_event.sender !== mainWindow?.webContents) {
-      return;
-    }
-
+  const mainRendererIpc = createAuthorizedIpcMain({
+    ipcMain,
+    getWindow: () => mainWindow,
+    getApprovedUrl: () => approvedMainRendererUrl
+  });
+  mainRendererIpc.on("recording:status", (_event, payload) => {
     const status = sanitizeRecordingStatusPayload(payload);
     systemInputController?.handleRendererStatus(status);
   });
-  ipcMain.on("recording:toggle-request", (_event) => {
-    if (_event.sender !== mainWindow?.webContents) {
-      return;
-    }
-
+  mainRendererIpc.on("recording:toggle-request", () => {
     void systemInputController?.toggle();
   });
-  ipcMain.handle("dictation:insert-text", async (_event, text) => {
-    if (_event.sender !== mainWindow?.webContents) {
-      return {
-        ok: false,
-        reason: "unauthorized",
-        message: "Paste failed. Text copied."
-      };
-    }
-
+  mainRendererIpc.handle("dictation:insert-text", async (_event, text) => {
     try {
       return await insertTextIntoPreviousApp(text, { mainWindow, clipboard });
     } catch {
@@ -385,42 +386,58 @@ function wireIpc() {
       };
     }
   });
-  ipcMain.handle("dictation:status-latest", () => lastDictationStatus || null);
-  ipcMain.handle("settings:get", () => settingsStore.getSettings());
-  ipcMain.handle("settings:save", async (_event, settings) => {
+  mainRendererIpc.handle("dictation:status-latest", () => lastDictationStatus || null);
+  mainRendererIpc.handle("settings:get", () => settingsStore.getSettings());
+  mainRendererIpc.handle("settings:save", async (_event, settings) => {
     return saveSettingsWithSystemEffects(settings);
   });
-  ipcMain.handle("history:list", () => settingsStore.getHistory());
+  mainRendererIpc.handle("history:list", () => settingsStore.getHistory());
+  mainRendererIpc.handle(
+    "data:recovery-status",
+    () => settingsStore.getRecoveryState?.() || []
+  );
   wireHistoryIpc({
-    ipcMain,
-    getMainWindow: () => mainWindow,
+    ipcMain: mainRendererIpc,
     historyActions
   });
-  ipcMain.handle("diagnostics:whisper", async () => {
+  mainRendererIpc.handle("diagnostics:whisper", async () => {
     const settings = await settingsStore.getSettings();
-    return validateWhisperSetup(settings);
+    return toWhisperDiagnosticResult(await validateWhisperSetup(settings));
   });
-  ipcMain.handle("diagnostics:text", async () => {
+  mainRendererIpc.handle("diagnostics:text", async () => {
     const settings = await settingsStore.getSettings({ includeSecrets: true });
-    return checkTextProvider(settings);
+    return toTextDiagnosticResult(await checkTextProvider(settings));
   });
-  ipcMain.handle("providers:status", async () => {
+  mainRendererIpc.handle("providers:status", async () => {
     const settings = await settingsStore.getSettings({ includeSecrets: true });
     return getProcessingProviderStatus(settings);
   });
-  ipcMain.handle("llm:status", () => detectEmbeddedLlmAssets(runtimeRoot));
+  mainRendererIpc.handle("llm:status", async () => (
+    toLocalModelUiStatus(await detectEmbeddedLlmAssets(runtimeRoot))
+  ));
   wireModelSetupIpc({
-    ipcMain,
+    ipcMain: mainRendererIpc,
     modelSetupService,
     settingsStore
   });
-  ipcMain.handle("dictation:wav", async (_event, wavBytes) => {
-    const buffer = Buffer.from(wavBytes);
-    const entry = await dictationService.processWav(buffer);
-    if (isPasteableDictationEntry(entry)) {
-      lastDictationEntry = entry;
+  mainRendererIpc.handle("dictation:wav", async (_event, payload) => {
+    const operationId = payload.operationId;
+    if (systemInputController?.getState().operationId !== operationId) {
+      return { ok: false, reason: "stale_operation" };
     }
-    return entry;
+    const buffer = getValidatedWavBuffer(payload.wavBytes);
+    activeDictationOperationId = operationId;
+    try {
+      const entry = await dictationService.processWav(buffer);
+      if (isPasteableDictationEntry(entry)) {
+        lastDictationEntry = entry;
+      }
+      return entry;
+    } finally {
+      if (activeDictationOperationId === operationId) {
+        activeDictationOperationId = null;
+      }
+    }
   });
 }
 
@@ -430,7 +447,14 @@ const ownsSingleInstance = registerSingleInstance(app, {
 
 if (ownsSingleInstance) {
   app.whenReady().then(async () => {
-  configureMediaPermissions(session.defaultSession);
+  configureMediaPermissions(session.defaultSession, {
+    getAllowedWebContents: () => mainWindow?.webContents || null,
+    getAllowedUrl: () => approvedMainRendererUrl
+  }).catch(() => handleStartupFailure({
+    app,
+    dialog,
+    language: lastSettings?.interfaceLanguage
+  }));
   runtimeRoot = getRuntimeRoot({ app });
   vendorRoot = getVendorRoot(runtimeRoot);
   appRoot = getAppRoot({ app });
@@ -524,6 +548,8 @@ if (ownsSingleInstance) {
   });
 
   app.on("will-quit", () => {
+    disposeHudDisplayChanges?.();
+    disposeHudDisplayChanges = null;
     hudActions?.dispose();
     hotkeyManager?.unregister();
     globalShortcut.unregisterAll?.();

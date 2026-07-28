@@ -1,4 +1,4 @@
-import { describeMicrophoneError } from "../shared/media-errors.js";
+import { getMicrophoneErrorReason } from "../shared/media-errors.js";
 import { getRecordReadiness } from "./record-readiness.js";
 import { getRecordRecoveryAction } from "./record-recovery-action.js";
 import { createShortcutRecorder } from "./shortcut-recorder.js";
@@ -36,6 +36,8 @@ import {
   normalizeSnippets,
   personalizationComparisonKey
 } from "../shared/personalization.js";
+import { WavRecorder } from "./wav-recorder.js";
+import { requireSuccessfulIpcResult } from "./ipc-results.js";
 
 const form = document.querySelector("#settingsForm");
 const recordButton = document.querySelector("#recordButton");
@@ -95,8 +97,6 @@ const settingsSectionNav = settingsDrawer.querySelector(".settings-section-tabs"
 const settingsSectionButtons = [...settingsDrawer.querySelectorAll("[data-settings-section]")];
 const settingsPanels = [...settingsDrawer.querySelectorAll("[data-settings-panel]")];
 const localModelStatus = document.querySelector("#localModelStatus");
-const setupLocalModel = document.querySelector("#setupLocalModel");
-const localModelInstallCommand = document.querySelector("#localModelInstallCommand");
 const setupChecklist = document.querySelector("#setupChecklist");
 const whisperSetupStatus = document.querySelector("#whisperSetupStatus");
 const llmSetupTitle = document.querySelector("[data-setup-type='llm'] strong");
@@ -249,7 +249,7 @@ function attachTranslationToIconLabel(button, key) {
 }
 
 async function init() {
-  currentSettings = await window.localFlow.getSettings();
+  currentSettings = requireSuccessfulIpcResult(await window.localFlow.getSettings());
   currentLanguage = normalizeInterfaceLanguage(currentSettings.interfaceLanguage);
   applyInterfaceLanguage(currentLanguage);
   fillSettings(currentSettings);
@@ -302,7 +302,6 @@ async function init() {
   checkWhisper.addEventListener("click", runWhisperDiagnostics);
   checkMicrophone.addEventListener("click", runMicrophoneDiagnostics);
   checkTextProvider.addEventListener("click", runTextProviderDiagnostics);
-  setupLocalModel.addEventListener("click", showLocalModelInstallCommand);
   installWhisper.addEventListener("click", () => runModelSetup("whisper"));
   installLlm.addEventListener("click", () => runModelSetup("llm"));
   refreshSetupStatus.addEventListener("click", refreshSetupStatusAndSettings);
@@ -344,6 +343,33 @@ async function init() {
   await renderLocalModelStatus();
   await refreshProviderStatus();
   await refreshSetupStatusView({ updateStatus: false });
+  await renderDataRecoveryStatus();
+}
+
+async function renderDataRecoveryStatus() {
+  if (!window.localFlow.getDataRecoveryStatus) return;
+
+  try {
+    const recovery = await window.localFlow.getDataRecoveryStatus();
+    const reasons = new Set(
+      Array.isArray(recovery)
+        ? recovery.map((entry) => entry?.reason).filter((reason) => (
+          /^(?:settings|history)_(?:recovered|unavailable)$/.test(reason)
+        ))
+        : []
+    );
+    if (reasons.has("settings_unavailable")) {
+      form.querySelector('[type="submit"]')?.setAttribute("disabled", "");
+    }
+    if (reasons.has("history_unavailable")) {
+      resultText.setAttribute("contenteditable", "false");
+      reprocessResult.disabled = true;
+    }
+    const reason = [...reasons].at(-1);
+    if (reason) setStatus(t(`data.recovery.${reason}`));
+  } catch {
+    // Startup remains usable when recovery status cannot be replayed.
+  }
 }
 
 function changeInterfaceLanguage() {
@@ -386,7 +412,7 @@ function createSettingsSaveOperation(next) {
     }
   };
   return async () => {
-    const response = await window.localFlow.saveSettings(next);
+    const response = requireSuccessfulIpcResult(await window.localFlow.saveSettings(next));
     return reconcileSettingsResponse(response, responseContext);
   };
 }
@@ -492,8 +518,12 @@ async function runWhisperDiagnostics() {
   try {
     setStatus(t("status.checkingWhisper"));
     await saveSettingsFromCurrentForm();
-    const result = await window.localFlow.checkWhisper();
-    diagnosticsList.innerHTML = renderChecks(result.checks);
+    const result = requireSuccessfulIpcResult(await window.localFlow.checkWhisper());
+    diagnosticsList.innerHTML = renderChecks([{
+      label: t("diagnostic.whisper"),
+      status: result.ready ? "pass" : "fail",
+      message: t(result.ready ? "diagnostic.whisper.ready" : "diagnostic.whisper.unavailable")
+    }]);
     setStatus(result.ready ? t("status.whisperReady") : t("status.whisperNeedsAttention"));
   } catch {
     setStatus(t("status.whisperFailed"));
@@ -550,7 +580,7 @@ async function runMicrophoneDiagnostics() {
       {
         label: t("diagnostic.permission"),
         status: "fail",
-        message: describeMicrophoneError(error)
+        message: t(`diagnostic.microphoneError.${getMicrophoneErrorReason(error)}`)
       }
     ]);
     setStatus(t("status.microphoneFailed"));
@@ -561,15 +591,23 @@ async function runTextProviderDiagnostics() {
   try {
     setStatus(t("status.checkingTextProvider"));
     await saveSettingsFromCurrentForm({ updateStatus: false });
-    const result = await window.localFlow.checkTextProvider();
-    textDiagnosticsList.innerHTML = renderChecks(result.checks);
+    const result = requireSuccessfulIpcResult(await window.localFlow.checkTextProvider());
+    textDiagnosticsList.innerHTML = renderChecks([{
+      label: t("diagnostic.textProvider"),
+      status: result.ready ? "pass" : "fail",
+      message: t(
+        result.ready
+          ? "diagnostic.textProvider.ready"
+          : "diagnostic.textProvider.unavailable"
+      )
+    }]);
     setStatus(result.ready ? t("status.textProviderReady") : t("status.textProviderNeedsAttention"));
-  } catch (error) {
+  } catch {
     textDiagnosticsList.innerHTML = renderChecks([
       {
         label: t("diagnostic.textProvider"),
         status: "fail",
-        message: error.message
+        message: t("diagnostic.textProvider.unavailable")
       }
     ]);
     setStatus(t("status.textProviderFailed"));
@@ -585,21 +623,13 @@ async function renderLocalModelStatus() {
   localModelStatus.innerHTML = `
     <strong>${escapeHtml(ready ? t("model.status.ready") : t("model.status.missing"))}</strong>
     <span>${escapeHtml(ready
-      ? t("model.status.readyDetail", { model: status.modelFile })
+      ? t("model.status.readyDetail", { model: status.modelId || t("model.provider.embedded") })
       : t("model.status.missingDetail", {
         model: `${status.modelId}:${status.quantization}`,
         size: status.approximateSize,
         license: status.license
       }))}</span>
   `;
-
-  if (status.cliPath && !form.embeddedLlmCliPath.value) {
-    form.embeddedLlmCliPath.value = status.cliPath;
-  }
-  if (status.modelPath && !form.embeddedLlmModelPath.value) {
-    form.embeddedLlmModelPath.value = status.modelPath;
-  }
-  localModelInstallCommand.textContent = status.setupCommand || "powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\setup-llm.ps1";
 }
 
 async function refreshProviderStatus() {
@@ -713,16 +743,11 @@ async function applyRecordRecoveryAction() {
   openSettingsDrawer();
 }
 
-function showLocalModelInstallCommand() {
-  localModelInstallCommand.hidden = false;
-  setStatus(t("model.installCommandShown"));
-}
-
 async function refreshSetupStatusView({ updateStatus = true } = {}) {
   if (!window.localFlow.getModelSetupStatus) return;
 
   try {
-    currentSetupStatus = await window.localFlow.getModelSetupStatus();
+    currentSetupStatus = requireSuccessfulIpcResult(await window.localFlow.getModelSetupStatus());
   } catch (error) {
     currentSetupStatus = createFailedSetupStatus(error);
     if (updateStatus) {
@@ -741,8 +766,9 @@ async function refreshSetupStatusAndSettings() {
 
   setSetupBusy(true);
   try {
-    currentSetupStatus = await window.localFlow.refreshModelSetupStatus();
-    await saveDetectedSetupPaths();
+    currentSetupStatus = requireSuccessfulIpcResult(
+      await window.localFlow.refreshModelSetupStatus()
+    );
     renderSetupChecklist();
     await renderLocalModelStatus();
     await refreshProviderStatus();
@@ -764,19 +790,14 @@ async function runModelSetup(type) {
 
   const stopPolling = startSetupStatusPolling(type);
   try {
-    const result = await window.localFlow.startModelSetup(type);
-    if (result.status === "complete") {
-      const refreshedStatus = window.localFlow.refreshModelSetupStatus
-        ? await window.localFlow.refreshModelSetupStatus()
-        : { ...currentSetupStatus, assets: result.assets };
-      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
-      await saveDetectedSetupPaths();
-    } else {
-      const refreshedStatus = window.localFlow.getModelSetupStatus
-        ? await window.localFlow.getModelSetupStatus()
-        : { ...currentSetupStatus, assets: result.assets };
-      currentSetupStatus = mergeSetupResult(refreshedStatus, type, result);
-    }
+    currentSetupStatus = requireSuccessfulIpcResult(
+      await window.localFlow.startModelSetup(type)
+    );
+    const result = currentSetupStatus?.setups?.[type] || {
+      type,
+      status: "failed",
+      failureReason: "setup_failed"
+    };
     renderSetupChecklist();
     await renderLocalModelStatus();
     await refreshProviderStatus();
@@ -787,8 +808,7 @@ async function runModelSetup(type) {
     currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
       type,
       status: "failed",
-      output: [],
-      error: ""
+      failureReason: "setup_failed"
     });
     renderSetupChecklist();
     setStatus(t("setup.startFailed"));
@@ -804,8 +824,10 @@ async function cancelActiveModelSetup() {
 
   setStatus(t("setup.cancelling"));
   try {
-    const result = await window.localFlow.cancelModelSetup(activeSetupType);
-    currentSetupStatus = mergeSetupResult(currentSetupStatus, activeSetupType, result);
+    currentSetupStatus = requireSuccessfulIpcResult(
+      await window.localFlow.cancelModelSetup(activeSetupType)
+    );
+    const result = currentSetupStatus?.setups?.[activeSetupType];
     renderSetupChecklist();
     setStatus(getSetupFailureMessage(result, "setup.cancelled"));
   } catch {
@@ -821,14 +843,15 @@ function startSetupStatusPolling(type) {
   currentSetupStatus = mergeSetupResult(currentSetupStatus, type, {
     type,
     status: "running",
-    output: [],
-    error: ""
+    failureReason: ""
   });
   renderSetupChecklist();
 
   const interval = window.setInterval(async () => {
     try {
-      currentSetupStatus = await window.localFlow.getModelSetupStatus();
+      currentSetupStatus = requireSuccessfulIpcResult(
+        await window.localFlow.getModelSetupStatus()
+      );
       renderSetupChecklist();
     } catch {
       // Keep the last visible setup state while the setup process is still running.
@@ -849,32 +872,10 @@ function mergeSetupResult(status, type, result) {
   };
 }
 
-async function saveDetectedSetupPaths() {
-  const assets = currentSetupStatus?.assets || {};
-  const next = {};
-
-  if (assets.whisper?.whisperCliPath) next.whisperCliPath = assets.whisper.whisperCliPath;
-  if (assets.whisper?.whisperModelPath) next.whisperModelPath = assets.whisper.whisperModelPath;
-  if (assets.llm?.cliPath) next.embeddedLlmCliPath = assets.llm.cliPath;
-  if (assets.llm?.modelPath) next.embeddedLlmModelPath = assets.llm.modelPath;
-
-  if (Object.keys(next).length) {
-    const fieldValuesAtSave = captureFormFieldValues();
-    const saveOperation = createSettingsSaveOperation(next);
-    await enqueueSettingsOperation(async () => {
-      await saveOperation();
-      fillSettings(currentSettings, { fieldValuesAtSave });
-    });
-  }
-}
-
 function renderSetupChecklist() {
   if (!currentSetupStatus || !setupChecklist) return;
 
-  const whisperReady = Boolean(
-    currentSetupStatus.assets?.whisper?.whisperCliPath &&
-    currentSetupStatus.assets?.whisper?.whisperModelPath
-  );
+  const whisperReady = Boolean(currentSetupStatus.assets?.whisper?.ready);
   const llmReady = Boolean(currentSetupStatus.assets?.llm?.ready);
   const whisperStatus = currentSetupStatus.setups?.whisper?.status || "idle";
   const llmStatus = currentSetupStatus.setups?.llm?.status || "idle";
@@ -931,43 +932,26 @@ function getTextSetupState(llmReady, llmStatus, setup = {}) {
 function getActiveSetupStatus(whisperStatus, llmStatus) {
   if (whisperStatus === "running") return currentSetupStatus.setups?.whisper;
   if (llmStatus === "running") return currentSetupStatus.setups?.llm;
-  const setups = [currentSetupStatus.setups?.whisper, currentSetupStatus.setups?.llm]
-    .filter((setup) => setup?.completedAt || setup?.output?.length);
-  return setups.at(-1) || null;
+  if (activeSetupType) return currentSetupStatus.setups?.[activeSetupType] || null;
+  return [currentSetupStatus.setups?.llm, currentSetupStatus.setups?.whisper]
+    .find((setup) => setup && setup.status !== "idle") || null;
 }
 
 function renderSetupOutput(setup) {
   if (!setupOutput) return;
 
-  const lines = getVisibleSetupOutput(setup);
-  if (!lines.length) {
+  if (!setup || setup.status === "idle") {
     setupOutput.hidden = true;
     setupOutput.textContent = "";
     return;
   }
 
   setupOutput.hidden = false;
-  setupOutput.textContent = lines.join("\n");
-}
-
-function getVisibleSetupOutput(setup) {
-  const lines = (setup?.output || [])
-    .map(sanitizeSetupOutputLine)
-    .filter(Boolean)
-    .slice(-8);
-
-  if (!lines.length && setup?.status === "running") {
-    return [t("setup.progress.wait")];
-  }
-  return lines;
-}
-
-function sanitizeSetupOutputLine(line) {
-  const text = String(line || "").trim();
-  if (!text) return "";
-  if (/[A-Za-z]:\\/.test(text)) return "";
-  if (/Paste these paths/i.test(text)) return "";
-  return text;
+  setupOutput.textContent = setup.status === "running"
+    ? t("setup.progress.wait")
+    : setup.status === "complete"
+      ? t(`setup.${setup.type}.complete`)
+      : getSetupFailureMessage(setup);
 }
 
 function setSetupBusy(busy) {
@@ -976,13 +960,23 @@ function setSetupBusy(busy) {
   applyRecordReadiness();
 }
 
-function createFailedSetupStatus(error) {
-  const message = error?.message || t("setup.failed");
+function createFailedSetupStatus() {
   return {
-    assets: currentSetupStatus?.assets || {},
+    assets: currentSetupStatus?.assets || {
+      whisper: { ready: false },
+      llm: { ready: false }
+    },
     setups: {
-      whisper: { type: "whisper", status: "failed", output: [], error: message },
-      llm: { type: "llm", status: "failed", output: [], error: message }
+      whisper: {
+        type: "whisper",
+        status: "failed",
+        failureReason: "setup_failed"
+      },
+      llm: {
+        type: "llm",
+        status: "failed",
+        failureReason: "setup_failed"
+      }
     }
   };
 }
@@ -1522,7 +1516,9 @@ async function startRecording(command = {}) {
       return;
     }
 
-    nextRecorder = new WavRecorder();
+    nextRecorder = new WavRecorder({
+      onLimit: (reason) => handleRecordingLimit(operationToken, operationId, reason)
+    });
     recorder = nextRecorder;
     await nextRecorder.start();
     if (!isCurrentRecordingOperation(operationToken, operationId)) {
@@ -1560,6 +1556,25 @@ function failRecordingStart(operationToken, operationId, message, reason) {
   activeRecordingOperationId = null;
 }
 
+function handleRecordingLimit(operationToken, operationId, reason) {
+  if (!isCurrentRecordingOperation(operationToken, operationId)) return;
+
+  const messageKey = reason === "recording_too_long"
+    ? "status.recordingTooLong"
+    : "status.recordingTooLarge";
+  const message = t(messageKey);
+  cleanupRecorder();
+  isRecording = false;
+  setRecordingLifecyclePhase("idle");
+  setViewPhase("warning");
+  document.body.classList.remove("recording");
+  updateRecordLabel();
+  applyRecordReadiness();
+  setStatus(message);
+  reportRecordingLifecycle({ phase: "warning", reason, message });
+  activeRecordingOperationId = null;
+}
+
 async function stopRecording(command = {}) {
   if (recordingLifecyclePhase !== "recording") return;
   const operationId = normalizeRecordingOperationId(command.operationId);
@@ -1585,7 +1600,9 @@ async function stopRecording(command = {}) {
       recorder = null;
     }
 
-    const entry = await window.localFlow.processWav(wav);
+    const entry = requireSuccessfulIpcResult(
+      await window.localFlow.processWav(wav, operationId)
+    );
     if (!isCurrentRecordingOperation(operationToken, operationId)) return;
 
     activePrimaryView = "home";
@@ -1636,8 +1653,6 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
   const data = new FormData(form);
   const next = {
     interfaceLanguage: data.get("interfaceLanguage"),
-    whisperCliPath: data.get("whisperCliPath"),
-    whisperModelPath: data.get("whisperModelPath"),
     whisperLanguage: data.get("whisperLanguage"),
     outputLanguage: data.get("outputLanguage"),
     hotkey: data.get("hotkey"),
@@ -1649,19 +1664,7 @@ async function saveSettingsFromCurrentForm({ updateStatus = true } = {}) {
     pasteAfterTranscribe: form.pasteAfterTranscribe.checked,
     polishMode: data.get("polishMode"),
     ollamaEnabled: form.ollamaEnabled.checked,
-    ollamaBaseUrl: data.get("ollamaBaseUrl"),
-    ollamaModel: data.get("ollamaModel"),
     llmProvider: data.get("llmProvider"),
-    embeddedLlmCliPath: data.get("embeddedLlmCliPath"),
-    embeddedLlmModelPath: data.get("embeddedLlmModelPath"),
-    whisperRuntimeUrl: data.get("whisperRuntimeUrl"),
-    whisperRuntimeMirrorUrls: data.get("whisperRuntimeMirrorUrls"),
-    whisperModelUrl: data.get("whisperModelUrl"),
-    whisperModelMirrorUrls: data.get("whisperModelMirrorUrls"),
-    llamaRuntimeUrl: data.get("llamaRuntimeUrl"),
-    llamaRuntimeMirrorUrls: data.get("llamaRuntimeMirrorUrls"),
-    qwenModelUrl: data.get("qwenModelUrl"),
-    qwenModelMirrorUrls: data.get("qwenModelMirrorUrls"),
     dictionary: normalizeDictionary(currentSettings?.dictionary),
     snippets: normalizeSnippets(currentSettings?.snippets)
   };
@@ -2789,145 +2792,4 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
-
-class WavRecorder {
-  async start() {
-    ensureMediaDevicesApi();
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
-    });
-    this.audioContext = new AudioContext();
-    this.sampleRate = this.audioContext.sampleRate;
-    this.chunks = [];
-    this.source = this.audioContext.createMediaStreamSource(this.stream);
-    await this.audioContext.audioWorklet.addModule(new URL("./audio-recorder-worklet.js", import.meta.url).href);
-    this.processor = new AudioWorkletNode(this.audioContext, "wav-recorder-processor", {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [1]
-    });
-    this.processor.port.onmessage = (event) => {
-      this.chunks.push(new Float32Array(event.data));
-    };
-    this.source.connect(this.processor);
-    this.processor.connect(this.audioContext.destination);
-  }
-
-  async stop() {
-    this.processor.port.onmessage = null;
-    this.processor.port.close();
-    this.processor.disconnect();
-    this.source.disconnect();
-    this.stream.getTracks().forEach((track) => track.stop());
-    await this.audioContext.close();
-
-    const merged = mergeFloat32(this.chunks);
-    const downsampled = downsample(merged, this.sampleRate, 16000);
-    return encodeWav(downsampled, 16000);
-  }
-
-  dispose() {
-    try {
-      if (this.processor?.port) {
-        this.processor.port.onmessage = null;
-        this.processor.port.close();
-      }
-    } catch {}
-
-    try {
-      this.processor?.disconnect();
-    } catch {}
-
-    try {
-      this.source?.disconnect();
-    } catch {}
-
-    try {
-      this.stream?.getTracks().forEach((track) => track.stop());
-    } catch {}
-
-    try {
-      this.audioContext?.close?.().catch(() => {});
-    } catch {}
-  }
-}
-
-function mergeFloat32(chunks) {
-  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const result = new Float32Array(length);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return result;
-}
-
-function downsample(buffer, sourceRate, targetRate) {
-  if (sourceRate === targetRate) {
-    return buffer;
-  }
-
-  const ratio = sourceRate / targetRate;
-  const length = Math.round(buffer.length / ratio);
-  const result = new Float32Array(length);
-
-  for (let i = 0; i < length; i += 1) {
-    const start = Math.floor(i * ratio);
-    const end = Math.floor((i + 1) * ratio);
-    let sum = 0;
-    let count = 0;
-
-    for (let j = start; j < end && j < buffer.length; j += 1) {
-      sum += buffer[j];
-      count += 1;
-    }
-
-    result[i] = count ? sum / count : 0;
-  }
-
-  return result;
-}
-
-function encodeWav(samples, sampleRate) {
-  const bytesPerSample = 2;
-  const blockAlign = bytesPerSample;
-  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
-  const view = new DataView(buffer);
-
-  writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + samples.length * bytesPerSample, true);
-  writeString(view, 8, "WAVE");
-  writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * blockAlign, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, "data");
-  view.setUint32(40, samples.length * bytesPerSample, true);
-
-  let offset = 44;
-  for (const sample of samples) {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-    offset += 2;
-  }
-
-  return buffer;
-}
-
-function writeString(view, offset, value) {
-  for (let i = 0; i < value.length; i += 1) {
-    view.setUint8(offset + i, value.charCodeAt(i));
-  }
 }

@@ -50,6 +50,7 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /name:\s*Windows Installer Artifact/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /push:/);
+  assert.match(workflow, /pull_request:/);
   assert.match(workflow, /runs-on:\s*windows-latest/);
   assert.match(workflow, /actions\/checkout@v4/);
   assert.match(workflow, /actions\/setup-node@v4/);
@@ -57,7 +58,11 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /setup-llm\.ps1 -RuntimeOnly/);
   assert.match(workflow, /npm test/);
+  assert.match(workflow, /npm run check:app/);
+  assert.match(workflow, /npm run check:visual/);
   assert.match(workflow, /npm run dist:win/);
+  assert.match(workflow, /npm run check:packaged/);
+  assert.match(workflow, /npm run check:product/);
   assert.match(workflow, /Tee-Object -FilePath \.tmp\/dist-win\.log/);
   assert.match(workflow, /windows-build-diagnostics/);
   assert.match(workflow, /if:\s*\$\{\{ always\(\) \}\}/);

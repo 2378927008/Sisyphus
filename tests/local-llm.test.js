@@ -171,9 +171,7 @@ test("checkTextProvider probes MyMemory with a small target-language request", a
     }
   );
 
-  assert.equal(result.ready, true);
-  assert.equal(result.checks[0].status, "pass");
-  assert.equal(result.checks[0].label, "MyMemory Free");
+  assert.deepEqual(result, { ready: true, reason: "" });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].origin, "https://api.mymemory.translated.net");
   assert.equal(requests[0].searchParams.get("q"), "hello world");
@@ -187,9 +185,10 @@ test("checkTextProvider reports missing embedded model files", async () => {
     embeddedLlmModelPath: "C:/missing/Qwen3-4B-Q4_K_M.gguf"
   });
 
-  assert.equal(result.ready, false);
-  assert.equal(result.checks[0].status, "fail");
-  assert.match(result.checks[0].message, /not found/);
+  assert.deepEqual(result, {
+    ready: false,
+    reason: "text_provider_unavailable"
+  });
 });
 
 test("checkTextProvider does not bypass embedded file checks when spawn is injected", async () => {
@@ -206,9 +205,10 @@ test("checkTextProvider does not bypass embedded file checks when spawn is injec
     }
   );
 
-  assert.equal(result.ready, false);
-  assert.equal(result.checks[0].status, "fail");
-  assert.match(result.checks[0].message, /not found/);
+  assert.deepEqual(result, {
+    ready: false,
+    reason: "text_provider_unavailable"
+  });
 });
 
 test("checkTextProvider reports MyMemory failures without throwing", async () => {
@@ -229,9 +229,35 @@ test("checkTextProvider reports MyMemory failures without throwing", async () =>
     }
   );
 
-  assert.equal(result.ready, false);
-  assert.equal(result.checks[0].status, "fail");
-  assert.match(result.checks[0].message, /Daily limit exceeded/);
+  assert.deepEqual(result, {
+    ready: false,
+    reason: "text_provider_unavailable"
+  });
+});
+
+test("checkTextProvider returns a stable reason without provider responses or raw exceptions", async () => {
+  const result = await checkTextProvider(
+    {
+      llmProvider: "mymemory",
+      outputLanguage: "zh-Hans"
+    },
+    {
+      fetch: async () => ({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          responseStatus: 429,
+          responseDetails:
+            "Daily limit exceeded at https://vendor.example: stderr spawn ENOENT"
+        })
+      })
+    }
+  );
+
+  assert.deepEqual(result, {
+    ready: false,
+    reason: "text_provider_unavailable"
+  });
 });
 
 function createFakeChild({ stdout = "", stderr = "", code = 0 } = {}) {

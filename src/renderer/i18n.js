@@ -233,8 +233,124 @@ const personalizationTranslations = {
   }
 };
 
+const productSafetyKeys = [
+  "diagnostic.whisper",
+  "diagnostic.whisper.ready",
+  "diagnostic.whisper.unavailable",
+  "diagnostic.textProvider.ready",
+  "diagnostic.textProvider.unavailable",
+  "diagnostic.microphoneError.permission_denied",
+  "diagnostic.microphoneError.not_found",
+  "diagnostic.microphoneError.busy",
+  "diagnostic.microphoneError.constraints",
+  "diagnostic.microphoneError.security",
+  "diagnostic.microphoneError.unavailable",
+  "status.recordingTooLong",
+  "status.recordingTooLarge",
+  "data.recovery.settings_recovered",
+  "data.recovery.history_recovered",
+  "data.recovery.settings_unavailable",
+  "data.recovery.history_unavailable"
+];
+const productSafetyValues = {
+  en: [
+    "Whisper speech recognition",
+    "Local speech recognition is ready.",
+    "Local speech recognition needs attention.",
+    "Text output is ready.",
+    "Text output needs attention.",
+    "Microphone permission was denied. Allow microphone access for desktop apps in Windows Settings, then restart Local Flow.",
+    "No microphone was found. Connect or enable a microphone and try again.",
+    "The microphone is busy or unavailable. Close other recording apps and try again.",
+    "The selected microphone cannot use the requested audio settings. Try another microphone.",
+    "Microphone access was blocked. Restart Local Flow and try again.",
+    "The microphone could not be started. Check microphone access and try again.",
+    "Recording stopped after reaching the five-minute limit.",
+    "Recording stopped because the audio limit was reached.",
+    "Damaged settings were preserved and safe defaults were restored.",
+    "Damaged history was preserved and an empty history was restored.",
+    "Settings storage is temporarily unavailable. Changes are disabled.",
+    "History storage is temporarily unavailable. Changes are disabled."
+  ],
+  "zh-Hans": [
+    "Whisper 语音识别", "本地语音识别已就绪。", "本地语音识别需要处理。", "文本输出已就绪。", "文本输出需要处理。",
+    "麦克风权限被拒绝。请在 Windows 设置中允许桌面应用访问麦克风，然后重启 Local Flow。",
+    "未找到麦克风。请连接或启用麦克风后重试。", "麦克风正被占用或暂不可用。请关闭其他录音应用后重试。",
+    "所选麦克风不支持当前音频设置，请尝试其他麦克风。", "麦克风访问被阻止。请重启 Local Flow 后重试。",
+    "无法启动麦克风。请检查麦克风访问权限后重试。", "录音已达到五分钟上限并停止。", "录音已达到音频容量上限并停止。",
+    "已保留损坏的设置文件，并恢复安全默认设置。", "已保留损坏的历史文件，并恢复空白历史。",
+    "设置存储暂不可用，当前无法保存更改。", "历史存储暂不可用，当前无法保存更改。"
+  ],
+  ja: [
+    "Whisper 音声認識", "ローカル音声認識の準備ができています。", "ローカル音声認識の確認が必要です。", "テキスト出力の準備ができています。", "テキスト出力の確認が必要です。",
+    "マイクの権限が拒否されました。Windows の設定でアクセスを許可し、Local Flow を再起動してください。", "マイクが見つかりません。接続または有効化して再試行してください。",
+    "マイクが使用中か利用できません。他の録音アプリを閉じて再試行してください。", "選択したマイクは現在の音声設定を使用できません。別のマイクを試してください。",
+    "マイクへのアクセスがブロックされました。Local Flow を再起動してください。", "マイクを開始できません。アクセス権を確認して再試行してください。",
+    "5 分の上限に達したため録音を停止しました。", "音声容量の上限に達したため録音を停止しました。",
+    "破損した設定を保持し、安全な既定値を復元しました。", "破損した履歴を保持し、空の履歴を復元しました。",
+    "設定ストレージを利用できないため、変更を保存できません。", "履歴ストレージを利用できないため、変更を保存できません。"
+  ],
+  ko: [
+    "Whisper 음성 인식", "로컬 음성 인식이 준비되었습니다.", "로컬 음성 인식을 확인해야 합니다.", "텍스트 출력이 준비되었습니다.", "텍스트 출력을 확인해야 합니다.",
+    "마이크 권한이 거부되었습니다. Windows 설정에서 접근을 허용한 뒤 Local Flow를 다시 시작하세요.", "마이크를 찾을 수 없습니다. 연결하거나 활성화한 뒤 다시 시도하세요.",
+    "마이크가 사용 중이거나 사용할 수 없습니다. 다른 녹음 앱을 닫고 다시 시도하세요.", "선택한 마이크가 현재 오디오 설정을 지원하지 않습니다. 다른 마이크를 사용하세요.",
+    "마이크 접근이 차단되었습니다. Local Flow를 다시 시작하세요.", "마이크를 시작할 수 없습니다. 접근 권한을 확인하고 다시 시도하세요.",
+    "5분 제한에 도달하여 녹음을 중지했습니다.", "오디오 용량 제한에 도달하여 녹음을 중지했습니다.",
+    "손상된 설정을 보관하고 안전한 기본값을 복원했습니다.", "손상된 기록을 보관하고 빈 기록을 복원했습니다.",
+    "설정 저장소를 사용할 수 없어 변경 사항을 저장할 수 없습니다.", "기록 저장소를 사용할 수 없어 변경 사항을 저장할 수 없습니다."
+  ],
+  "zh-Hant": [
+    "Whisper 語音辨識", "本機語音辨識已就緒。", "本機語音辨識需要處理。", "文字輸出已就緒。", "文字輸出需要處理。",
+    "麥克風權限遭拒。請在 Windows 設定中允許桌面應用程式存取麥克風，然後重新啟動 Local Flow。",
+    "找不到麥克風。請連接或啟用麥克風後重試。", "麥克風正被占用或無法使用。請關閉其他錄音應用程式後重試。",
+    "所選麥克風不支援目前的音訊設定，請改用其他麥克風。", "麥克風存取遭阻擋。請重新啟動 Local Flow 後重試。",
+    "無法啟動麥克風。請檢查存取權限後重試。", "錄音已達五分鐘上限並停止。", "錄音已達音訊容量上限並停止。",
+    "已保留損壞的設定檔並還原安全預設值。", "已保留損壞的歷史檔並還原空白歷史。",
+    "設定儲存空間暫時無法使用，目前無法儲存變更。", "歷史儲存空間暫時無法使用，目前無法儲存變更。"
+  ],
+  fr: [
+    "Reconnaissance vocale Whisper", "La reconnaissance vocale locale est prête.", "La reconnaissance vocale locale nécessite une vérification.",
+    "La sortie de texte est prête.", "La sortie de texte nécessite une vérification.",
+    "L'accès au microphone a été refusé. Autorisez-le dans les paramètres Windows, puis redémarrez Local Flow.",
+    "Aucun microphone n'a été trouvé. Connectez-en ou activez-en un, puis réessayez.",
+    "Le microphone est occupé ou indisponible. Fermez les autres applications d'enregistrement, puis réessayez.",
+    "Le microphone sélectionné ne prend pas en charge les réglages audio actuels. Essayez-en un autre.",
+    "L'accès au microphone a été bloqué. Redémarrez Local Flow et réessayez.", "Impossible de démarrer le microphone. Vérifiez l'accès et réessayez.",
+    "L'enregistrement s'est arrêté après la limite de cinq minutes.", "L'enregistrement s'est arrêté après avoir atteint la limite audio.",
+    "Les réglages endommagés ont été conservés et les valeurs sûres restaurées.", "L'historique endommagé a été conservé et un historique vide restauré.",
+    "Le stockage des réglages est indisponible. Les modifications sont désactivées.", "Le stockage de l'historique est indisponible. Les modifications sont désactivées."
+  ],
+  ru: [
+    "Распознавание речи Whisper", "Локальное распознавание речи готово.", "Требуется проверить локальное распознавание речи.",
+    "Вывод текста готов.", "Требуется проверить вывод текста.", "Доступ к микрофону запрещен. Разрешите его в параметрах Windows и перезапустите Local Flow.",
+    "Микрофон не найден. Подключите или включите его и повторите попытку.", "Микрофон занят или недоступен. Закройте другие приложения записи и повторите попытку.",
+    "Выбранный микрофон не поддерживает текущие параметры звука. Выберите другой.", "Доступ к микрофону заблокирован. Перезапустите Local Flow.",
+    "Не удалось запустить микрофон. Проверьте доступ и повторите попытку.", "Запись остановлена после достижения лимита в пять минут.",
+    "Запись остановлена после достижения лимита аудиоданных.", "Поврежденные настройки сохранены, восстановлены безопасные значения.",
+    "Поврежденная история сохранена, восстановлена пустая история.", "Хранилище настроек недоступно. Сохранение изменений отключено.",
+    "Хранилище истории недоступно. Сохранение изменений отключено."
+  ],
+  es: [
+    "Reconocimiento de voz Whisper", "El reconocimiento de voz local está listo.", "El reconocimiento de voz local necesita atención.",
+    "La salida de texto está lista.", "La salida de texto necesita atención.", "Se denegó el permiso del micrófono. Permite el acceso en Windows y reinicia Local Flow.",
+    "No se encontró ningún micrófono. Conecta o activa uno y vuelve a intentarlo.", "El micrófono está ocupado o no disponible. Cierra otras aplicaciones y vuelve a intentarlo.",
+    "El micrófono seleccionado no admite la configuración de audio actual. Prueba otro.", "Se bloqueó el acceso al micrófono. Reinicia Local Flow.",
+    "No se pudo iniciar el micrófono. Comprueba el acceso y vuelve a intentarlo.", "La grabación se detuvo al alcanzar el límite de cinco minutos.",
+    "La grabación se detuvo al alcanzar el límite de audio.", "Se conservaron los ajustes dañados y se restauraron valores seguros.",
+    "Se conservó el historial dañado y se restauró un historial vacío.", "El almacenamiento de ajustes no está disponible. Los cambios están desactivados.",
+    "El almacenamiento del historial no está disponible. Los cambios están desactivados."
+  ]
+};
+const productSafetyTranslations = Object.fromEntries(
+  Object.entries(productSafetyValues).map(([language, values]) => [
+    language,
+    Object.fromEntries(productSafetyKeys.map((key, index) => [key, values[index]]))
+  ])
+);
+
 const en = {
   ...personalizationTranslations.en,
+  ...productSafetyTranslations.en,
   "app.title": "Local Flow Dictation",
   "app.eyebrow": "Local-first voice input",
   "nav.home": "Home",
@@ -496,6 +612,7 @@ const en = {
 const zhHans = {
   ...en,
   ...personalizationTranslations["zh-Hans"],
+  ...productSafetyTranslations["zh-Hans"],
   "nav.home": "首页",
   "nav.history": "历史记录",
   "nav.dictionary": "个人词典",
@@ -752,6 +869,7 @@ export const uiTranslations = {
   ja: {
     ...en,
     ...personalizationTranslations.ja,
+    ...productSafetyTranslations.ja,
     "nav.home": "ホーム",
     "nav.history": "履歴",
     "nav.dictionary": "個人辞書",
@@ -904,6 +1022,7 @@ export const uiTranslations = {
   ko: {
     ...en,
     ...personalizationTranslations.ko,
+    ...productSafetyTranslations.ko,
     "nav.home": "홈",
     "nav.history": "기록",
     "nav.dictionary": "개인 사전",
@@ -1056,6 +1175,7 @@ export const uiTranslations = {
   "zh-Hant": {
     ...zhHans,
     ...personalizationTranslations["zh-Hant"],
+    ...productSafetyTranslations["zh-Hant"],
     "nav.home": "首頁",
     "nav.history": "歷史記錄",
     "nav.dictionary": "個人詞典",
@@ -1196,6 +1316,7 @@ export const uiTranslations = {
   fr: {
     ...en,
     ...personalizationTranslations.fr,
+    ...productSafetyTranslations.fr,
     "nav.home": "Accueil",
     "nav.history": "Historique",
     "nav.dictionary": "Dictionnaire personnel",
@@ -1348,6 +1469,7 @@ export const uiTranslations = {
   ru: {
     ...en,
     ...personalizationTranslations.ru,
+    ...productSafetyTranslations.ru,
     "nav.home": "Главная",
     "nav.history": "История",
     "nav.dictionary": "Личный словарь",
@@ -1500,6 +1622,7 @@ export const uiTranslations = {
   es: {
     ...en,
     ...personalizationTranslations.es,
+    ...productSafetyTranslations.es,
     "nav.home": "Inicio",
     "nav.history": "Historial",
     "nav.dictionary": "Diccionario personal",

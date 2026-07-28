@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyElectronRuntimeSwitches } from "../src/main/electron-runtime.js";
 import { configureMediaPermissions } from "../src/main/media-permissions.js";
 import { getProcessingProviderStatus } from "../src/main/provider-registry.js";
@@ -17,6 +17,7 @@ const expectedInterfaceLanguageCodes = ["en", "zh-Hans", "ja", "ko", "zh-Hant", 
 const smokeIpcChannelRegistry = [
   "settings:get",
   "settings:save",
+  "data:recovery-status",
   "history:list",
   "history:update",
   "history:reprocess",
@@ -210,9 +211,7 @@ const historyFixtures = [
 const setupStatus = {
   assets: {
     whisper: {
-      ready: true,
-      whisperCliPath: settings.whisperCliPath,
-      whisperModelPath: settings.whisperModelPath
+      ready: true
     },
     llm: {
       ready: false,
@@ -221,8 +220,8 @@ const setupStatus = {
     }
   },
   setups: {
-    whisper: { type: "whisper", status: "idle", output: [], error: "" },
-    llm: { type: "llm", status: "idle", output: [], error: "" }
+    whisper: { type: "whisper", status: "idle" },
+    llm: { type: "llm", status: "idle" }
   }
 };
 
@@ -243,6 +242,7 @@ function assertSmokeIpcCoverage() {
 
 function wireIpc() {
   registerSmokeIpcHandler("settings:get", () => settings);
+  registerSmokeIpcHandler("data:recovery-status", () => []);
   registerSmokeIpcHandler("settings:save", async (_event, next) => {
     settingsSaveCalls.push(structuredClone(next));
     const plan = settingsSavePlans.shift();
@@ -355,18 +355,18 @@ function wireIpc() {
   registerSmokeIpcHandler("models:setup-status", () => setupStatus);
   registerSmokeIpcHandler("models:setup-refresh", () => setupStatus);
   registerSmokeIpcHandler("models:setup-start", (_event, type) => ({
-    type,
-    status: "complete",
-    output: [],
-    error: "",
-    assets: setupStatus.assets
+    assets: setupStatus.assets,
+    setups: {
+      ...setupStatus.setups,
+      [type]: { type, status: "complete" }
+    }
   }));
   registerSmokeIpcHandler("models:setup-cancel", (_event, type) => ({
-    type,
-    status: "cancelled",
-    output: [],
-    error: "",
-    assets: setupStatus.assets
+    assets: setupStatus.assets,
+    setups: {
+      ...setupStatus.setups,
+      [type]: { type, status: "failed", failureReason: "setup_cancelled" }
+    }
   }));
   registerSmokeIpcHandler("dictation:status-latest", () => ({
     phase: "idle",
@@ -381,7 +381,6 @@ function wireIpc() {
 }
 
 app.whenReady().then(async () => {
-  configureMediaPermissions(session.defaultSession);
   wireIpc();
   assertSmokeIpcCoverage();
 
@@ -395,6 +394,10 @@ app.whenReady().then(async () => {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+  configureMediaPermissions(session.defaultSession, {
+    getAllowedWebContents: () => window.webContents,
+    getAllowedUrl: () => pathToFileURL(htmlPath).href
   });
 
   window.webContents.on("console-message", (_event, details) => {

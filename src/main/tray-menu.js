@@ -3,6 +3,7 @@ const MENU_LABELS = {
     showMainWindow: "Show",
     startDictation: "Start dictation",
     stopDictation: "Stop dictation",
+    dictationBusy: "Dictation in progress",
     pauseShortcut: "Pause shortcut",
     resumeShortcut: "Resume shortcut",
     launchAtLogin: "Launch at login",
@@ -14,6 +15,7 @@ const MENU_LABELS = {
     showMainWindow: "显示主窗口",
     startDictation: "开始语音输入",
     stopDictation: "停止语音输入",
+    dictationBusy: "正在处理语音输入",
     pauseShortcut: "暂停全局快捷键",
     resumeShortcut: "恢复全局快捷键",
     launchAtLogin: "开机自启",
@@ -25,6 +27,7 @@ const MENU_LABELS = {
     showMainWindow: "表示",
     startDictation: "音声入力を開始",
     stopDictation: "音声入力を停止",
+    dictationBusy: "音声入力を処理中",
     pauseShortcut: "ショートカットを一時停止",
     resumeShortcut: "ショートカットを再開",
     launchAtLogin: "ログイン時に起動",
@@ -36,6 +39,7 @@ const MENU_LABELS = {
     showMainWindow: "표시",
     startDictation: "음성 입력 시작",
     stopDictation: "음성 입력 중지",
+    dictationBusy: "음성 입력 처리 중",
     pauseShortcut: "단축키 일시 중지",
     resumeShortcut: "단축키 다시 시작",
     launchAtLogin: "로그인 시 실행",
@@ -47,6 +51,7 @@ const MENU_LABELS = {
     showMainWindow: "顯示主視窗",
     startDictation: "開始語音輸入",
     stopDictation: "停止語音輸入",
+    dictationBusy: "正在處理語音輸入",
     pauseShortcut: "暫停全域快捷鍵",
     resumeShortcut: "恢復全域快捷鍵",
     launchAtLogin: "登入時啟動",
@@ -58,6 +63,7 @@ const MENU_LABELS = {
     showMainWindow: "Afficher",
     startDictation: "Démarrer la dictée",
     stopDictation: "Arrêter la dictée",
+    dictationBusy: "Dictée en cours de traitement",
     pauseShortcut: "Suspendre le raccourci",
     resumeShortcut: "Réactiver le raccourci",
     launchAtLogin: "Lancer à la connexion",
@@ -69,6 +75,7 @@ const MENU_LABELS = {
     showMainWindow: "Показать",
     startDictation: "Начать диктовку",
     stopDictation: "Остановить диктовку",
+    dictationBusy: "Обработка диктовки",
     pauseShortcut: "Приостановить сочетание клавиш",
     resumeShortcut: "Возобновить сочетание клавиш",
     launchAtLogin: "Запускать при входе",
@@ -80,6 +87,7 @@ const MENU_LABELS = {
     showMainWindow: "Mostrar",
     startDictation: "Iniciar dictado",
     stopDictation: "Detener dictado",
+    dictationBusy: "Procesando dictado",
     pauseShortcut: "Pausar atajo",
     resumeShortcut: "Reanudar atajo",
     launchAtLogin: "Iniciar al acceder",
@@ -200,6 +208,7 @@ const BACKGROUND_NOTICES = {
 };
 
 const STOP_PHASES = new Set(["recording", "starting"]);
+const BUSY_PHASES = new Set(["stopping", "transcribing", "polishing", "pasting"]);
 
 export function buildTrayMenuTemplate({
   language = "en",
@@ -208,9 +217,11 @@ export function buildTrayMenuTemplate({
   handlers = {}
 } = {}) {
   const labels = getLabels(MENU_LABELS, language);
-  const dictationLabel = STOP_PHASES.has(state.phase)
-    ? labels.stopDictation
-    : labels.startDictation;
+  const dictationLabel = BUSY_PHASES.has(state.phase)
+    ? labels.dictationBusy
+    : STOP_PHASES.has(state.phase)
+      ? labels.stopDictation
+      : labels.startDictation;
   const shortcutLabel = settings.globalShortcutPaused
     ? labels.resumeShortcut
     : labels.pauseShortcut;
@@ -222,6 +233,7 @@ export function buildTrayMenuTemplate({
     },
     {
       label: dictationLabel,
+      enabled: !BUSY_PHASES.has(state.phase),
       click: handlers.toggleDictation
     },
     {

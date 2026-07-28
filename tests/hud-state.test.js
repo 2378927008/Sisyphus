@@ -307,6 +307,17 @@ test("getHudViewState ignores stale reasons outside warning and error phases", (
   assert.equal(view.message, "Preparing microphone.");
 });
 
+test("recording limits have explicit HUD messages in every supported language", () => {
+  for (const language of ["en", "zh-Hans", "ja", "ko", "zh-Hant", "fr", "ru", "es"]) {
+    const generic = getHudViewState({ phase: "warning", language }).message;
+    for (const reason of ["recording_too_long", "recording_too_large"]) {
+      const view = getHudViewState({ phase: "warning", reason, language });
+      assert.notEqual(view.message, generic, `${language}:${reason}`);
+      assert.ok(view.message.length > 8, `${language}:${reason}`);
+    }
+  }
+});
+
 test("formatElapsed clamps invalid and long values", () => {
   assert.equal(formatElapsed(-1000), "00:00");
   assert.equal(formatElapsed(65_000), "01:05");

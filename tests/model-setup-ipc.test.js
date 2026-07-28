@@ -59,7 +59,13 @@ test("refreshDetectedModelPaths saves detected paths without requesting secret-b
     }
   });
 
-  assert.equal(result, status);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: true },
+      llm: { ready: false }
+    },
+    setups: {}
+  });
   assert.deepEqual(saved, [[{
     whisperCliPath: "C:/whisper/whisper-cli.exe",
     whisperModelPath: "C:/whisper/ggml-base.bin",
@@ -91,7 +97,13 @@ test("refreshDetectedModelPaths does not save when no paths are detected", async
     }
   });
 
-  assert.equal(result, status);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: false },
+      llm: { ready: false }
+    },
+    setups: {}
+  });
   assert.equal(saveCalls, 0);
 });
 
@@ -128,7 +140,19 @@ test("model setup start IPC returns failed setup result without persisting stale
 
   const result = await handlers.get("models:setup-start")(null, "whisper");
 
-  assert.equal(result, failedResult);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: true },
+      llm: { ready: false }
+    },
+    setups: {
+      whisper: {
+        type: "whisper",
+        status: "failed",
+        failureReason: "setup_failed"
+      }
+    }
+  });
   assert.equal(saveCalls, 0);
 });
 
@@ -163,7 +187,18 @@ test("model setup start IPC persists detected paths only after complete setup", 
 
   const result = await handlers.get("models:setup-start")(null, "llm");
 
-  assert.equal(result, completeResult);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: false },
+      llm: { ready: false }
+    },
+    setups: {
+      llm: {
+        type: "llm",
+        status: "complete"
+      }
+    }
+  });
   assert.deepEqual(saved, [[{
     embeddedLlmCliPath: "C:/llm/llama-cli.exe",
     embeddedLlmModelPath: "C:/llm/Qwen3-4B-Q4_K_M.gguf"
@@ -197,7 +232,13 @@ test("model setup status IPC only refreshes setup status without saving settings
 
   const result = await handlers.get("models:setup-status")();
 
-  assert.equal(result, status);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: false },
+      llm: { ready: false }
+    },
+    setups: {}
+  });
   assert.equal(saveCalls, 0);
 });
 
@@ -230,7 +271,19 @@ test("model setup cancel IPC delegates to the setup service", async () => {
 
   const result = await handlers.get("models:setup-cancel")(null, "llm");
 
-  assert.equal(result, cancelled);
+  assert.deepEqual(result, {
+    assets: {
+      whisper: { ready: false },
+      llm: { ready: false }
+    },
+    setups: {
+      llm: {
+        type: "llm",
+        status: "failed",
+        failureReason: "setup_failed"
+      }
+    }
+  });
   assert.deepEqual(calls, ["llm"]);
 });
 

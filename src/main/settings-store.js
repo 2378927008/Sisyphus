@@ -137,6 +137,7 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
   const settingsPath = path.join(userDataPath, "settings.json");
   const historyPath = path.join(userDataPath, "history.json");
   const io = resolveFileIo(ioOverrides);
+  const storage = createStorageState();
   let settingsOperationQueue = Promise.resolve();
   let historyOperationQueue = Promise.resolve();
   const enqueueSettingsOperation = (operation) => {
@@ -153,30 +154,32 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
   return {
     getSettings(options = {}) {
       return enqueueSettingsOperation(async () => {
-        const settings = await loadSettings(settingsPath, baseSettings, secretCodec, io);
+        const settings = await loadSettings(settingsPath, baseSettings, secretCodec, io, storage);
         return options.includeSecrets ? settings : redactSecrets(settings);
       });
     },
     saveSettings(settings, options = {}) {
       return enqueueSettingsOperation(async () => {
-        const existing = await loadSettings(settingsPath, baseSettings, secretCodec, io);
+        const existing = await loadSettings(settingsPath, baseSettings, secretCodec, io, storage);
+        assertStorageWritable(storage, "settings");
         const next = mergeSettings({ ...existing, ...omitEmptyProviderSelectionOverrides(settings) }, baseSettings);
         await writeJson(settingsPath, toPersistedSettings(next, secretCodec), io);
         return options.includeSecrets ? next : redactSecrets(next);
       });
     },
     getHistory() {
-      return enqueueHistoryOperation(() => loadHistory(historyPath, io));
+      return enqueueHistoryOperation(() => loadHistory(historyPath, io, storage));
     },
     getHistoryEntry(id) {
       return enqueueHistoryOperation(async () => {
-        const history = await loadHistory(historyPath, io);
+        const history = await loadHistory(historyPath, io, storage);
         return history.find((entry) => entry?.id === id) || null;
       });
     },
     addHistory(entry, limit = defaultSettings.historyLimit) {
       return enqueueHistoryOperation(async () => {
-        const history = await loadHistory(historyPath, io);
+        const history = await loadHistory(historyPath, io, storage);
+        assertStorageWritable(storage, "history");
         const withNewEntry = ensureStableHistoryIds([...history, entry], io.randomUUID).history;
         const preparedEntry = withNewEntry.at(-1);
         const existingHistory = withNewEntry.slice(0, -1);
@@ -188,7 +191,8 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
     },
     updateHistory(id, patch, conditions = {}) {
       return enqueueHistoryOperation(async () => {
-        const history = await loadHistory(historyPath, io);
+        const history = await loadHistory(historyPath, io, storage);
+        assertStorageWritable(storage, "history");
         const index = history.findIndex((entry) => entry?.id === id);
         if (index < 0) {
           return null;
@@ -202,6 +206,9 @@ export function createSettingsStore(userDataPath, baseSettings = defaultSettings
         await writeJson(historyPath, next, io);
         return updated;
       });
+    },
+    getRecoveryState() {
+      return [...storage.recovery.values()].map((entry) => ({ ...entry }));
     }
   };
 }
@@ -218,13 +225,17 @@ function normalizeShortcutMode(value) {
   return String(value || "").trim() === "hold" ? "hold" : "toggle";
 }
 
-async function loadSettings(settingsPath, baseSettings, secretCodec, io) {
-  const persisted = await loadJson(settingsPath, baseSettings, io);
+async function loadSettings(settingsPath, baseSettings, secretCodec, io, storage) {
+  const persisted = await loadJson(settingsPath, baseSettings, io, {
+    area: "settings",
+    isValid: (value) => Boolean(value && typeof value === "object" && !Array.isArray(value)),
+    storage
+  });
   const settings = mergeSettings(hydratePersistedSecrets(persisted, secretCodec), baseSettings);
   const repaired = await repairMissingLocalAssetPaths(settings, baseSettings, io);
   const changedKeys = localAssetPathKeys.filter((key) => settings[key] !== repaired[key]);
 
-  if (changedKeys.length) {
+  if (changedKeys.length && storage.writable.settings !== false) {
     await persistRepairedLocalAssetPaths(settingsPath, persisted, repaired, changedKeys, io);
   }
 
@@ -351,24 +362,80 @@ function toPersistedSettings(settings, secretCodec) {
   return persisted;
 }
 
-async function loadJson(filePath, fallback, io) {
+async function loadJson(filePath, fallback, io, { area, isValid, storage }) {
   try {
     const content = await io.readFile(filePath, "utf8");
-    return JSON.parse(content);
-  } catch {
+    const parsed = JSON.parse(content);
+    if (!isValid(parsed)) {
+      throw new SyntaxError("Invalid persisted data shape.");
+    }
+    markStorageReady(storage, area);
+    return parsed;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      markStorageReady(storage, area);
+      return fallback;
+    }
+    if (error instanceof SyntaxError) {
+      try {
+        await quarantineCorruptFile(filePath, io);
+        markStorageRecovery(storage, area, `${area}_recovered`, true);
+        return fallback;
+      } catch {
+        markStorageRecovery(storage, area, `${area}_unavailable`, false);
+        return fallback;
+      }
+    }
+    markStorageRecovery(storage, area, `${area}_unavailable`, false);
     return fallback;
   }
 }
 
-async function loadHistory(historyPath, io) {
-  const history = await loadJson(historyPath, [], io);
-  if (!Array.isArray(history)) return [];
+async function loadHistory(historyPath, io, storage) {
+  const history = await loadJson(historyPath, [], io, {
+    area: "history",
+    isValid: Array.isArray,
+    storage
+  });
 
   const migrated = ensureStableHistoryIds(history, io.randomUUID);
-  if (migrated.changed) {
+  if (migrated.changed && storage.writable.history !== false) {
     await writeJson(historyPath, migrated.history, io);
   }
   return migrated.history;
+}
+
+function createStorageState() {
+  return {
+    writable: {
+      settings: true,
+      history: true
+    },
+    recovery: new Map()
+  };
+}
+
+function markStorageReady(storage, area) {
+  storage.writable[area] = true;
+  if (storage.recovery.get(area)?.reason === `${area}_unavailable`) {
+    storage.recovery.delete(area);
+  }
+}
+
+function markStorageRecovery(storage, area, reason, writable) {
+  storage.writable[area] = writable;
+  storage.recovery.set(area, { area, reason });
+}
+
+function assertStorageWritable(storage, area) {
+  if (storage.writable[area] === false) {
+    throw new Error(`${area}_storage_unavailable`);
+  }
+}
+
+async function quarantineCorruptFile(filePath, io) {
+  const suffix = String(io.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  await io.rename(filePath, `${filePath}.corrupt-${Date.now()}-${suffix || "data"}`);
 }
 
 function ensureStableHistoryIds(history, createId) {

@@ -10,6 +10,19 @@ on:
       - "src/**"
       - "assets/**"
       - "scripts/**"
+      - "tests/**"
+      - "vendor/.gitkeep"
+      - ".github/workflows/windows-installer.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - "assets/**"
+      - "scripts/**"
+      - "tests/**"
       - "vendor/.gitkeep"
       - ".github/workflows/windows-installer.yml"
   workflow_dispatch:
@@ -38,6 +51,12 @@ jobs:
       - name: Run test suite
         run: npm test
 
+      - name: Run application smoke
+        run: npm run check:app
+
+      - name: Run visual smoke
+        run: npm run check:visual
+
       - name: Build Windows installer
         shell: pwsh
         run: |
@@ -47,6 +66,12 @@ jobs:
           if ($buildExitCode -ne 0) {
             exit $buildExitCode
           }
+
+      - name: Check packaged startup
+        run: npm run check:packaged
+
+      - name: Check product readiness
+        run: npm run check:product
 
       - name: Verify release artifacts
         run: npm run verify:release

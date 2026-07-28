@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { wireHistoryIpc } from "../src/main/history-ipc.js";
+import { createAuthorizedIpcMain } from "../src/main/ipc-authorization.js";
 
 function createHarness({
   updateResult = { ok: false, reason: "history_changed" },
@@ -11,19 +12,28 @@ function createHarness({
     update: [],
     reprocess: []
   };
-  const webContents = { isDestroyed: () => false };
+  const approvedUrl = "file:///C:/app/src/renderer/index.html";
+  const webContents = {
+    isDestroyed: () => false,
+    getURL: () => approvedUrl
+  };
   const mainWindow = {
     isDestroyed: () => false,
     webContents
   };
+  const rawIpcMain = {
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    }
+  };
+  const authorizedIpcMain = createAuthorizedIpcMain({
+    ipcMain: rawIpcMain,
+    getWindow: () => mainWindow,
+    getApprovedUrl: () => approvedUrl
+  });
 
   wireHistoryIpc({
-    ipcMain: {
-      handle(channel, handler) {
-        handlers.set(channel, handler);
-      }
-    },
-    getMainWindow: () => mainWindow,
+    ipcMain: authorizedIpcMain,
     historyActions: {
       async updateText(id, text) {
         calls.update.push({ id, text });
@@ -39,8 +49,8 @@ function createHarness({
   return {
     calls,
     handlers,
-    authorizedEvent: { sender: webContents },
-    unauthorizedEvent: { sender: {} }
+    authorizedEvent: createIpcEvent(webContents, approvedUrl),
+    unauthorizedEvent: createIpcEvent({}, approvedUrl)
   };
 }
 
@@ -145,3 +155,9 @@ test("history handlers preserve valid action arguments and Task 5 results", asyn
   assert.deepEqual(calls.update, [{ id: "history-1", text: "edited text" }]);
   assert.deepEqual(calls.reprocess, ["history-1"]);
 });
+
+function createIpcEvent(sender, url) {
+  const senderFrame = { url };
+  senderFrame.top = senderFrame;
+  return { sender, senderFrame };
+}
