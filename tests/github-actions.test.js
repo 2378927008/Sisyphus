@@ -64,5 +64,6 @@ test("GitHub Actions can build and upload the Windows installer artifact", async
   assert.match(workflow, /npm run verify:release/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Local Flow Setup 0\.1\.0\.exe/);
+  assert.match(workflow, /dist\/local-flow-release-build\.json/);
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|sk-proj|APPLE_ID|APP_STORE_CONNECT/i);
 });

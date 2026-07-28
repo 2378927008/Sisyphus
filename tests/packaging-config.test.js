@@ -15,7 +15,7 @@ test("package exposes Windows packaging scripts and electron-builder dependency"
     "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-visual-smoke.mjs"
   );
   assert.equal(pkg.scripts["package:win"], "electron-builder --win --dir");
-  assert.equal(pkg.scripts["dist:win"], "electron-builder --win nsis --publish never");
+  assert.equal(pkg.scripts["dist:win"], "node scripts/build-windows-installer.mjs");
   assert.equal(pkg.scripts["check:packaged"], "node scripts/packaged-start-smoke.mjs");
   assert.equal(pkg.scripts["check:product"], "node scripts/product-readiness-report.mjs");
   assert.ok(pkg.devDependencies["electron-builder"]);

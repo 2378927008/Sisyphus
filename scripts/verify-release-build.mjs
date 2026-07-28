@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateEmbeddedLlmRuntime } from "../src/main/embedded-llm-assets.js";
 import { validateWhisperSetup } from "../src/main/whisper-diagnostics.js";
+import { validateReleaseBuildProvenance } from "./release-build-provenance-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -25,7 +26,9 @@ function buildReleaseRequirements(pkg) {
   return [
     { path: "assets/local-flow-icon.ico", minBytes: 1024 },
     { path: `${outputDir}/${installerName}`, minBytes: 1024 * 1024 },
+    { path: `${outputDir}/${installerName}.blockmap`, minBytes: 1024 },
     { path: `${outputDir}/win-unpacked/${productName}.exe`, minBytes: 1024 * 1024 },
+    { path: `${outputDir}/local-flow-release-build.json`, minBytes: 256 },
     {
       path: `${outputDir}/win-unpacked/resources/app/assets/local-flow-icon.ico`,
       minBytes: 1024
@@ -84,6 +87,51 @@ async function readJson(relativePath) {
 async function sha256(relativePath) {
   const binary = await readFile(toFsPath(relativePath));
   return createHash("sha256").update(binary).digest("hex");
+}
+
+async function artifactMetadata(relativePath) {
+  const fileStat = await stat(toFsPath(relativePath));
+  return {
+    path: relativePath,
+    bytes: fileStat.size,
+    sha256: await sha256(relativePath),
+    modifiedAt: fileStat.mtime.toISOString()
+  };
+}
+
+function readWindowsFileVersion(relativePath) {
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `
+        $item = Get-Item -LiteralPath $env:LOCAL_FLOW_VERSION_FILE
+        [pscustomobject]@{
+          fileVersion = $item.VersionInfo.FileVersion
+          productVersion = $item.VersionInfo.ProductVersion
+        } | ConvertTo-Json -Compress
+      `
+    ],
+    {
+      cwd: projectRoot,
+      encoding: "utf8",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        LOCAL_FLOW_VERSION_FILE: toFsPath(relativePath)
+      }
+    }
+  );
+  if (result.status !== 0) {
+    throw new Error(`could not read Windows version for ${relativePath}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function normalizeWindowsVersion(value) {
+  return String(value || "").match(/^\d+\.\d+\.\d+/)?.[0] || "";
 }
 
 function assertIgnored(relativePath) {
@@ -154,6 +202,10 @@ try {
 
   const outputDir = pkg.build?.directories?.output || "dist";
   const unpackedRoot = `${outputDir}/win-unpacked`;
+  const installerPath = `${outputDir}/${pkg.build.productName} Setup ${pkg.version}.exe`;
+  const blockmapPath = `${installerPath}.blockmap`;
+  const unpackedExecutablePath = `${unpackedRoot}/${pkg.build.productName}.exe`;
+  const buildRecordPath = `${outputDir}/local-flow-release-build.json`;
   const llamaManifestPath =
     `${unpackedRoot}/resources/app/scripts/llama-runtime-manifest.json`;
   const qwenManifestPath =
@@ -164,11 +216,50 @@ try {
     `${unpackedRoot}/resources/vendor/whisper/bin/Release/whisper-cli.exe`;
   const whisperModelPath =
     `${unpackedRoot}/resources/vendor/whisper/models/ggml-base.bin`;
-  const [llamaManifest, qwenManifest] = await Promise.all([
+  const [
+    llamaManifest,
+    qwenManifest,
+    buildRecord,
+    installerArtifact,
+    blockmapArtifact,
+    unpackedExecutableArtifact
+  ] = await Promise.all([
     readJson(llamaManifestPath),
-    readJson(qwenManifestPath)
+    readJson(qwenManifestPath),
+    readJson(buildRecordPath),
+    artifactMetadata(installerPath),
+    artifactMetadata(blockmapPath),
+    artifactMetadata(unpackedExecutablePath)
   ]);
   assertManifestShape(llamaManifest, qwenManifest);
+
+  const releaseProvenance = validateReleaseBuildProvenance({
+    packageVersion: pkg.version,
+    productName: pkg.build.productName,
+    record: buildRecord,
+    actualArtifacts: {
+      installer: installerArtifact,
+      blockmap: blockmapArtifact,
+      unpackedExecutable: unpackedExecutableArtifact
+    }
+  });
+  if (!releaseProvenance.ok) {
+    throw new Error(`release build provenance failed: ${releaseProvenance.errors.join("; ")}`);
+  }
+
+  const installerVersion = readWindowsFileVersion(installerPath);
+  const unpackedExecutableVersion = readWindowsFileVersion(unpackedExecutablePath);
+  for (const [label, versionInfo] of [
+    ["installer", installerVersion],
+    ["unpacked executable", unpackedExecutableVersion]
+  ]) {
+    if (
+      normalizeWindowsVersion(versionInfo.fileVersion) !== pkg.version ||
+      normalizeWindowsVersion(versionInfo.productVersion) !== pkg.version
+    ) {
+      throw new Error(`${label} version does not match package ${pkg.version}`);
+    }
+  }
 
   const actualLlamaCliSha256 = await sha256(llamaCliPath);
   if (actualLlamaCliSha256 !== llamaManifest.cliSha256.toLowerCase()) {
@@ -214,6 +305,13 @@ try {
       whisper: true,
       llama: true,
       qwenModelBundled: false
+    },
+    releaseBuild: {
+      buildStartedAt: buildRecord.buildStartedAt,
+      buildFinishedAt: buildRecord.buildFinishedAt,
+      artifactSkewMs: releaseProvenance.artifactSkewMs,
+      installerVersion,
+      unpackedExecutableVersion
     },
     ignored
   }, null, 2));

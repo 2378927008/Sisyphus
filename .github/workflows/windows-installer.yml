@@ -71,4 +71,5 @@ jobs:
           path: |
             dist/Local Flow Setup 0.1.0.exe
             dist/Local Flow Setup 0.1.0.exe.blockmap
+            dist/local-flow-release-build.json
             dist/win-unpacked/**

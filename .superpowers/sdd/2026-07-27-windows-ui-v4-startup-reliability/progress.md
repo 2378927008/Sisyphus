@@ -46,3 +46,5 @@ Task 13: replacement implementer audited inherited changes and preserved prior w
 Task 13: packaged-start harness RED reproduced (GUI process suppressed its own native window)
 Task 13: packaged-start harness GREEN (focused 21/21; real desktop five-field JSON passed)
 Task 13: implemented and verified (awaiting independent review)
+Task 13: independent review returned 2 Important and 2 Minor findings
+Task 13: review findings fixed with TDD, persistent evidence, and release provenance (awaiting independent re-review)

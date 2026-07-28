@@ -34,7 +34,17 @@ Local Flow 是一款 Windows 语音输入软件，不是默认翻译软件。日
 
 ## 卸载
 
-打开 Windows“设置 > 应用 > 已安装的应用”，找到 `Local Flow` 并选择“卸载”。卸载程序应移除安装目录、桌面快捷方式和开始菜单入口，不应删除安装目录以外的无关用户文件。
+仅当 Windows“设置 > 应用 > 已安装的应用”中存在 `Local Flow` 条目时，才从该条目选择“卸载”。否则，打开当前安装目录，直接运行 `Uninstall Local Flow.exe`。
+
+第二种方式是针对当前安装状态的兜底路径，不表示系统中一定存在卸载登记。卸载程序应移除安装目录、桌面快捷方式和开始菜单入口，不应删除安装目录以外的无关用户文件。
+
+## 清洁安装证据
+
+`npm.cmd run collect:clean-install-evidence` 只读取发布产物、注册表、快捷方式和当前进程状态，并把归一化结果写入 `docs\release\evidence\windows-clean-install-v4.json`。它不会运行安装包或卸载程序，也不会修改现有安装。
+
+未提供现有安装目录时，采集器会把该部分明确标记为 `unsupported`。需要只读比对现有安装时，可先设置 `LOCAL_FLOW_EXISTING_INSTALL_ROOT`，但正式 JSON 只保存 `<existing-install-root>` 等角色字段，不保存 SID、用户名或用户目录绝对路径。
+
+完整的隔离安装、卸载、哨兵文件保留和真实记事本语音插入仍需要人工执行；未执行时，证据文件必须保持 `not_run` 或 `manual_required`。
 
 ## 发布前验证
 
@@ -48,6 +58,7 @@ npm.cmd run check:visual
 npm.cmd run package:win
 npm.cmd run check:packaged
 npm.cmd run dist:win
+npm.cmd run collect:clean-install-evidence
 npm.cmd run check:product
 npm.cmd run verify:release
 ```
@@ -60,6 +71,7 @@ npm.cmd run verify:release
 
 - `Local Flow Setup 0.1.0.exe`
 - `Local Flow Setup 0.1.0.exe.blockmap`
+- `local-flow-release-build.json`
 - `win-unpacked` 免安装目录
 
 当前安装包尚未进行商业代码签名，Windows 可能显示未知发布者提示。正式公开发布前需要补充代码签名和正式 Release 流程。

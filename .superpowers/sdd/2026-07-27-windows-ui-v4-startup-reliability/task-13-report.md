@@ -1,51 +1,100 @@
 # Task 13 Report: Packaged Startup And Windows Installer
 
-Status: implemented and verified (awaiting independent review)
+Status: review findings fixed and verified (awaiting independent re-review)
 
 ## Scope
 
-Completed the Windows UI V4 packaged-start, release-readiness, installer, and
-clean-install verification work. No iPhone source, Task 12 visual
-implementation, model selection, or API policy was changed.
+Task 13 covers the Windows UI V4 packaged-start contract, release readiness,
+installer generation, persistent release evidence, and honest manual-validation
+boundaries. This fix does not change iPhone source, Task 12 UI, model selection,
+or API policy. It did not install, uninstall, overwrite, or modify the existing
+user installation.
 
-## Takeover Audit
+## Independent Review Fixes
 
-The replacement implementer inherited uncommitted Task 13 work from commit
-`641707d`. The retained changes were audited rather than discarded:
+The first independent review returned two Important and two Minor findings.
+This pass addresses all four:
 
-- focused release tests initially passed 20/20;
-- all four modified scripts passed `node --check`;
-- the existing diff contained the intended release contracts, but no durable
-  execution log proving the prior implementer's original RED run survived;
-- the real packaged-start check exposed a harness defect:
-  `secondLaunchRevealedExistingWindow=false`.
+1. The trial guide no longer assumes that Windows has an Installed apps entry.
+   It uses that entry only when present and otherwise directs the user to the
+   installation directory's `Uninstall Local Flow.exe`.
+2. Clean-install claims now live in a repository-persistent, non-sensitive
+   manifest:
+   `docs/release/evidence/windows-clean-install-v4.json`.
+3. `check:product` labels itself `automated-artifacts-only`, exposes
+   `automatedArtifactReadiness`, validates the evidence schema, and lists every
+   manual release trial.
+4. `dist:win` records a real build start and finish, and `verify:release`
+   correlates installer, blockmap, and unpacked executable version, hash, size,
+   modification time, and same-build time window.
 
-The real app could reveal its window when launched normally. The smoke harness
-used `windowsHide: true` for the GUI process, so the verifier itself suppressed
-the native window it expected to observe.
+## Review-Fix TDD Evidence
 
-## Replacement RED/GREEN
+Every production change followed RED then GREEN.
+
+### Uninstall And Readiness Scope
 
 RED:
 
 ```text
-node --test tests/packaging-config.test.js
-SyntaxError: ... does not provide an export named
-'buildPackagedAppSpawnOptions'
+node --test tests/task-13-review-fixes.test.js
+2 tests, 0 passed, 2 failed
+- readinessScope was undefined
+- trial guide had no uninstall fallback
 ```
 
 GREEN:
 
-- added `buildPackagedAppSpawnOptions(projectRoot)`;
-- packaged GUI launches now use `windowsHide: false`;
-- PowerShell/CIM query helpers remain hidden;
-- focused release tests pass 21/21;
-- both packaged smoke files pass `node --check`;
-- the real desktop packaged-start check now passes all required fields.
+```text
+2 tests, 2 passed, 0 failed
+```
 
-## Packaged Startup Evidence
+When the clean-install claim was narrowed, a second RED required the additional
+`windows-isolated-clean-install-uninstall` manual item; the same focused file
+returned 2/2 after implementation.
 
-Approved real Windows desktop run:
+### Persistent Clean-Install Evidence
+
+RED:
+
+```text
+ERR_MODULE_NOT_FOUND: scripts/clean-install-evidence-core.mjs
+```
+
+After the schema existed, the remaining RED failures identified the missing
+manifest, readiness gate, and package command. GREEN reached 5/5. A real
+no-root collector run then exposed a normalization gap:
+
+```text
+shortcut target must be normalized
+shortcut working directory must be normalized
+```
+
+The fallback now records a normalized redacted role and the collector test
+passes 6/6.
+
+### Build Provenance And Freshness
+
+RED:
+
+```text
+ERR_MODULE_NOT_FOUND: scripts/release-build-provenance-core.mjs
+dist:win still called electron-builder directly
+```
+
+GREEN:
+
+```text
+17 focused packaging/provenance tests passed
+```
+
+The tests reject a stale same-version installer, version mismatch, artifact
+hash drift, and an artifact outside the recorded build window.
+
+## Packaged Startup Baseline
+
+The prior approved real Windows desktop smoke remains the packaged-start
+baseline:
 
 ```json
 {
@@ -53,136 +102,119 @@ Approved real Windows desktop run:
   "hiddenLaunchStayedAlive": true,
   "secondLaunchExited": true,
   "secondLaunchRevealedExistingWindow": true,
-  "duplicateMainInstances": 0,
-  "exe": "dist/win-unpacked/Local Flow.exe",
-  "pid": 10320,
-  "userDataScope": ".tmp/packaged-start-smoke-user-data"
+  "duplicateMainInstances": 0
 }
 ```
 
-The smoke:
+The smoke scopes processes by exact executable and isolated user-data role,
+excludes Electron helpers, requires a visible native window, bounds all waits,
+and cleans only its known children and scoped profile.
 
-- scopes CIM rows by exact executable path and isolated `--user-data-dir`;
-- excludes Electron `--type` helper processes from main-instance counts;
-- uses `MainWindowHandle` plus Win32 `IsWindowVisible`;
-- bounds spawn, second-exit, query, reveal, and cleanup waits;
-- terminates only children or exact executable/user-data matches in `finally`;
-- removes only `.tmp/packaged-start-smoke-user-data`.
+## Release Build Provenance
 
-## Pre-Package Gates
+`npm.cmd run dist:win` rebuilt only the project `dist` directory and did not run
+the installer. It generated `dist/local-flow-release-build.json`:
 
-- `npm.cmd test`: exit 0; 578 passed, 0 failed, 0 cancelled, 0 skipped.
-- `npm.cmd run check:app`: exit 0; app smoke `ok=true`, V4 shell smoke
-  `ok=true`, real OS Escape evidence `SENT=2 SESSION=1`.
-- `npm.cmd run check:microphone`: exit 0; three audio inputs and three audio
-  outputs visible before and after permission acquisition.
-- `npm.cmd run check:visual`: exit 0; `ok=true`, five required PNGs,
-  real 460 x 72 HUD states, and the 2x search/select/edit/copy/insert workflow.
-- The combined approved-reference comparison and all four application
-  screenshots were opened and inspected. No clipping, overlap, blank capture,
-  missing focus treatment, or blocking hierarchy mismatch was observed.
-
-## Build And Release Gates
-
-- `npm.cmd run package:win`: exit 0.
-- `npm.cmd run check:packaged`: exit 0 with the exact JSON above.
-- `npm.cmd run dist:win`: exit 0.
-- `npm.cmd run check:product`: exit 0.
-- `npm.cmd run verify:release`: exit 0.
-- `git diff --check`: exit 0; only line-ending conversion warnings.
+- build started: `2026-07-28T05:03:59.664Z`;
+- build finished: `2026-07-28T05:04:58.887Z`;
+- three-artifact modification-time span: 46,844 ms;
+- package, installer, and unpacked executable version: `0.1.0`.
 
 Fresh release artifacts:
 
-| Artifact | Bytes | Modified (Asia/Shanghai) |
+| Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `dist/Local Flow Setup 0.1.0.exe` | 244,126,626 | 2026-07-28 12:23:06 |
-| `dist/Local Flow Setup 0.1.0.exe.blockmap` | 255,869 | 2026-07-28 12:23:17 |
-| `dist/win-unpacked/Local Flow.exe` | 210,485,248 | 2026-07-28 12:22:29 |
+| `dist/Local Flow Setup 0.1.0.exe` | 244,136,924 | `14f7ba0cb98e273dc60f3b67858ae98b53eb7d1b6e7f769924c18d198db325e7` |
+| `dist/Local Flow Setup 0.1.0.exe.blockmap` | 255,888 | `d6435434dfaf401f6d1fb8b2bae9cb88266f42ea03ef024143df49fbd3556157` |
+| `dist/win-unpacked/Local Flow.exe` | 210,485,248 | `05a18fce49f1e9eb2686f4103090a31e648fc9e17ff57124f3e63c801b799b04` |
 
-Absolute installer:
+`verify:release` also confirms the bundled Whisper CLI/model, llama.cpp
+runtime, valid optional Qwen manifest, and absence of a bundled Qwen GGUF.
+The Windows GitHub artifact now retains `local-flow-release-build.json`
+alongside the installer, blockmap, and unpacked directory.
 
-```text
-C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\dist\Local Flow Setup 0.1.0.exe
-```
+## Persistent Clean-Install Evidence
 
-Absolute unpacked executable:
+The retained manifest is validated by
+`scripts/clean-install-evidence-core.mjs` and `check:product`. It rejects a
+`passed` trial unless every required field has observed proof. It also rejects
+SID values, user names, command lines, and absolute drive paths.
 
-```text
-C:\Users\Administrator\Documents\Codex\2026-06-24\typeless-wisper-flow-windows-iphone-github\.worktrees\windows-ui-v4\dist\win-unpacked\Local Flow.exe
-```
+Current read-only observations are stored with normalized roles:
 
-Release verification confirmed:
+- existing executable:
+  `05a18fce49f1e9eb2686f4103090a31e648fc9e17ff57124f3e63c801b799b04`,
+  210,485,248 bytes, matching the unpacked executable;
+- existing uninstaller:
+  `91daf21af55e1ca70887285038184b408ab3ea4ada6576a2a1f40b1367ee35a0`,
+  530,237 bytes;
+- Start-menu shortcut:
+  `48045b3078c0607524328e760847b4d909e960897ec8bb9a1616c7446bf744a6`,
+  targeting `<existing-install-root>/Local Flow.exe`;
+- no desktop `Local Flow.lnk`;
+- no scoped Local Flow or Notepad process;
+- no `.tmp/clean-install*` entry.
 
-- bundled Whisper CLI: 479,232 bytes;
-- bundled Whisper `ggml-base.bin`: 147,951,465 bytes;
-- bundled llama CLI: 2,501,632 bytes;
-- llama runtime manifest: `b9049`;
-- optional model manifest: `Qwen/Qwen3-4B-GGUF`;
-- `runtimeChecks.whisper=true`;
-- `runtimeChecks.llama=true`;
-- `runtimeChecks.qwenModelBundled=false`;
-- no GGUF model is shipped inside the installer.
+The initial review's no-registration result came from the restricted execution
+identity. A later elevated read-only collection used the interactive user
+profile and observed a current-user `Local Flow 0.1.0` entry, also visible
+through the loaded-user role. No SID or profile path is retained. Because the
+two scopes differed and no before/after clean-install snapshot survived, this
+report makes no claim that the earlier installer trial created, preserved, or
+restored the registration. The guide remains valid whether the entry is present
+or absent.
 
-## Clean-Install Evidence
+## Claims Explicitly Withdrawn
 
-The interrupted clean-install trial left durable, scoped artifacts that were
-audited before cleanup:
+The prior report claimed a successful sentinel-preservation trial, exact
+Notepad insertion, shortcut restoration, registry restoration, and isolated
+uninstall cleanup. Those disposable artifacts were not retained, so the claims
+are removed rather than repeated.
 
-- the isolated temporary install directory was empty after uninstall;
-- the unrelated sentinel still existed with SHA-256
-  `17E05F6F65F2B157FFEFD6DE9D06D6A65C3CE28C5A3CE81EE70A6CABD21B49A2`;
-- the Notepad target contained the exact UTF-8 text
-  `Local Flow 清洁安装插入测试`;
-- isolated user-data profiles existed for visible startup, single instance,
-  tray behavior, and Notepad insertion;
-- the restored `E:\local flow\Local Flow.exe` SHA-256 exactly matched the
-  fresh unpacked executable:
-  `05A18FCE49F1E9EB2686F4103090A31E648FC9E17FF57124F3E63C801B799B04`;
-- the real-user uninstall record points only to
-  `E:\local flow\Uninstall Local Flow.exe`;
-- the original Start-menu shortcut backup hash and target were verified, then
-  restored exactly;
-- no temporary desktop shortcut remained;
-- no test-scoped Local Flow or Notepad process remained.
+The persistent manifest truthfully records:
 
-The final machine state preserves the user's existing `E:\local flow`
-installation. Only isolated `.tmp/clean-install*` profiles and exact test
-processes are eligible for cleanup.
+- `cleanInstallTrial.status = "not_run"`;
+- sentinel before/after = `not_run`;
+- shortcut before/after = `not_run`;
+- uninstall registration before/after = `not_run`;
+- isolated process scope = `not_run`;
+- product text insertion = `manual_required`.
 
-## Deterministic Product Evidence
+## Automated Readiness
 
-- dictionary normalization and exact-snippet expansion are covered by the
-  full automated suite;
-- automatic output preserves the detected language when the optional text
-  model is unavailable;
-- target-language output requires an explicit selection and a ready provider;
-- the release verifier proves that Qwen is optional and absent from the
-  installer while Whisper and llama runtimes remain ready;
-- real OS Escape injection is covered by `check:app` and does not rely on a
-  renderer-only synthetic key event.
+Fresh review-fix verification:
+
+- focused Task 13 tests: 37 passed, 0 failed;
+- `npm.cmd test`: 590 passed, 0 failed, 0 cancelled, 0 skipped;
+- `npm.cmd run dist:win`: exit 0;
+- `npm.cmd run check:product`: exit 0 with
+  `automatedArtifactReadiness=true`;
+- `npm.cmd run verify:release`: exit 0 with same-build provenance accepted.
+
+Earlier real desktop `check:app`, `check:microphone`, `check:visual`, and
+`check:packaged` evidence remains baseline evidence and was not rerun inside a
+sandbox.
 
 ## Manual-Only Evidence
 
-The following require a person speaking into the installed application and
-must not be represented as unattended proof:
+The following must not be represented as unattended proof:
 
 1. live Chinese, English, Japanese, and one additional-language recordings;
-2. live target-language conversion after an explicit target selection;
-3. a complete microphone-to-Whisper-to-Notepad global-shortcut trial;
-4. live Escape cancellation with audible input and visual confirmation that
-   no history row is added;
-5. visual confirmation of the one-time Windows tray balloon.
-
-The automated gates validate the underlying permissions, runtimes, language
-rules, global-shortcut state machine, OS Escape path, history rules, and text
-insertion path, but they do not substitute for these human speech samples.
+2. live target-language conversion after explicit target selection;
+3. complete microphone-to-Whisper-to-Notepad global-shortcut input;
+4. live Escape cancellation with confirmation that no history row is added;
+5. visual confirmation of the one-time Windows tray balloon;
+6. a complete isolated install/uninstall trial retaining sentinel,
+   shortcut, registry, process, and insertion before/after evidence;
+7. iPhone build, signing, permissions, keyboard extension, and device behavior
+   on macOS with Xcode.
 
 ## Remaining Concerns
 
 - The installer is not commercially code-signed, so Windows SmartScreen may
   show an unknown-publisher warning.
-- Electron Builder warns that `asar` is disabled. This is an existing release
-  layout decision, not changed in Task 13.
-- Qwen model installation remains optional and network-dependent; the model is
+- Electron Builder warns that `asar` is disabled; this existing release-layout
+  decision is unchanged.
+- Qwen installation remains optional and network-dependent; its model file is
   intentionally excluded from the installer.
-- Native iPhone build/signing still requires macOS and Xcode.
+- Native iPhone verification still requires macOS and Xcode.

@@ -1,6 +1,7 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateCleanInstallEvidence } from "./clean-install-evidence-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -123,22 +124,56 @@ function buildReleaseRequirements(pkg) {
         "开始菜单",
         "自动（同语音）",
         "不影响本地 Whisper",
-        "卸载"
+        "卸载",
+        "已安装的应用",
+        "Uninstall Local Flow.exe",
+        "当前安装状态的兜底路径"
       ]
+    },
+    {
+      path: "docs/release/evidence/windows-clean-install-v4.json",
+      minBytes: 1024,
+      area: "windows-clean-install-evidence",
+      jsonValidator: validateCleanInstallEvidence
     }
   ];
 }
 
 const manualValidationRequired = [
   {
-    area: "iphone-native-build",
-    reason: "This Windows workstation cannot run Xcode or the iOS Simulator.",
-    command: "xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build"
+    area: "windows-live-multilingual-speech",
+    reason: "A person must record Chinese, English, Japanese, and one additional language in the installed app.",
+    command: "Manual installed-app trial"
   },
   {
-    area: "microphone-runtime-permission",
-    reason: "Windows and iOS permission prompts are OS-managed and must be accepted in the real app session.",
-    command: "npm.cmd run check:microphone"
+    area: "windows-explicit-target-language-conversion",
+    reason: "A person must select an explicit target language and confirm the converted result.",
+    command: "Manual installed-app trial"
+  },
+  {
+    area: "windows-microphone-to-notepad",
+    reason: "OS microphone permission, live speech, Whisper transcription, and real Notepad insertion require a person.",
+    command: "Manual installed-app trial"
+  },
+  {
+    area: "windows-escape-cancel-no-history",
+    reason: "A person must cancel audible input with Escape and confirm that no history row is added.",
+    command: "Manual installed-app trial"
+  },
+  {
+    area: "windows-tray-balloon",
+    reason: "The one-time Windows tray balloon requires visual confirmation in a real desktop session.",
+    command: "Manual installed-app trial"
+  },
+  {
+    area: "windows-isolated-clean-install-uninstall",
+    reason: "A complete isolated installer and uninstaller trial with retained before/after evidence has not been run.",
+    command: "Manual isolated-install trial; never target the existing user installation"
+  },
+  {
+    area: "iphone-xcode-device-build",
+    reason: "This Windows workstation cannot run Xcode, sign the iPhone app, or verify the keyboard extension on a device.",
+    command: "xcodebuild -scheme LocalFlowiOS -destination 'platform=iOS Simulator,name=iPhone 16' build"
   }
 ];
 
@@ -152,17 +187,27 @@ async function fileCheck(requirement) {
     await access(fullPath);
     const fileStat = await stat(fullPath);
     let missingContent = [];
+    let validationErrors = [];
     if (requirement.contentIncludes?.length) {
       const source = await readFile(fullPath, "utf8");
       missingContent = requirement.contentIncludes.filter((expectedText) => !source.includes(expectedText));
     }
+    if (requirement.jsonValidator) {
+      const source = await readFile(fullPath, "utf8");
+      const validation = requirement.jsonValidator(JSON.parse(source));
+      validationErrors = validation.errors;
+    }
     return {
-      ok: fileStat.size >= requirement.minBytes && missingContent.length === 0,
+      ok:
+        fileStat.size >= requirement.minBytes &&
+        missingContent.length === 0 &&
+        validationErrors.length === 0,
       area: requirement.area,
       path: requirement.path,
       bytes: fileStat.size,
       minBytes: requirement.minBytes,
-      ...(missingContent.length ? { missingContent } : {})
+      ...(missingContent.length ? { missingContent } : {}),
+      ...(validationErrors.length ? { validationErrors } : {})
     };
   } catch (error) {
     return {
@@ -191,6 +236,8 @@ try {
   const ok = checks.every((check) => check.ok);
   print({
     ok,
+    automatedArtifactReadiness: ok,
+    readinessScope: "automated-artifacts-only",
     productName: pkg.build?.productName || pkg.name,
     version: pkg.version,
     checks,
@@ -200,6 +247,8 @@ try {
 } catch (error) {
   print({
     ok: false,
+    automatedArtifactReadiness: false,
+    readinessScope: "automated-artifacts-only",
     message: error.message,
     manualValidationRequired
   });

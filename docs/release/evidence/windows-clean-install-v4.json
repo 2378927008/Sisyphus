@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "local-flow-windows-clean-install",
+  "generatedAt": "2026-07-28T05:05:09.170Z",
+  "readinessScope": "read-only-current-state-and-manual-clean-install-plan",
+  "source": {
+    "collector": "scripts/clean-install-evidence.mjs",
+    "command": "npm.cmd run collect:clean-install-evidence",
+    "existingInstallInput": "LOCAL_FLOW_EXISTING_INSTALL_ROOT=<existing-install-root>"
+  },
+  "safety": {
+    "existingInstallMutation": "prohibited",
+    "installerRun": false,
+    "uninstallerRun": false
+  },
+  "releaseArtifacts": {
+    "status": "observed",
+    "version": "0.1.0",
+    "installer": {
+      "status": "observed",
+      "path": "dist/Local Flow Setup 0.1.0.exe",
+      "sha256": "14f7ba0cb98e273dc60f3b67858ae98b53eb7d1b6e7f769924c18d198db325e7",
+      "bytes": 244136924
+    },
+    "blockmap": {
+      "status": "observed",
+      "path": "dist/Local Flow Setup 0.1.0.exe.blockmap",
+      "sha256": "d6435434dfaf401f6d1fb8b2bae9cb88266f42ea03ef024143df49fbd3556157",
+      "bytes": 255888
+    },
+    "unpackedExecutable": {
+      "status": "observed",
+      "path": "dist/win-unpacked/Local Flow.exe",
+      "sha256": "05a18fce49f1e9eb2686f4103090a31e648fc9e17ff57124f3e63c801b799b04",
+      "bytes": 210485248
+    }
+  },
+  "currentState": {
+    "status": "observed",
+    "existingInstallation": {
+      "status": "observed",
+      "role": "existing_user_install",
+      "root": "<existing-install-root>",
+      "executable": {
+        "status": "observed",
+        "path": "<existing-install-root>/Local Flow.exe",
+        "sha256": "05a18fce49f1e9eb2686f4103090a31e648fc9e17ff57124f3e63c801b799b04",
+        "bytes": 210485248
+      },
+      "uninstaller": {
+        "status": "observed",
+        "path": "<existing-install-root>/Uninstall Local Flow.exe",
+        "sha256": "91daf21af55e1ca70887285038184b408ab3ea4ada6576a2a1f40b1367ee35a0",
+        "bytes": 530237
+      },
+      "executableMatchesRelease": true
+    },
+    "startMenuShortcut": {
+      "status": "observed",
+      "path": "%APPDATA%/Microsoft/Windows/Start Menu/Programs/Local Flow.lnk",
+      "exists": true,
+      "target": "<existing-install-root>/Local Flow.exe",
+      "workingDirectory": "<existing-install-root>",
+      "sha256": "48045b3078c0607524328e760847b4d909e960897ec8bb9a1616c7446bf744a6"
+    },
+    "desktopShortcut": {
+      "status": "observed",
+      "path": "%USERPROFILE%/Desktop/Local Flow.lnk",
+      "exists": false
+    },
+    "uninstallRegistration": {
+      "status": "observed",
+      "scopes": [
+        {
+          "role": "current_user",
+          "status": "observed",
+          "matchingEntryCount": 1
+        },
+        {
+          "role": "local_machine_64",
+          "status": "observed",
+          "matchingEntryCount": 0
+        },
+        {
+          "role": "local_machine_32",
+          "status": "observed",
+          "matchingEntryCount": 0
+        },
+        {
+          "role": "loaded_users",
+          "status": "observed",
+          "matchingEntryCount": 1
+        }
+      ],
+      "matchingEntries": [
+        {
+          "role": "current_user",
+          "displayName": "Local Flow 0.1.0",
+          "displayVersion": "0.1.0",
+          "installLocation": "",
+          "uninstallString": "\"<existing-install-root>/Uninstall Local Flow.exe\" /currentuser"
+        },
+        {
+          "role": "loaded_users",
+          "displayName": "Local Flow 0.1.0",
+          "displayVersion": "0.1.0",
+          "installLocation": "",
+          "uninstallString": "\"<existing-install-root>/Uninstall Local Flow.exe\" /currentuser"
+        }
+      ],
+      "conclusion": "present"
+    },
+    "scopedProcesses": {
+      "status": "observed",
+      "processNames": [
+        "Local Flow.exe",
+        "notepad.exe"
+      ],
+      "scope": "exact known Local Flow executable roles plus notepad.exe",
+      "matchingProcessCount": 0
+    },
+    "temporaryTestArtifacts": {
+      "status": "observed",
+      "scope": ".tmp/clean-install*",
+      "matchingEntryCount": 0
+    }
+  },
+  "cleanInstallTrial": {
+    "status": "not_run",
+    "isolatedInstallRoot": {
+      "status": "manual_required",
+      "role": "isolated_install_root",
+      "value": null
+    },
+    "sentinel": {
+      "before": {
+        "status": "not_run",
+        "sha256": null
+      },
+      "after": {
+        "status": "not_run",
+        "sha256": null
+      }
+    },
+    "shortcuts": {
+      "before": {
+        "status": "not_run",
+        "target": null,
+        "sha256": null
+      },
+      "after": {
+        "status": "not_run",
+        "target": null,
+        "sha256": null
+      }
+    },
+    "uninstallRegistration": {
+      "before": {
+        "status": "not_run",
+        "matchingEntries": null
+      },
+      "after": {
+        "status": "not_run",
+        "matchingEntries": null
+      }
+    },
+    "processScope": {
+      "status": "not_run",
+      "executableRole": "isolated_install_executable",
+      "userDataRole": "isolated_test_profile",
+      "matchingProcessCount": null
+    },
+    "productTextInsertion": {
+      "status": "manual_required",
+      "targetApplication": "Windows Notepad",
+      "path": [
+        "global_shortcut",
+        "microphone",
+        "whisper",
+        "output_pipeline",
+        "send_input",
+        "notepad"
+      ],
+      "expectedText": "Local Flow clean-install insertion trial",
+      "evidenceToRetain": [
+        "target text file hash",
+        "trial timestamp",
+        "isolated user-data role"
+      ]
+    }
+  }
+}

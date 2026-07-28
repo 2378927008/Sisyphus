@@ -13,9 +13,10 @@
     "check:visual": "electron --no-sandbox --disable-gpu --disable-gpu-compositing --disable-software-rasterizer scripts/electron-visual-smoke.mjs",
     "test": "node --test tests/*.test.js",
     "package:win": "electron-builder --win --dir",
-    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:win": "node scripts/build-windows-installer.mjs",
     "check:packaged": "node scripts/packaged-start-smoke.mjs",
     "check:product": "node scripts/product-readiness-report.mjs",
+    "collect:clean-install-evidence": "node scripts/clean-install-evidence.mjs",
     "verify:release": "node scripts/verify-release-build.mjs"
   },
   "devDependencies": {
